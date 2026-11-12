@@ -1,6 +1,6 @@
 # SLQ Game Lobby — handoff
 
-Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is pull request #2 on top of it (it contains #1); v0.4.0 (poker) is pull request #3 on top of that; v0.5.0 (Yatzy) is a pull request on top of poker. Each contains the ones before it. Read this first when continuing in a new chat.
+Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is pull request #2 on top of it (it contains #1); v0.4.0 (poker) is pull request #3 on top of that; v0.5.0 (Yatzy) is pull request #4 on top of poker; v0.6.0 (Meyer) is a pull request on top of Yatzy. Each contains the ones before it. Read this first when continuing in a new chat.
 
 - The code lives in **https://github.com/slqdk/SLQ-Game-Lobby** (public, branch `main`). Søren's server pulls from `main` with `lobby-update`, so `main` must always work; larger work goes on a branch and a pull request.
 - It runs in a Proxmox LXC behind Nginx Proxy Manager, which needs **Websockets Support** switched on (see the README).
@@ -31,7 +31,9 @@ Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, c
 
 **v0.5.0** adds Yatzy at the dice table (see "Yatzy" below).
 
-The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table) and Meyer (dice table).
+**v0.6.0** adds Meyer at the dice table (see "Meyer" below).
+
+The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table).
 
 ## Decisions made without asking (tell Søren, change if he wants)
 
@@ -138,6 +140,16 @@ Five dice and the sheet most people in Denmark use (Søren did not answer "five 
 - The robot tries every way of keeping dice, throws the rest in its head (10, 28 or 90 times by level; the hard one also looks one throw further), and keeps what gives the best field on average, measured against what each field is normally worth (`PAR`). It averages about 195, 215 and 220 points.
 - `public/js/games/yatzy.js`: the dice (tap to keep), the sheet with one column per player, one's own open fields as buttons showing what the throw would give. `public/js/games/common.js` holds what the screens for more than two share (the table before the start, faces); poker still has its own copy of the pre-start screen.
 
+### Meyer (v0.6.0)
+
+The lying game with two dice and a cup, two to six players, six lives each; the last one alive wins.
+
+- `public/shared/games/meyer.js`. A throw is kept as its place in the row from lowest to highest (`rankOf`): 32, 41 … 65, the pairs 11 to 66, Lille Meyer (31), Meyer (21). Moves: `{roll}` (throw and look), then `{say: n}` (the same as the last claim or higher; it need not be true), `{blind}` ("det eller derover": throw without looking and pass it on with the same claim), `{lift}`, and `{next}` after a lift. Lifting a lie costs the liar a life, lifting the truth costs the lifter one; a round where Meyer was claimed costs two. Whoever lost begins the next round. The first of a round must throw and look.
+- `view` hides the cup from everybody and one's own throw from the others; a lift puts the dice in `last`.
+- A clock like poker's (40 seconds; when it runs out the truth is said for one, or the least that is allowed, or the cup is passed on unseen), and 6 seconds to look at a lifted cup.
+- The robot estimates how likely the last claim is a lie from what the claimant had to beat (`prev.need`: somebody who had to beat 65 has probably thrown too low) and from how lies tend to land just above that; then it weighs what lifting risks against what throwing on risks. The hard one lies with claims a real throw could have been; the easy one lifts at random and always says the least that will pass; the middle one is the two mixed. Of six robots, two of each, the hard ones win about three times as often as the easy ones.
+- Decisions made without asking: "the same or higher" (not strictly higher); six lives; Meyer costs two for whoever loses that round; Lille Meyer is just the second highest throw (no special rule); no rule about what the loser must do.
+
 ### Adding a game
 
 1. `public/shared/games/<id>.js`: an object with `id`, `name`, `min`, `max`, `station` (the furniture), `setup`, `act`, `turn`, `result`, `view`, `bot` (see `base.js`; `c4.js` is the example). The state must be plain data. `view(state, seat)` is where hidden cards or dice are kept from the others.
@@ -153,7 +165,7 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 
 ## What comes next
 
-- **Milestone 2**: Meyer and Ludo (poker is done in v0.4.0, Yatzy in v0.5.0). Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer needs `view` to hide the dice (poker shows how). The tables now handle more than two seats, robots with names, leaving in the middle and a clock (see "Poker"). Poker itself could get a loose table (sit down with one's own chips, leave at will) and a second prize.
+- **Milestone 2**: Ludo (poker is done in v0.4.0, Yatzy in v0.5.0, Meyer in v0.6.0). Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer needs `view` to hide the dice (poker shows how). The tables now handle more than two seats, robots with names, leaving in the middle and a clock (see "Poker"). Poker itself could get a loose table (sit down with one's own chips, leave at will) and a second prize.
 - ~~Milestone 3: the shooter~~ done in v0.3.0. Left to do there: controls for phones (touch sticks), text chat inside a match, the clubhouse's teasing inside a match, more arenas (the arena is one module, `world.js`), spectating, and tuning after real play: how good the robots are, how eager they are for the star, the rewards.
 - ~~Milestone 4: EagleEye Commander in the clubhouse~~ done in v0.2.0. Left to do there: the game still polls its server every few seconds (the lobby's WebSocket could tell it at once), and the clubhouse avatar is not shown inside the game.
 

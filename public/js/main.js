@@ -7,6 +7,7 @@ import { play, unlock, soundOn, setSound } from './sfx.js';
 import { renderC4 } from './games/c4.js';
 import { renderPoker } from './games/poker.js';
 import { renderYatzy } from './games/yatzy.js';
+import { renderMeyer } from './games/meyer.js';
 import { ECON, LIMITS, EMOTES, PRANKS, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
 import { ROOM, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
@@ -20,7 +21,7 @@ const st = {
   me: null, groups: [], g: null, mem: new Map(), tables: new Map(), ee: new Map(), arenas: new Map(), game: null, gameQ: null,
   view: 'boot', sock: null, skew: 0, tv: null, everOpen: false, leaving: false, hinted: false,
 };
-const RENDER = { c4: renderC4, poker: renderPoker, yatzy: renderYatzy };
+const RENDER = { c4: renderC4, poker: renderPoker, yatzy: renderYatzy, meyer: renderMeyer };
 const BUSY = { ee: 'EagleEye Commander', shooter: 'skydespillet' };
 const app = $('#app');
 let room = null, demoTimer = 0;
@@ -555,6 +556,7 @@ function openScores() {
     ...board('Sejre i 4 på stribe', m => (m.stats && m.stats.c4 && m.stats.c4.w) || 0),
     ...board('Vundne pokerturneringer', m => (m.stats && m.stats.poker && m.stats.poker.w) || 0),
     ...board('Sejre i Yatzy', m => (m.stats && m.stats.yatzy && m.stats.yatzy.w) || 0),
+    ...board('Sejre i Meyer', m => (m.stats && m.stats.meyer && m.stats.meyer.w) || 0),
     ...board('Drab i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.k) || 0),
     ...board('Vundne runder i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.w) || 0),
     ...board('Sejre i EagleEye Commander', m => (m.stats && m.stats.ee && m.stats.ee.w) || 0),

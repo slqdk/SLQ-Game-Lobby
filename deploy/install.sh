@@ -76,7 +76,10 @@ EOT
   cat > /usr/local/bin/lobby-code <<EOT
 #!/bin/sh
 # Shows the installation code: the code a new account needs to be allowed to make groups.
-sed -n 's/.*"code":"\([^"]*\)".*/\1/p' '$DATA_DIR/config.json'
+# (config.json has no line break at its end, so the code is printed with one of its own)
+code=\$(sed -n 's/.*"code":"\([^"]*\)".*/\1/p' '$DATA_DIR/config.json' 2>/dev/null)
+[ -n "\$code" ] || { echo "Ingen installationskode endnu: tjenesten skriver den i $DATA_DIR/config.json ved første start." >&2; exit 1; }
+printf '%s\n' "\$code"
 EOT
   cat > /usr/local/bin/lobby-password <<EOT
 #!/bin/sh

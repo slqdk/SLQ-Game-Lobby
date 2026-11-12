@@ -5,6 +5,7 @@ import { $, h, icon, bust, sheet, toast } from './ui.js';
 import { drawBust, drawFigure, drawPrank, drawEmote, drawGlass } from './avatar.js';
 import { play, unlock, soundOn, setSound } from './sfx.js';
 import { renderC4 } from './games/c4.js';
+import { renderPoker } from './games/poker.js';
 import { ECON, LIMITS, EMOTES, PRANKS, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
 import { ROOM, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
@@ -18,7 +19,7 @@ const st = {
   me: null, groups: [], g: null, mem: new Map(), tables: new Map(), ee: new Map(), arenas: new Map(), game: null, gameQ: null,
   view: 'boot', sock: null, skew: 0, tv: null, everOpen: false, leaving: false, hinted: false,
 };
-const RENDER = { c4: renderC4 };
+const RENDER = { c4: renderC4, poker: renderPoker };
 const BUSY = { ee: 'EagleEye Commander', shooter: 'skydespillet' };
 const app = $('#app');
 let room = null, demoTimer = 0;
@@ -551,6 +552,7 @@ function openScores() {
   sheet.open({ title: 'Opslagstavlen', kind: 'scores', body: [
     ...board('Flest jetoner', m => m.chips),
     ...board('Sejre i 4 på stribe', m => (m.stats && m.stats.c4 && m.stats.c4.w) || 0),
+    ...board('Vundne pokerturneringer', m => (m.stats && m.stats.poker && m.stats.poker.w) || 0),
     ...board('Drab i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.k) || 0),
     ...board('Vundne runder i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.w) || 0),
     ...board('Sejre i EagleEye Commander', m => (m.stats && m.stats.ee && m.stats.ee.w) || 0),
@@ -565,19 +567,20 @@ function tableRow(t) {
   const g = GAMES[t.game], seated = t.seats.some(s => s.u === mine()), myTurn = t.phase === 'play' && t.seats[t.turn] && t.seats[t.turn].u === mine();
   const names = t.seats.map(s => s.u === mine() ? 'dig' : s.n);
   let title, sub, label;
-  if (t.phase === 'open') { title = names[0] === 'dig' ? 'Dit bord venter på en modspiller' : t.seats[0].n + ' venter på en modspiller'; sub = t.stake ? 'Indsats ' + t.stake + ' jetoner' : 'Ingen indsats'; label = seated ? 'Åbn' : 'Sæt dig'; }
-  else if (t.phase === 'play') { title = names.join(' mod '); title = title[0].toUpperCase() + title.slice(1); sub = myTurn ? 'Din tur' : t.seats[t.turn].n + ' har turen · ' + ago(t.turnAt); label = seated ? 'Fortsæt' : 'Se med'; }
-  else { title = names.join(' mod '); title = title[0].toUpperCase() + title.slice(1); sub = t.res.draw ? 'Uafgjort' : t.seats[t.res.win[0]].n + ' vandt'; label = 'Se'; }
+  const many = g.max > 2, full = t.seats.length >= g.max, vs = names.length > 2 ? names.slice(0, -1).join(', ') + ' og ' + names[names.length - 1] : names.join(' mod ');
+  if (t.phase === 'open') { title = many ? (names[0] === 'dig' ? 'Dit bord' : t.seats[0].n + 's bord') + ' venter på spillere (' + t.seats.length + ' af ' + g.max + ')' : names[0] === 'dig' ? 'Dit bord venter på en modspiller' : t.seats[0].n + ' venter på en modspiller'; sub = t.stake ? 'Indsats ' + t.stake + ' jetoner' : 'Ingen indsats'; label = seated ? 'Åbn' : full ? 'Se' : 'Sæt dig'; }
+  else if (t.phase === 'play') { title = vs[0].toUpperCase() + vs.slice(1); sub = myTurn ? 'Din tur' : t.seats[t.turn] ? t.seats[t.turn].n + ' har turen' + (many ? '' : ' · ' + ago(t.turnAt)) : 'I gang'; label = seated ? 'Fortsæt' : 'Se med'; }
+  else { title = vs[0].toUpperCase() + vs.slice(1); sub = t.res.draw ? 'Uafgjort' : t.seats[t.res.win[0]].n + ' vandt'; label = 'Se'; }
   return h('div', { class: 'trow' + (myTurn ? ' turn' : '') }, h('div', { class: 't' }, h('b', {}, title), h('span', {}, g.name + ' · ' + sub)),
-    h('button', { class: 'btn small' + (myTurn || (t.phase === 'open' && !seated) ? '' : ' alt'), onclick: () => (t.phase === 'open' && !seated ? send({ t: 'tjoin', id: t.id }) : openTable(t.id)) }, label));
+    h('button', { class: 'btn small' + (myTurn || (t.phase === 'open' && !seated) ? '' : ' alt'), onclick: () => (t.phase === 'open' && !seated && !full ? send({ t: 'tjoin', id: t.id }) : openTable(t.id)) }, label));
 }
 const rank = t => (t.phase === 'play' && t.seats[t.turn] && t.seats[t.turn].u === mine() ? 0 : t.seats.some(s => s.u === mine()) ? 1 : t.phase === 'open' ? 2 : t.phase === 'play' ? 3 : 4);
 function newGame(gid) {
   const g = GAMES[gid];
   let stake = 0;
   const seg = h('div', { class: 'seg' }, ECON.stakes.map(v => h('button', { class: v === 0 ? 'on' : '', disabled: st.me.chips < v, onclick: e => { stake = v; for (const b of seg.children) b.classList.toggle('on', b === e.currentTarget); bots.hidden = !!v; } }, v ? String(v) : 'Ingen indsats')));
-  const bots = h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Eller mod robotten:'), ['Let', 'Mellem', 'Svær'].map((n, i) => h('button', { class: 'btn alt small', onclick: () => send({ t: 'tnew', game: gid, stake: 0, bot: i + 1 }) }, n)));
-  return [h('div', { class: 'sec' }, 'Nyt spil: ' + g.name), seg, h('button', { class: 'btn', onclick: () => send({ t: 'tnew', game: gid, stake }) }, 'Stil et bord op og vent på en ven'), bots];
+  const bots = h('div', { class: 'row' }, h('span', { class: 'hint' }, g.max > 2 ? 'Eller med robotter ved bordet (den første):' : 'Eller mod robotten:'), ['Let', 'Mellem', 'Svær'].map((n, i) => h('button', { class: 'btn alt small', onclick: () => send({ t: 'tnew', game: gid, stake: 0, bot: i + 1 }) }, n)));
+  return [h('div', { class: 'sec' }, 'Nyt spil: ' + g.name), seg, h('button', { class: 'btn', onclick: () => send({ t: 'tnew', game: gid, stake }) }, g.max > 2 ? 'Stil et bord op og vent på vennerne' : 'Stil et bord op og vent på en ven'), bots];
 }
 let reopen = () => {};
 function openStation(sn) {

@@ -7,7 +7,7 @@ import { ECON } from '../../shared/defs.js';
 const COLOURS = ['#e2403a', '#f2c33f'], NAMES = ['Rød', 'Gul'];
 const shown = new Map();      // table id -> "game:moves" of the newest move this browser has let fall
 
-function robotIcon(size) {
+export function robotIcon(size) {
   return icon(size, c => {
     c.beginPath(); c.arc(0, 0, 15, 0, 7); c.fillStyle = '#3a3152'; c.fill();
     c.lineWidth = 1.6; c.strokeStyle = '#17121f';

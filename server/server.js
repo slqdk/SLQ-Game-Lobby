@@ -157,6 +157,7 @@ setInterval(() => {
     if (t - p.alive > 70000 || (!p.conn.user && t - p.since > 20000)) p.socket.destroy(); else p.ping();
   }
 }, 25000).unref();
+setInterval(() => { try { hub.tick(); } catch (e) { console.error(e); } }, 1000).unref();           // the clocks of games that have one
 setInterval(() => { try { hub.tidy(); ee.tick(); } catch (e) { console.error(e); } }, 60000).unref();
 
 // What has changed is written within a couple of seconds; on the way out, at once.

@@ -84,11 +84,11 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     register(b, ip) {
       throttle(ip);
       const name = String(b.name ?? '').trim(), code = norm(b.code);
-      if (!nameOk(name, LIMITS.nameMin, LIMITS.nameMax)) fail('Navnet skal være ' + LIMITS.nameMin + '–' + LIMITS.nameMax + ' tegn: bogstaver, tal, mellemrum, punktum eller bindestreg.');
+      if (!nameOk(name, LIMITS.nameMin, LIMITS.nameMax)) fail('Brugernavnet skal være ' + LIMITS.nameMin + '–' + LIMITS.nameMax + ' tegn: bogstaver, tal, mellemrum, punktum eller bindestreg.');
       const pass = checkPass(b.pass);
       const creator = code && code === norm(store.config.code), g = creator ? null : store.groups.get(invites.get(code));
       if (!creator && !g) { failed(ip); fail('Koden passer ikke. Brug linket fra din invitation, eller installationskoden.'); }
-      if (byName.has(name.toLowerCase())) fail('Navnet er optaget. Vælg et andet.');
+      if (byName.has(name.toLowerCase())) fail('Brugernavnet er optaget. Vælg et andet.');
       if (g && Object.keys(g.members).length >= LIMITS.members) fail('Gruppen er fuld.');
       const m = made.get(ip);
       if (m && now() - m.at < HOUR && m.n >= 10) fail('Der er lavet mange konti herfra. Vent en times tid.');
@@ -104,7 +104,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     login(b, ip) {
       throttle(ip);
       const u = byName.get(String(b.name ?? '').trim().toLowerCase());
-      if (!u || !passOk(u, b.pass)) { failed(ip); fail('Forkert navn eller kodeord.'); }
+      if (!u || !passOk(u, b.pass)) { failed(ip); fail('Forkert brugernavn eller kodeord.'); }
       return { token: tokenFor(u), id: u.id, name: u.name };
     },
 
@@ -117,7 +117,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (b.op === 'users') return { users: [...store.users.values()].map(u => ({ name: u.name, seen: u.seen, chips: u.chips, groups: groupsOf(u.id).map(g => g.name) })) };
       if (b.op === 'pass') {
         const u = byName.get(String(b.name ?? '').trim().toLowerCase());
-        if (!u) fail('Der er ingen konto med det navn.');
+        if (!u) fail('Der er ingen konto med det brugernavn.');
         const pass = randomCode(4).toLowerCase() + '-' + randomCode(4).toLowerCase() + '-' + randomCode(4).toLowerCase();
         Object.assign(u, hashPass(pass));
         u.gen++; store.saveUsers();

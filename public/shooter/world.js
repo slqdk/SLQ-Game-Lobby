@@ -50,10 +50,13 @@ export function buildWorld(THREE, scene, texLib) {
   function addBox(cx, cz, w, d, base, top, color, opts) {
     opts = opts || {};
     const h = top - base;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color, opts.rough, opts.tex, opts.trx != null ? opts.trx : Math.max(w, d) / 2, opts.try != null ? opts.try : Math.max(h, 0.8) / 2));
-    m.position.set(cx, base + h / 2, cz);
-    m.castShadow = true; m.receiveShadow = true;
-    scene.add(m);
+    let m = null;
+    if (!opts.hide) {                // hide: a wall and a floor that something else draws
+      m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color, opts.rough, opts.tex, opts.trx != null ? opts.trx : Math.max(w, d) / 2, opts.try != null ? opts.try : Math.max(h, 0.8) / 2));
+      m.position.set(cx, base + h / 2, cz);
+      m.castShadow = true; m.receiveShadow = true;
+      scene.add(m);
+    }
     if (opts.solid !== false) colliders.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, base: base, top: top });
     if (opts.walkable !== false) surfaces.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, h: top });
     return m;
@@ -413,6 +416,7 @@ export function buildWorld(THREE, scene, texLib) {
     // 28 trin, én omgang. De øverste trin (over 5.86 m) skal ende i den ÅBNE lysning, ellers
     // rammer man dækket med hovedet. Bredde/radius valgt så trinene overlapper (man falder ikke af).
     const N_STEP = 28, R_STEP = 4.0, STEP_W = 2.1, RISE = DECK / N_STEP, A_STEP = 360 / N_STEP;
+    const R_PLANK = 5.35, W_PLANK = 1.1;          // the planks between a step and the wall
     const aStart = doorDeg + 27;
     const kHigh = Math.ceil(5.86 / RISE) - 1;
     let _sx = 0, _sy = 0;
@@ -460,26 +464,72 @@ export function buildWorld(THREE, scene, texLib) {
     for (let k = 0; k < N_STEP; k++) {
       const a = aStart + k * A_STEP, h = RISE * (k + 1);
       addBox(cx + R_STEP * Math.cos(rd(a)), cz + R_STEP * Math.sin(rd(a)), STEP_W, STEP_W, Math.max(0, h - 0.24), h, COL.roof, { tex: 'wood' });
+      // (clubhouse) The square steps left a gap along the wall that one fell down through. Every step now goes on
+      // to the wall with two planks on its outer side (their corners end inside the wall). They lie a hair lower
+      // than the step and than each other, so that no two wooden faces share a plane.
+      for (let s = 0; s < 2; s++) {
+        const b = a + (s ? 1 : -1) * A_STEP / 4, e = 0.006 * (s + 1);
+        addBox(cx + R_PLANK * Math.cos(rd(b)), cz + R_PLANK * Math.sin(rd(b)), W_PLANK, W_PLANK, Math.max(0, h - 0.24 + e), h - e, COL.roof, { tex: 'wood' });
+      }
       // indervæg: lav mur på trinnets indvendige side (r=2.6), rækker op over trinnet
       const rx = cx + 2.6 * Math.cos(rd(a)), rz = cz + 2.6 * Math.sin(rd(a));
       addBox(rx, rz, 1.2, 1.2, Math.max(0, h - 0.24), h + 1.2, COL.wall, { tex: tex, walkable: false });
     }
     // ---- dæk med åben trappelysning ----
-    // (clubhouse) On the steps where a walker's head reaches the deck slab, no deck tile may come within a body's
-    // width: one tile row used to hang over the first of them and shoved everybody sideways on the way up.
-    const headSteps = [];
-    for (let k = 0; k < N_STEP; k++) {
-      const h = RISE * (k + 1), a = aStart + k * A_STEP;
-      if (h + 1.9 > DECK - 0.22 && h + STEP < DECK) headSteps.push([cx + R_STEP * Math.cos(rd(a)), cz + R_STEP * Math.sin(rd(a))]);
-    }
-    const overStairs = function (tx, tz) { const r = 0.45 + STEP_W / 2 + RAD; return headSteps.some(function (s) { return Math.abs(tx - s[0]) < r && Math.abs(tz - s[1]) < r; }); };
+    // (clubhouse) The deck is the whole circle out to the wall, less the opening the stairs come up through. The
+    // opening is a piece of a ring: outside the low wall along the inner side of the stairs, and over the steps
+    // where a walker's head is higher than the slab (kLo..kHi) plus what a step is wide and a body's width to both
+    // sides, so that nothing overhead shoves anybody on the way up. Before, the deck was square tiles only: they
+    // left cracks along the wall, by the last step and in the middle that one fell through, eight metres down.
+    let kLo = N_STEP, kHi = 0;
+    for (let k = 0; k < N_STEP; k++) { const h = RISE * (k + 1); if (h + 1.9 > DECK - 0.22 && h + STEP < DECK) { kLo = Math.min(kLo, k); kHi = Math.max(kHi, k); } }
+    const H_LO = aStart + kLo * A_STEP - 29, H_HI = aStart + kHi * A_STEP + 29, H_MID = (H_LO + H_HI) / 2, H_HALF = (H_HI - H_LO) / 2, H_IN = 3.2;
+    // is a point (measured from the middle of the tower) in the opening? pad: degrees more to both sides
+    const inHole = function (dx, dz, pad, rin) { return Math.hypot(dx, dz) > (rin == null ? H_IN : rin) && angDist(Math.atan2(dz, dx) * 180 / Math.PI, H_MID) <= H_HALF + (pad || 0); };
+    // the slab one bumps one's head on and that the robots cannot see through: the tiles, where a whole tile fits
+    const tiles = [];
     for (let ix = -6; ix <= 6; ix++) for (let iz = -6; iz <= 6; iz++) {
-      const tx = cx + ix * 0.9, tz = cz + iz * 0.9, rr = Math.hypot(ix * 0.9, iz * 0.9);
-      if (rr + 0.64 > R - 0.3) continue;
-      const ta = (Math.atan2(iz, ix) * 180 / Math.PI + 360) % 360;
-      if (rr >= 1.6 && angDist(ta, wellCtr) <= WELL) continue;
-      if (overStairs(tx, tz)) continue;
-      addBox(tx, tz, 0.9, 0.9, DECK - 0.22, DECK, COL.roof, { tex: 'concrete' });
+      const ox = ix * 0.9, oz = iz * 0.9;
+      if (Math.hypot(ox, oz) + 0.64 > R - 0.3) continue;
+      let near = false;
+      for (let u = -1; u <= 1 && !near; u++) for (let v = -1; v <= 1; v++) if (inHole(ox + u * 0.45, oz + v * 0.45, 4, 2.6)) { near = true; break; }
+      if (near) continue;
+      addBox(cx + ox, cz + oz, 0.9, 0.9, DECK - 0.22, DECK, COL.roof, { tex: 'concrete', hide: true });
+      tiles.push([ox, oz]);
+    }
+    // the rest of the circle is floor without walls: cells of 0.15 m, joined into as few rectangles as it takes.
+    // A rectangle may lie over tiles and reach into the wall, never over the opening.
+    const GC = 0.15, HC = Math.ceil(6.1 / GC), NC = 2 * HC, need = new Uint8Array(NC * NC), may = new Uint8Array(NC * NC);
+    for (let j = 0; j < NC; j++) for (let i = 0; i < NC; i++) {
+      const x0 = (i - HC) * GC, z0 = (j - HC) * GC, mx = x0 + GC / 2, mz = z0 + GC / 2;
+      if (Math.max(Math.hypot(x0, z0), Math.hypot(x0 + GC, z0), Math.hypot(x0, z0 + GC), Math.hypot(x0 + GC, z0 + GC)) > 6.05 || inHole(mx, mz)) continue;
+      may[j * NC + i] = 1;
+      if (Math.hypot(mx, mz) <= 5.5 && !tiles.some(function (t) { return Math.abs(mx - t[0]) <= 0.45 && Math.abs(mz - t[1]) <= 0.45; })) need[j * NC + i] = 1;
+    }
+    const rowMay = function (j, a, b) { if (j < 0 || j >= NC) return false; for (let q = a; q <= b; q++) if (!may[j * NC + q]) return false; return true; };
+    const colMay = function (i, a, b) { if (i < 0 || i >= NC) return false; for (let q = a; q <= b; q++) if (!may[q * NC + i]) return false; return true; };
+    for (let j = 0; j < NC; j++) for (let i = 0; i < NC; i++) {
+      if (!need[j * NC + i]) continue;
+      let i0 = i, i1 = i, j0 = j, j1 = j, grew = true;
+      while (grew) {
+        grew = false;
+        if (colMay(i1 + 1, j0, j1)) { i1++; grew = true; }
+        if (rowMay(j1 + 1, i0, i1)) { j1++; grew = true; }
+        if (colMay(i0 - 1, j0, j1)) { i0--; grew = true; }
+        if (rowMay(j0 - 1, i0, i1)) { j0--; grew = true; }
+      }
+      for (let q = j0; q <= j1; q++) for (let s = i0; s <= i1; s++) need[q * NC + s] = 0;
+      surfaces.push({ minX: cx + (i0 - HC) * GC, maxX: cx + (i1 + 1 - HC) * GC, minZ: cz + (j0 - HC) * GC, maxZ: cz + (j1 + 1 - HC) * GC, h: DECK });
+    }
+    // what one sees of it: one slab with the opening cut out, a hair over the last step so that the two do not flicker
+    if (!HEADLESS) {
+      const shape = new THREE.Shape(), RV = R - 0.2, around = 360 - 2 * H_HALF;
+      const at = function (r, deg) { return [r * Math.cos(rd(deg)), -r * Math.sin(rd(deg))]; };
+      for (let i = 0; i <= 48; i++) { const p = at(RV, H_HI + around * i / 48); if (i) shape.lineTo(p[0], p[1]); else shape.moveTo(p[0], p[1]); }
+      for (let i = 0; i <= 18; i++) { const p = at(H_IN, H_LO + 2 * H_HALF * i / 18); shape.lineTo(p[0], p[1]); }
+      shape.closePath();
+      const slab = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.22, bevelEnabled: false }), mat(COL.roof, 0.9, 'concrete', 0.5, 0.5));
+      slab.rotation.x = -Math.PI / 2; slab.position.set(cx, DECK - 0.216, cz); slab.castShadow = slab.receiveShadow = true; scene.add(slab);
     }
     // ren dækkant hele vejen rundt (skjuler de takkede fliseender -> læses som en cirkel)
     const rimSegs = 32, rimChord = 2 * (R - 0.35) * Math.sin(Math.PI / rimSegs) + 0.06;
@@ -489,10 +539,11 @@ export function buildWorld(THREE, scene, texLib) {
       m.position.set(x, DECK - 0.11, z); m.rotation.y = rd(90 - a); m.castShadow = m.receiveShadow = true; scene.add(m);
     }
     // indvendig kant rundt om trappelysningen (så hullet ser bevidst ud, ikke ødelagt)
-    for (let da = -WELL; da <= WELL; da += 11) {
-      const a = wellCtr + da, x = cx + 2.15 * Math.cos(rd(a)), z = cz + 2.15 * Math.sin(rd(a));
-      addBox(x, z, 0.5, 0.5, DECK, DECK + 0.5, COL.roof, { tex: 'concrete', walkable: false });
-    }
+    // (clubhouse) a low rim to look at, along the inner side of the opening and its low end; one walks over it
+    const lip = function (x, z, len, deg) { const m = new THREE.Mesh(new THREE.BoxGeometry(len, 0.14, 0.22), mat(COL.roof, 0.9, 'concrete', len / 2, 0.2)); m.position.set(cx + x, DECK + 0.07, cz + z); m.rotation.y = rd(deg); m.castShadow = m.receiveShadow = true; scene.add(m); };
+    const lipN = 14, lipR = H_IN - 0.11, lipLen = 2 * lipR * Math.sin(rd(H_HALF / lipN)) + 0.05;
+    for (let i = 0; i < lipN; i++) { const a = H_LO + 2 * H_HALF * (i + 0.5) / lipN; lip(lipR * Math.cos(rd(a)), lipR * Math.sin(rd(a)), lipLen, 90 - a); }
+    { const rm = (H_IN - 0.22 + R - 0.2) / 2, a = H_LO, ox = 0.11 * Math.sin(rd(a)), oz = -0.11 * Math.cos(rd(a)); lip(rm * Math.cos(rd(a)) + ox, rm * Math.sin(rd(a)) + oz, R - 0.2 - (H_IN - 0.22), -a); }
     if (opt.short) {
       // korte tårne: lav sammenhængende borg-kant + tinder ovenpå (skydeskår imellem)
       const bSegs = 28;
@@ -529,11 +580,29 @@ export function buildWorld(THREE, scene, texLib) {
     const rd = function (d) { return d * Math.PI / 180; };
     const RISE = 8 / 28, A_STEP = 360 / 28, aStart = doorDeg + 27;
     const R_DOWN = 3.5, W_DOWN = 2.9, N_DOWN = Math.ceil(TUN_D / RISE), W = 4.4;   // brede trin: når helt ud til skaktvæggen (intet fald-hul)
+    const R_PIER = 1.75;
     // nedadgående spiral: TYNDE trin (som op-spiralen) — solide blokke spærrede opstigningen
     for (let k = 1; k <= N_DOWN; k++) {
       const a = aStart - k * A_STEP, h = Math.max(-TUN_D + 0.02, -RISE * k);
       addBox(cx + R_DOWN * Math.cos(rd(a)), cz + R_DOWN * Math.sin(rd(a)), W_DOWN, W_DOWN, h - 0.24, h, COL.ramp, { tex: 'wood' });
+      // (clubhouse) the pier the stairs wind around: a piece of wall on the inner side of every step, from the
+      // bottom of the shaft to a good metre over the step. Before, one fell off the inner side into the shaft.
+      addBox(cx + R_PIER * Math.cos(rd(a)), cz + R_PIER * Math.sin(rd(a)), 1.0, 1.0, -TUN_D, h + 1.2, COL.wall, { tex: tex, walkable: false });
     }
+    // (clubhouse) where the stairs pass a corner of the shaft, the two steps on either side leave a notch in the
+    // very corner: a plank there, level with the lower of the two
+    for (let c = 0; c < 4; c++) {
+      const ca = 45 + c * 90;
+      let low = 0;
+      for (let k = 1; k <= N_DOWN; k++) { const d = Math.abs(((aStart - k * A_STEP - ca) % 360 + 540) % 360 - 180); if (d <= A_STEP) low = Math.max(low, k); }
+      if (!low) continue;
+      const h = Math.max(-TUN_D + 0.02, -RISE * low);
+      addBox(cx + (Math.cos(rd(ca)) > 0 ? 3.8 : -3.8), cz + (Math.sin(rd(ca)) > 0 ? 3.8 : -3.8), 1.0, 1.0, h - 0.234, h - 0.006, COL.ramp, { tex: 'wood' });
+    }
+    // (clubhouse) a beam over the way out to the tunnel, up to the street: the top steps reach in under the street
+    // there, and whoever walked along them fell into the tunnel
+    if (gapSide === '+x') addBox(cx + W - 0.04, cz, 0.3, 6, TUN_CEIL - 0.01, -0.008, COL.wallLow, { tex: 'concrete', walkable: false });
+    else addBox(cx - W + 0.04, cz - 3.85, 0.3, 1.7, TUN_CEIL - 0.01, -0.008, COL.wallLow, { tex: 'concrete', walkable: false });
     // (gulv-ringen fjernet — spilleren går ind via dørens asfalt-kant og videre på spiralen)
     // skaktvægge (firkant ±W) fra bund til jord, med åbning på gren-siden
     const seg = function (fixed, from, to, axis) { if (to - from < 0.1) return; if (axis === 'x') addBox((from + to) / 2, fixed, to - from, 0.3, -TUN_D, 0, COL.wallLow, { tex: 'concrete', walkable: false }); else addBox(fixed, (from + to) / 2, 0.3, to - from, -TUN_D, 0, COL.wallLow, { tex: 'concrete', walkable: false }); };

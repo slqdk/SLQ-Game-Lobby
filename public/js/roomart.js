@@ -15,9 +15,15 @@ const rrect = (c, x, y, w, h, r = 0.06) => { c.beginPath(); c.roundRect(x, y, w,
 const ell = (c, x, y, rx, ry) => { c.beginPath(); c.ellipse(x, y, rx, ry, 0, 0, TAU); };
 const poly = (c, pts) => { c.beginPath(); pts.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]))); c.closePath(); };
 const line = (c, x0, y0, x1, y1, col, lw = LW) => { c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.lineWidth = lw; c.strokeStyle = col; c.stroke(); };
-function text(c, s, x, y, size, col, weight = 600, align = 'center') {
-  c.font = weight + ' ' + size + 'px ' + FONT; c.textAlign = align; c.textBaseline = 'middle'; c.fillStyle = col; c.fillText(s, x, y);
+// Text in room units. It is set at 100 px and scaled down, because browsers do not agree on fonts smaller than a pixel.
+function text(c, s, x, y, size, col, weight = 600, stroke = '') {
+  c.save(); c.translate(x, y); c.scale(size / 100, size / 100);
+  c.font = weight + ' 100px ' + FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+  if (stroke) { c.lineWidth = 7; c.strokeStyle = stroke; c.strokeText(s, 0, 0); }
+  c.fillStyle = col; c.fillText(s, 0, 0);
+  c.restore();
 }
+function textWidth(c, s, size, weight = 600) { c.font = weight + ' 100px ' + FONT; return c.measureText(s).width * size / 100; }
 // a box standing on the floor: its front face and its top
 function box(c, x, y, w, d, h, top, front, r = 0.07) {
   rrect(c, x, V(y + d, h), w, h, r); paint(c, front);
@@ -101,8 +107,7 @@ export function paintBackground(c, groupName) {
       c.fillStyle = 'rgba(255,255,255,.75)'; c.fillRect(bx - 0.05, V(0, z + tall * 0.55), 0.1, 0.07);
     }
     c.save(); c.shadowColor = '#ff5fa2'; c.shadowBlur = 22;
-    text(c, 'BAR', x + w / 2, V(0, 3.0), 0.5, '#ffd3e6', 700);
-    c.lineWidth = 0.035; c.strokeStyle = '#ff7eb6'; c.strokeText('BAR', x + w / 2, V(0, 3.0));
+    text(c, 'BAR', x + w / 2, V(0, 3.0), 0.5, '#ffd3e6', 700, '#ff7eb6');
     rrect(c, x + w / 2 - 0.85, V(0, 3.3), 1.7, 0.58, 0.2); c.lineWidth = 0.04; c.strokeStyle = '#7fe0ff'; c.shadowColor = '#4fc3e8'; c.stroke();
     c.restore();
   }
@@ -121,10 +126,9 @@ export function paintBackground(c, groupName) {
   // the group's name on a banner over the notice board
   if (groupName) {
     const cx = STATION.board.wall[0] + STATION.board.wall[2] / 2, y = V(0, 3.02);
-    c.font = '700 0.3px ' + FONT;
-    const w = Math.min(3.6, Math.max(1.6, c.measureText(groupName).width + 0.5));
+    const tw = textWidth(c, groupName, 0.3, 700), w = Math.min(3.6, Math.max(1.6, tw + 0.5));
     poly(c, [[cx - w / 2, y - 0.2], [cx + w / 2, y - 0.2], [cx + w / 2 + 0.14, y], [cx + w / 2, y + 0.2], [cx - w / 2, y + 0.2], [cx - w / 2 - 0.14, y]]); paint(c, '#f4e6c8', 0.035);
-    c.save(); c.translate(cx, y + 0.01); const tw = c.measureText(groupName).width; if (tw > w - 0.3) c.scale((w - 0.3) / tw, 1); text(c, groupName, 0, 0, 0.3, '#5a2f3c', 700); c.restore();
+    c.save(); c.translate(cx, y + 0.01); if (tw > w - 0.3) c.scale((w - 0.3) / tw, 1); text(c, groupName, 0, 0, 0.3, '#5a2f3c', 700); c.restore();
   }
   // the door, with its sign
   { const [x, , w, h] = STATION.door.wall;

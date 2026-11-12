@@ -82,6 +82,7 @@ EOT
 #!/bin/sh
 # A new password for somebody who forgot theirs:  lobby-password <navn>      All accounts:  lobby-password
 [ \$# -gt 0 ] && set -- pass "\$@" || set -- users
+tz=\$(sed -n 's/^Environment=TZ=//p' /etc/systemd/system/$SVC.service 2>/dev/null); [ -z "\$tz" ] || export TZ="\$tz"      # the same clock as the service
 DATA_DIR='$DATA_DIR' PORT='$PORT' exec node '$APP_DIR/tools/admin.mjs' "\$@"
 EOT
   chmod 755 /usr/local/bin/lobby-update /usr/local/bin/lobby-code /usr/local/bin/lobby-password

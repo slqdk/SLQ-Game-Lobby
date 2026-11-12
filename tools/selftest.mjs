@@ -12,6 +12,7 @@ import poker, { handValue, handName, equity, START as PSTART, THINK, SHOW } from
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../server/store.js';
+import { createPush, encrypt as pushEncrypt } from '../server/push.js';
 import { createHub } from '../server/hub.js';
 import { createEagleEye } from '../server/eagleeye.js';
 import { createArena } from '../server/arena.js';
@@ -33,11 +34,14 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slq-lobby-test-'));
 let clock = new Date(2026, 10, 12, 12, 0, 0).getTime();
 const rnd = mulberry32(42);
 let store = createStore(dir, { delay: -1 }), ee, hub, arena;
+// notifications: what the lobby wants sent to browsers is collected here instead
+const pushed = []; let pushCode = 201;
+const fakePush = { key: 'TESTKEY', allowed: e => /^https:\/\/push\.test\//.test(String(e)), send: (sub, payload, opts) => { pushed.push({ e: sub.e, payload, opts: opts || {} }); return Promise.resolve(pushCode); } };
 function startLobby() {           // the lobby with EagleEye Commander and the shooter in it, as server.js puts them together
   let tell = () => {};
   ee = createEagleEye({ dir: path.join(dir, 'eagleeye'), secret: store.config.secret, now: () => Math.floor(clock / 1000), changed: (m, g) => tell(m, g) });
   arena = createArena({ now: () => clock, rand: rnd, timer: false, changed: (...a) => hub.arChanged(...a), ended: r => hub.arEnded(r), left: (...a) => hub.arLeft(...a) });
-  hub = createHub({ store, ee, arena, version: 'test', now: () => clock, botDelay: 0, rand: rnd });
+  hub = createHub({ store, ee, arena, version: 'test', now: () => clock, botDelay: 0, rand: rnd, push: fakePush });
   tell = hub.eeChanged;
 }
 startLobby();
@@ -1017,6 +1021,110 @@ section('stilarket');
   const loose = [];
   rules(read('../public/shooter/shooter.css'), x => { if (x && !/^(\.sh-|#arena)/.test(x)) loose.push(x); });
   check('skydespillets stilark holder sig til sine egne navne', loose.length === 0, loose.join(', '));
+}
+
+section('beskeder til dem, der er væk');
+{
+  const settle = () => new Promise(r => setImmediate(r));
+  const b64 = b => Buffer.from(b).toString('base64url'), hm = (k, d) => crypto.createHmac('sha256', k).update(d).digest();
+  // what a browser does with a message it receives (RFC 8291, the receiving side)
+  const openPush = (body, priv, pub, auth) => {
+    const salt = body.subarray(0, 16), as = body.subarray(21, 21 + body[20]), data = body.subarray(21 + body[20]), ecdh = crypto.createECDH('prime256v1');
+    ecdh.setPrivateKey(Buffer.from(priv, 'base64url'));
+    const ikm = hm(hm(Buffer.from(auth, 'base64url'), ecdh.computeSecret(as)), Buffer.concat([Buffer.from('WebPush: info\0'), Buffer.from(pub, 'base64url'), as, Buffer.from([1])]));
+    const prk = hm(salt, ikm), d = crypto.createDecipheriv('aes-128-gcm', hm(prk, Buffer.from('Content-Encoding: aes128gcm\0\x01')).subarray(0, 16), hm(prk, Buffer.from('Content-Encoding: nonce\0\x01')).subarray(0, 12));
+    d.setAuthTag(data.subarray(data.length - 16));
+    const plain = Buffer.concat([d.update(data.subarray(0, data.length - 16)), d.final()]);
+    return plain.subarray(0, plain.length - 1).toString();
+  };
+  // the example in appendix A of RFC 8291
+  const RFC = { text: 'When I grow up, I want to be a watermelon', uaPub: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', uaPriv: 'q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94',
+    auth: 'BTBZMqHH6r4Tts7J_aSIgg', asPriv: 'yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw', salt: 'DGv6ra1nlYgDCS1FRnbzlw',
+    body: 'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN' };
+  const made = pushEncrypt(RFC.text, RFC.uaPub, RFC.auth, { asPrivate: RFC.asPriv, salt: RFC.salt });
+  check('krypteringen giver præcis eksemplet i RFC 8291', b64(made) === RFC.body);
+  check('og en browser kan læse den', openPush(made, RFC.uaPriv, RFC.uaPub, RFC.auth) === RFC.text);
+  const cfg = {}, posts = []; let saves = 0;
+  const px = createPush({ config: cfg, save: () => saves++, now: () => clock, post: (url, headers, body) => { posts.push({ url, headers, body }); return Promise.resolve({ status: 201 }); } });
+  check('serverens nøgler laves én gang og gemmes', saves === 1 && createPush({ config: cfg, save: () => saves++ }).key === px.key && saves === 1 && Buffer.from(px.key, 'base64url').length === 65 && typeof cfg.vapid.d === 'string');
+  const ua = crypto.createECDH('prime256v1'); ua.generateKeys();
+  const sub = { e: 'https://fcm.googleapis.com/fcm/send/abc', p: b64(ua.getPublicKey()), a: b64(crypto.randomBytes(16)), o: 'https://lobby.example' };
+  const code = await px.send(sub, { t: 'Din tur', b: 'æøå' }, { topic: 'bord 7', urgent: true, ttl: 60 });
+  const H = posts[0].headers, jwt = /^vapid t=([\w-]+)\.([\w-]+)\.([\w-]+), k=([\w-]+)$/.exec(H.Authorization), claims = JSON.parse(Buffer.from(jwt[2], 'base64url'));
+  check('en besked sendes krypteret til browserens beskedtjeneste', code === 201 && posts[0].url === sub.e && H['Content-Encoding'] === 'aes128gcm' && H.TTL === '60' && H.Urgency === 'high' && /^[\w-]{24}$/.test(H.Topic) && H['Content-Length'] === posts[0].body.length
+    && JSON.parse(openPush(posts[0].body, b64(ua.getPrivateKey()), sub.p, sub.a)).b === 'æøå');
+  check('serveren skriver under med sin nøgle, så tjenesten kan se, hvem der sender', jwt[4] === px.key && claims.aud === 'https://fcm.googleapis.com' && claims.sub === 'https://lobby.example' && claims.exp * 1000 > clock && claims.exp * 1000 <= clock + 24 * 3600e3
+    && crypto.verify('sha256', Buffer.from(jwt[1] + '.' + jwt[2]), { key: crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: cfg.vapid.x, y: cfg.vapid.y }, format: 'jwk' }), dsaEncoding: 'ieee-p1363' }, Buffer.from(jwt[3], 'base64url')));
+  const good = ['https://fcm.googleapis.com/fcm/send/x', 'https://updates.push.services.mozilla.com/wpush/v2/x', 'https://web.push.apple.com/x', 'https://wns2-by3p.notify.windows.com/w/?token=x'];
+  const bad = ['http://fcm.googleapis.com/x', 'https://fcm.googleapis.com.evil.dk/x', 'https://192.168.1.1/x', 'https://evil.dk/fcm.googleapis.com', 'https://a@fcm.googleapis.com/x', 'https://fcm.googleapis.com:8443/x', 'vrøvl', ''];
+  check('kun browsernes egne beskedtjenester får noget tilsendt', good.every(px.allowed) && !bad.some(px.allowed) && (await px.send({ ...sub, e: 'https://192.168.1.1/x' }, {})) === 0 && posts.length === 1);
+
+  // ---- in the lobby ----
+  for (const c of [A, B, C]) c.send({ t: 'tclose' });
+  const idB = B.me().id, uB = store.users.get(idB), keys = () => ({ p256dh: b64(crypto.createECDH('prime256v1').generateKeys()), auth: b64(crypto.randomBytes(16)) });
+  const due = () => { clock += 6000; hub.tick(); return settle(); }, back = () => { B = client(tokB); B.send({ t: 'enter', g: GID }); P[1] = B; };
+  check('browseren får serverens nøgle, når den logger ind', A.last('welcome').push === 'TESTKEY');
+  B.send({ t: 'psub', sub: { endpoint: 'https://evil.test/x', keys: keys() } });
+  const e1 = B.err();
+  B.send({ t: 'psub', sub: { endpoint: 'https://push.test/b1', keys: { p256dh: 'abc', auth: 'def' } } });
+  check('et abonnement et fremmed sted hen, eller med nøgler der ikke kan læses, afvises', /beskedtjeneste/.test(e1) && /nøgler/.test(B.err()) && !uB.push);
+  B.send({ t: 'psub', sub: { endpoint: 'https://push.test/b1', keys: keys() }, origin: 'https://lobby.example' });
+  check('en enhed melder sig til', B.last('psub').n === 1 && uB.push.length === 1 && uB.push[0].o === 'https://lobby.example' && !JSON.stringify(B.me()).includes('push.test'));
+  C.send({ t: 'psub', sub: { endpoint: 'https://push.test/b1', keys: keys() } });
+  check('en browser hører til én konto ad gangen', uB.push.length === 0 && store.users.get(C.me().id).push.length === 1);
+  C.send({ t: 'punsub', endpoint: 'https://push.test/b1' });
+  B.send({ t: 'psub', sub: { endpoint: 'https://push.test/b1', keys: keys() } }); B.send({ t: 'psub', sub: { endpoint: 'https://push.test/b2', keys: keys() } });
+  check('man kan melde sig fra igen, og have flere enheder', store.users.get(C.me().id).push.length === 0 && uB.push.length === 2);
+  pushed.length = 0; clock += 6000;
+  B.send({ t: 'ptest' }); await settle();
+  check('en prøvebesked går til alle ens enheder', pushed.length === 2 && pushed[0].payload.t === 'SLQ Game Lobby' && B.last('ptest').ok === 2);
+
+  // a game between two people: all moves go in the first two columns, so that nobody wins by accident
+  const tbl = id => store.groups.get(GID).tables[id], P = [A, B];
+  A.send({ t: 'tnew', game: 'c4', stake: 0 }); const id = A.last('tv').tv.id; B.send({ t: 'tjoin', id });
+  let n = 0;
+  const turn = () => GAMES.c4.turn(tbl(id).state), move = () => { clock += 400; P[turn()].send({ t: 'tact', id, a: { c: n++ < 6 ? 0 : 1 } }); }, toB = () => { while (turn() !== 1) move(); }, toA = () => { while (turn() !== 0) move(); };
+  toB(); pushed.length = 0; await due();
+  check('den, der sidder i klubhuset, får ingen besked om sin tur', turn() === 1 && pushed.length === 0);
+  toA(); B.send({ t: 'vis', on: false }); toB(); await due();
+  check('den, hvis side ikke er fremme, får at vide, at det er deres tur', pushed.length === 2 && pushed[0].payload.t === 'Din tur i 4 på stribe' && pushed[0].payload.b === 'Søren venter i Torsdagsklubben.'
+    && pushed[0].payload.u === './?g=' + GID + '&t=' + id && pushed[0].opts.topic === 't' + GID + ':' + id, JSON.stringify(pushed[0] || null));
+  await due(); await due();
+  check('men kun én gang for den tur', pushed.length === 2);
+  B.send({ t: 'vis', on: true }); toA(); hub.disconnect(B.conn); pushed.length = 0; toB(); await due();
+  check('den, der har lukket siden, får også besked', pushed.length === 2 && pushed[0].e === 'https://push.test/b1');
+  back(); toA(); hub.disconnect(B.conn); pushCode = 410; pushed.length = 0; toB(); await due();
+  check('en enhed, der ikke længere lytter, tages af kontoen', pushed.length === 2 && uB.push.length === 0);
+  pushCode = 201; back();
+  B.send({ t: 'psub', sub: { endpoint: 'https://push.test/b3', keys: keys() } });
+  toA(); B.send({ t: 'vis', on: false }); pushed.length = 0;
+  A.send({ t: 'tact', id, a: { resign: true } }); await settle();
+  check('den, der er væk, hører, hvordan spillet endte', pushed.length === 1 && pushed[0].payload.t === 'Du vandt i 4 på stribe!' && /er slut/.test(pushed[0].payload.b) && tbl(id).phase === 'over', JSON.stringify(pushed));
+  for (const c of [A, B]) c.send({ t: 'tleave', id });
+  // against a robot nobody waits, so nothing is sent
+  B.send({ t: 'vis', on: true }); B.send({ t: 'tnew', game: 'c4', stake: 0 }); const idR = B.last('tv').tv.id; B.send({ t: 'tbot', id: idR, level: 1 });
+  if (GAMES.c4.turn(tbl(idR).state) !== 0) throw new Error('robotten rykkede ikke');
+  B.send({ t: 'vis', on: false }); B.send({ t: 'tact', id: idR, a: { c: 0 } }); pushed.length = 0; await due();
+  check('mod en robot sendes der ingenting', tbl(idR).phase === 'play' && GAMES.c4.turn(tbl(idR).state) === 0 && pushed.length === 0);
+  B.send({ t: 'tleave', id: idR });
+  // being asked to a table
+  clock += 4000; A.send({ t: 'tnew', game: 'yatzy', stake: 10 }); const idI = A.last('tv').tv.id; pushed.length = 0;
+  A.send({ t: 'tinv', id: idI, u: idB }); await settle();
+  check('den, der bliver budt op med siden i baggrunden, får en besked', pushed.length === 1 && pushed[0].payload.t === 'Søren vil spille Yatzy' && /indsats 10/.test(pushed[0].payload.b) && pushed[0].payload.u.endsWith('&t=' + idI), A.err());
+  A.send({ t: 'tleave', id: idI });
+  // EagleEye Commander: a new round
+  A.send({ t: 'enew', name: 'Besked' }); const codeE = A.last('eopen').code, tokE = A.last('eopen').token;
+  B.send({ t: 'ejoin', code: codeE }); const tokE2 = B.last('eopen').token;
+  pushed.length = 0; ee.api.act({ token: tokE, act: { a: 'start' } }); await due();
+  check('en general, der er væk, hører, at kampen er i gang', pushed.length === 1 && pushed[0].payload.t === 'Ny runde i EagleEye Commander' && pushed[0].payload.b === '«Besked» · runde 1 · Torsdagsklubben' && pushed[0].payload.u === './?g=' + GID + '&e=' + codeE, JSON.stringify(pushed));
+  pushed.length = 0; ee.api.act({ token: tokE, act: { a: 'ready', on: true } }); await due();
+  check('at en anden melder klar, er ikke en ny runde', pushed.length === 0);
+  ee.api.act({ token: tokE2, act: { a: 'ready', on: true } }); await due();
+  check('men den næste runde er', pushed.length === 1 && /runde 2/.test(pushed[0].payload.b));
+  A.send({ t: 'edrop', code: codeE }); A.send({ t: 'eclose' }); B.send({ t: 'eclose' });
+  B.send({ t: 'vis', on: true }); B.send({ t: 'punsub', endpoint: 'https://push.test/b3' });
+  clock += 4 * 60e3; hub.tidy();                 // the table that was given up is cleared away
+  check('og der er ryddet op', !ee.get(codeE) && uB.push.length === 0 && Object.keys(store.groups.get(GID).tables).length === 0, A.err() + ' ' + Object.keys(store.groups.get(GID).tables));
 }
 
 section('glemt kodeord');

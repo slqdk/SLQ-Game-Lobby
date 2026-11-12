@@ -168,6 +168,9 @@ label small { color: var(--mute); font-weight: 500; }
 .switch.on i { background: #1f5a4d; }
 .switch.on i::after { transform: translateX(20px); background: var(--teal); }
 .switch small { display: block; color: var(--mute); font-weight: 500; }
+.switch:disabled { cursor: default; }
+.switch:disabled i { opacity: .45; }
+.pushrow { display: grid; gap: 8px; justify-items: start; }
 
 /* wardrobe */
 .wardrobe { display: grid; grid-template-columns: 190px 1fr; gap: 16px; align-items: start; }

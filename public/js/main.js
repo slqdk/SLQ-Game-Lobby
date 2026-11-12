@@ -4,6 +4,7 @@ import { createRoom } from './room.js';
 import { $, h, icon, bust, sheet, toast } from './ui.js';
 import { drawBust, drawFigure, drawPrank, drawEmote, drawGlass } from './avatar.js';
 import { play, unlock, soundOn, setSound } from './sfx.js';
+import { pushStart, pushState, pushOn, pushOff, pushSync } from './push.js';
 import { renderC4 } from './games/c4.js';
 import { renderPoker } from './games/poker.js';
 import { renderYatzy } from './games/yatzy.js';
@@ -110,6 +111,7 @@ $('#authForm').addEventListener('submit', async e => {
 });
 
 function logout() {
+  pushOff(send);                    // the next account on this browser must not get this one's notifications
   if (st.sock) st.sock.stop();
   st.sock = null; st.token = ''; st.me = null; st.gid = ''; st.g = null;
   save('slq-token', ''); save('slq-group', '');
@@ -226,6 +228,7 @@ const on = {
     renderFriends(); tablesChanged();
     if (st.tv) send({ t: 'topen', id: st.tv.id });            // back after a lost connection: the game is still open here
     if (!st.hinted) { st.hinted = true; room.hint(9); toast('Tryk på gulvet for at gå. Tryk på møblerne og på de andre for at bruge dem.', { ms: 7000 }); }
+    goWant();
   },
   g(m) {
     if (!st.g) return;
@@ -769,7 +772,7 @@ function openMenu() {
   }
   body.push(h('div', { class: 'sec' }, 'Dig'));
   const snd = h('button', { class: 'switch' + (soundOn() ? ' on' : ''), onclick: () => { setSound(!soundOn()); room.setSound(soundOn()); snd.classList.toggle('on', soundOn()); } }, h('span', {}, 'Lyd'), h('i'));
-  body.push(snd, dndSwitch());
+  body.push(snd, dndSwitch(), pushRow());
   const pw = h('form', { hidden: true, onsubmit: e => { e.preventDefault(); send({ t: 'pass', old: e.currentTarget.old.value, pass: e.currentTarget.pass.value }); } },
     h('label', {}, 'Nuværende kodeord', h('input', { name: 'old', type: 'password', autocomplete: 'current-password', required: true })),
     h('label', {}, 'Nyt kodeord', h('input', { name: 'pass', type: 'password', autocomplete: 'new-password', minLength: LIMITS.passMin, required: true })), h('button', { class: 'btn' }, 'Skift kodeord'));
@@ -799,7 +802,59 @@ $('#btnMenu').addEventListener('click', openMenu);
 const meBefore = on.me;
 on.me = m => { meBefore(m); shopRefresh(); barRefresh(); };
 const welcomeBefore = on.welcome;
-on.welcome = m => { st.version = m.version; welcomeBefore(m); };
+on.welcome = m => { st.version = m.version; st.pushKey = m.push || ''; welcomeBefore(m); awayNow = null; reportVis(); pushSync(st.pushKey, send); };
+
+// ---------- notifications ----------
+// The server only sends a notification to somebody who is not looking: the page tells it whether it is in front
+// (a visible tab in a window that has the focus, touched within the last five minutes; a game page counts as touching).
+let seenAt = Date.now(), awayNow = null;
+const isAway = () => document.visibilityState !== 'visible' || !document.hasFocus() || (!embedOpen() && Date.now() - seenAt > 5 * 60e3);
+function reportVis() { const a = isAway(); if (a !== awayNow && send({ t: 'vis', on: !a })) awayNow = a; }
+// A notification that was tapped names a group and a table (or an EagleEye match): go there.
+function openFrom(search) {
+  const q = new URLSearchParams(search), clean = v => (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6), g = clean(q.get('g'));
+  if (!g) return;
+  st.want = { g, t: +q.get('t') || 0, e: clean(q.get('e')) };
+  if (st.g && st.g.id === g) goWant();                                         // already in that clubhouse
+  else if (st.me && st.groups.some(x => x.id === g)) enter(g);                 // logged in, but somewhere else
+  else { st.gid = g; save('slq-group', g); }                                   // not logged in yet: the welcome goes there
+}
+function goWant() {
+  const w = st.want;
+  if (!w || !st.g || st.g.id !== w.g) return;
+  st.want = null;
+  if (w.t && st.tables.has(w.t)) openTable(w.t);
+  else if (w.e && st.ee.has(w.e)) send({ t: 'eopen', code: w.e });
+}
+const PUSH_TEXT = {
+  on: 'Du får en besked, når det er din tur, eller nogen byder dig op, og klubhuset ikke er fremme.',
+  off: 'Få en besked, når det er din tur, eller nogen byder dig op, mens du er væk.',
+  denied: 'Beskeder er blokeret for denne side. Tillad dem i browserens indstillinger for siden.',
+  home: 'På iPhone og iPad: tryk på Del og «Føj til hjemmeskærm», og åbn klubhuset derfra. Så kan beskeder slås til.',
+  https: 'Beskeder virker kun, når klubhuset åbnes over https.',
+  none: 'Denne browser kan ikke vise beskeder.',
+};
+// The switch in the menu: notifications on this device, and a button to try them.
+function pushRow() {
+  const box = h('div', { class: 'pushrow' });
+  const draw = async () => {
+    const s = await pushState(st.pushKey);
+    if (!s) return box.replaceChildren();
+    const sw = h('button', { class: 'switch' + (s === 'on' ? ' on' : ''), id: 'pushSwitch', disabled: s !== 'on' && s !== 'off', onclick: async () => {
+      sw.disabled = true;
+      try { if (s === 'on') await pushOff(send); else await pushOn(st.pushKey, send); } catch (e) { toast(e.message, { kind: 'err' }); }
+      draw();
+    } }, h('span', {}, 'Beskeder på denne enhed', h('small', {}, PUSH_TEXT[s])), h('i'));
+    box.replaceChildren(...(s === 'on' ? [sw, h('button', { class: 'btn alt small', id: 'pushTest', onclick: () => send({ t: 'ptest' }) }, 'Send en prøvebesked')] : [sw]));
+  };
+  draw();
+  return box;
+}
+on.psub = () => {};
+on.ptest = m => {
+  if (m.ok) toast('Prøvebeskeden er sendt' + (m.ok > 1 ? ' til ' + m.ok + ' enheder' : '') + '. Den dukker op om et øjeblik.', { kind: 'good' });
+  else toast('Beskedtjenesten tog ikke imod beskeden (svar ' + m.bad.join(', ') + ').', { kind: 'err' });
+};
 
 // ---------- start ----------
 async function boot() {
@@ -812,7 +867,13 @@ async function boot() {
   // an invitation in the address: remember it, and take it out of the address bar
   const q = new URLSearchParams(location.search), code = (q.get('i') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   try { if (code) sessionStorage.setItem('slq-invite', code); st.invite = code || sessionStorage.getItem('slq-invite') || ''; } catch { st.invite = code; }
-  if (code) history.replaceState(null, '', location.pathname);
+  openFrom(location.search);
+  if (location.search) history.replaceState(null, '', location.pathname);
+  pushStart(openFrom);
+  document.addEventListener('visibilitychange', reportVis);
+  for (const ev of ['focus', 'blur']) window.addEventListener(ev, reportVis);
+  for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, () => { seenAt = Date.now(); if (awayNow) reportVis(); }, { passive: true });
+  setInterval(reportVis, 30000);
   demo();
   room.start();
   if (st.token) connect(); else showWelcome();

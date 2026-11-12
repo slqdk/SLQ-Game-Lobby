@@ -66,6 +66,7 @@ export function createStore(dir, { delay = 1500 } = {}) {
 
   return {
     config, users, groups, flush,
+    saveConfig: () => write(cfile, config, 0o600),
     newUserId: () => nextUser++,
     saveUsers: () => touch('users'),
     saveGroup: g => touch(g.id),

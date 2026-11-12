@@ -11,6 +11,8 @@ WorkingDirectory=/opt/slq-game-lobby
 Environment=NODE_ENV=production
 Environment=PORT=8080
 Environment=DATA_DIR=/var/lib/slq-game-lobby
+# the clock the lobby goes by: when a new day starts (the daily chips), and the times lobby-password shows
+Environment=TZ=Europe/Copenhagen
 ExecStart=/usr/bin/env node server/server.js
 Restart=on-failure
 RestartSec=3

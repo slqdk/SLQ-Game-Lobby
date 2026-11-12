@@ -29,6 +29,8 @@ PORT=8090 DATA_DIR=/var/lib/slq-game-lobby node server/server.js
 | `HOST` | all interfaces | Listen on one address only, e.g. `127.0.0.1` |
 | `TRUSTED_PROXY` | none | Extra reverse-proxy addresses or networks, comma separated (see "Behind a reverse proxy") |
 
+The installed service runs on Danish time (`TZ=Europe/Copenhagen` in `deploy/slq-game-lobby.service`): that decides when a new day starts for the daily chips.
+
 The first start writes `config.json` in the data folder with the **installation code** (`XXXX-XXXX`). Whoever makes an account with that code may create groups; everybody else joins through a group's invitation link.
 
 `npm test` runs the self test: the lobby logic without sockets, then the real server on a spare port with a hand-made WebSocket client.

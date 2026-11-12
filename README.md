@@ -16,7 +16,7 @@ What is in it:
 - **Poker** at the card table: Texas Hold'em without a limit as a small tournament for two to six. Everybody starts with 1,000 poker chips, the blinds rise every eighth hand, and the last one with chips takes the buy-ins. A clock keeps it moving (40 seconds per decision), and robots in three strengths can fill the seats at tables without a buy-in.
 - **Yatzy** at the dice table: five dice, the Danish sheet with fifteen fields and the bonus for 63, two to four players, live or one turn now and the next tomorrow, with or without robots.
 - **Meyer** at the dice table: two dice under a cup, say the same as the one before or higher (true or not), believe it or lift the cup. Six lives each, Meyer costs two, two to six players, a clock, robots that lie and doubt.
-- The furniture for what comes next already stands in the room: Ludo.
+- **Ludo** at the board-game table: two to four players, a six to get out, globes and stars, two together stand safely, an exact throw into the goal. The pieces hop along the board, robots in three levels, and like Yatzy it can be played over days.
 
 No dependencies: Node 20 or newer and a browser. The user interface is in Danish.
 

@@ -8,6 +8,7 @@ import { renderC4 } from './games/c4.js';
 import { renderPoker } from './games/poker.js';
 import { renderYatzy } from './games/yatzy.js';
 import { renderMeyer } from './games/meyer.js';
+import { renderLudo } from './games/ludo.js';
 import { ECON, LIMITS, EMOTES, PRANKS, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
 import { ROOM, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
@@ -21,7 +22,7 @@ const st = {
   me: null, groups: [], g: null, mem: new Map(), tables: new Map(), ee: new Map(), arenas: new Map(), game: null, gameQ: null,
   view: 'boot', sock: null, skew: 0, tv: null, everOpen: false, leaving: false, hinted: false,
 };
-const RENDER = { c4: renderC4, poker: renderPoker, yatzy: renderYatzy, meyer: renderMeyer };
+const RENDER = { c4: renderC4, ludo: renderLudo, poker: renderPoker, yatzy: renderYatzy, meyer: renderMeyer };
 const BUSY = { ee: 'EagleEye Commander', shooter: 'skydespillet' };
 const app = $('#app');
 let room = null, demoTimer = 0;
@@ -557,6 +558,7 @@ function openScores() {
     ...board('Vundne pokerturneringer', m => (m.stats && m.stats.poker && m.stats.poker.w) || 0),
     ...board('Sejre i Yatzy', m => (m.stats && m.stats.yatzy && m.stats.yatzy.w) || 0),
     ...board('Sejre i Meyer', m => (m.stats && m.stats.meyer && m.stats.meyer.w) || 0),
+    ...board('Sejre i Ludo', m => (m.stats && m.stats.ludo && m.stats.ludo.w) || 0),
     ...board('Drab i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.k) || 0),
     ...board('Vundne runder i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.w) || 0),
     ...board('Sejre i EagleEye Commander', m => (m.stats && m.stats.ee && m.stats.ee.w) || 0),
@@ -608,7 +610,7 @@ function openTables() {
     const list = [...st.tables.values()].filter(t => GAMES[t.game]).sort((a, b) => rank(a) - rank(b) || b.at - a.at);
     const shoot = [...st.arenas.values()].map(arenaRow);
     return [list.length || shoot.length ? [...shoot, ...list.map(tableRow)] : h('p', { class: 'empty' }, 'Der er ingen spil i gang lige nu.'), ...newGame('c4'),
-      h('p', { class: 'hint' }, 'Skydespillet står i arkaden, og EagleEye Commander ved kommandobordet. Yatzy, Meyer, Ludo og poker får deres egne borde senere.')].flat();
+      h('p', { class: 'hint' }, 'De andre spil står ved deres egne borde i klubhuset: Ludo ved brætspilsbordet, poker ved kortbordet, Yatzy og Meyer ved terningebordet, skydespillet i arkaden og EagleEye Commander ved kommandobordet.')].flat();
   };
   sheet.open({ title: 'Spil', kind: 'tables', body: build() });
   reopen = () => sheet.fill(build());

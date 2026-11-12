@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import crypto from 'node:crypto';
+import ludo, { START as LSTART, STARS as LSTARS, GLOBES as LGLOBES, GOAL as LGOAL } from '../public/shared/games/ludo.js';
 import meyer, { rankOf, rankName, chance as meyerChance, LIVES, MEYER } from '../public/shared/games/meyer.js';
 import yatzy, { scoreOf, sums as yzSums, FIELDS } from '../public/shared/games/yatzy.js';
 import poker, { handValue, handName, equity, START as PSTART, THINK, SHOW } from '../public/shared/games/poker.js';
@@ -925,6 +926,79 @@ section('meyer');
   }
   check('spillet ender med én vinder', tbl(id).phase === 'over' && tbl(id).state.lives.filter(x => x > 0).length === 1 && A.me().stats.meyer.p === 1);
   for (const c of [A, B]) c.send({ t: 'tleave', id });
+}
+
+section('ludo');
+{
+  const dice = (...ds) => { let i = 0; return () => (ds[Math.min(i++, ds.length - 1)] - 0.5) / 6; };       // a die that falls as we say
+  const no = (st, seat, a) => { try { ludo.act(st, seat, a, rnd); return false; } catch { return true; } };
+  const Y = [-1, -1, -1, -1], at = (turn, pos) => { const t = ludo.setup(4, { first: turn }, rnd); t.pos = pos.map(p => p.slice()); return t; };
+  check('banen har otte stjerner og fire globusser, og hver farve møder dem i samme afstand', LSTARS.length === 8 && LGLOBES.length === 4 && [0, 1, 2, 3].every(c => LSTARS.map(a => (a - LSTART[c] + 52) % 52).sort((x, y) => x - y).join() === '4,11,17,24,30,37,43,50'));
+  let s = ludo.setup(4, { first: 0 }, rnd);
+  ludo.act(s, 0, { roll: true }, dice(3));
+  check('uden brikker ude har man tre slag til en sekser', s.turn === 0 && s.phase === 'roll' && s.last.pass && s.last.more && s.tries === 1);
+  ludo.act(s, 0, { roll: true }, dice(2)); ludo.act(s, 0, { roll: true }, dice(5));
+  check('efter tre slag uden sekser går turen videre', s.turn === 1 && s.tries === 0 && s.last.pass && !s.last.more);
+  ludo.act(s, 1, { roll: true }, dice(6));
+  check('en sekser bringer en brik ud, og man slår igen', s.pos[1].join() === '0,-1,-1,-1' && s.turn === 1 && s.phase === 'roll' && s.last.from === -1 && !s.last.pick);
+  ludo.act(s, 1, { roll: true }, dice(6));
+  check('er der et valg, vælger man selv', s.phase === 'move' && s.moves.join() === '0,1,2,3' && no(s, 1, { roll: true }) && no(s, 0, { move: 0 }) && no(s, 1, { move: 7 }));
+  ludo.act(s, 1, { move: 0 }, rnd);
+  check('brikken flytter terningens øjne', s.pos[1][0] === 6 && s.last.steps.join() === '1,2,3,4,5,6' && s.last.pick && s.turn === 1);
+  ludo.act(s, 1, { roll: true }, dice(3));
+  check('er der intet valg, flyttes brikken af sig selv, og turen går videre', s.pos[1][0] === 9 && s.turn === 2 && s.phase === 'roll');
+  s = at(0, [[16, -1, -1, -1], [6, -1, -1, -1], Y, Y]); ludo.act(s, 0, { roll: true }, dice(3));
+  check('lander man på en andens brik, ryger den hjem', s.pos[0][0] === 19 && s.pos[1][0] === -1 && s.last.hit.join() === '1,0,6');
+  s = at(0, [[16, -1, -1, -1], [6, 6, -1, -1], Y, Y]); ludo.act(s, 0, { roll: true }, dice(3));
+  check('to brikker på samme felt står sikkert: den, der lander der, ryger selv hjem', s.pos[0][0] === -1 && s.pos[1].join() === '6,6,-1,-1' && s.last.self);
+  s = at(0, [[18, -1, -1, -1], [8, -1, -1, -1], Y, Y]); ludo.act(s, 0, { roll: true }, dice(3));
+  check('på en globus står man sikkert', s.pos[0][0] === -1 && s.pos[1][0] === 8 && s.last.self);
+  s = at(0, [[2, -1, -1, -1], Y, [37, -1, -1, -1], Y]); ludo.act(s, 0, { roll: true }, dice(2));
+  check('en stjerne sender brikken videre til den næste, og den, der står dér, ryger hjem', s.pos[0][0] === 11 && s.pos[2][0] === -1 && s.last.star && s.last.steps.join() === '3,4,11');
+  s = at(0, [[47, 3, -1, -1], Y, Y, Y]); ludo.act(s, 0, { roll: true }, dice(3)); ludo.act(s, 0, { move: 0 }, rnd);
+  check('stjernen foran ens egen bane fører lige i mål', s.pos[0][0] === LGOAL && s.last.steps.join() === '48,49,50,56');
+  s = at(0, [[54, LGOAL, LGOAL, LGOAL], Y, Y, Y]); ludo.act(s, 0, { roll: true }, dice(4));
+  check('målet skal rammes præcist: det, man slår for meget, går man tilbage', s.pos[0][0] === 54 && s.last.steps.join() === '55,56,55,54' && s.turn === 1);
+  s.turn = 0; ludo.act(s, 0, { roll: true }, dice(2));
+  check('fire brikker i mål vinder spillet', s.phase === 'over' && ludo.result(s).win.join() === '0' && ludo.turn(s) === -1);
+  s = at(0, [Y, [39, 39, -1, -1], Y, Y]); ludo.act(s, 0, { roll: true }, dice(6));
+  check('en brik, der kommer ud, slår alt hjem fra sit startfelt', s.pos[0].filter(p => p === 0).length === 1 && s.pos[1].join() === '-1,-1,-1,-1' && s.last.hit.length === 2 && s.turn === 0);
+  s = at(1, [[0, -1, -1, -1], [36, -1, -1, -1], Y, Y]); ludo.act(s, 1, { roll: true }, dice(3));
+  check('på sit eget startfelt står man sikkert', s.pos[1][0] === -1 && s.pos[0][0] === 0 && s.last.self);
+  s = at(1, [[5, -1, -1, -1], [7, -1, -1, -1], [9, -1, -1, -1], Y]); ludo.drop(s, 1);
+  check('går en fra, tages brikkerne af brættet, og de andre spiller videre', s.gone[1] && s.pos[1].join() === '-1,-1,-1,-1' && s.turn === 2 && !ludo.result(s));
+  ludo.drop(s, 2); ludo.drop(s, 3);
+  check('er der kun én tilbage, har den vundet', ludo.result(s).win.join() === '0');
+  check('to spillere sidder over for hinanden på brættet', ludo.setup(2, {}, rnd).color.join() === '0,2' && ludo.setup(3, {}, rnd).color.join() === '0,1,2');
+  // robots: every game ends with four pieces in the goal, and the hard one wins more often than the easy one
+  const wins = [0, 0, 0, 0]; let ended = 0, acts = 0;
+  for (let g = 0; g < 60; g++) {
+    const lv = [0, 1, 2, 3].map(i => [1, 2, 3, 2][(i + g) % 4]); s = ludo.setup(4, { first: g }, rnd); let steps = 0;
+    while (!ludo.result(s) && steps++ < 50000) { ludo.act(s, s.turn, ludo.bot(s, s.turn, lv[s.turn], rnd), rnd); acts++; }
+    if (ludo.result(s) && s.pos[s.winner].every(p => p === LGOAL) && s.pos.flat().every(p => p >= -1 && p <= LGOAL)) { ended++; wins[lv[s.winner]]++; }
+  }
+  check('robotterne spiller til en har fire brikker i mål, og den svære vinder oftere end den lette', ended === 60 && wins[3] > wins[1], wins.join(' ') + ' (' + Math.round(acts / 60) + ' handlinger pr. spil)');
+
+  // at the board-game table: two people and a robot
+  for (const c of [A, B, C]) c.send({ t: 'tclose' });
+  const tv = c => c.last('tv').tv, tbl = id => store.groups.get(GID).tables[id];
+  mark(A, B, C);
+  A.send({ t: 'tnew', game: 'ludo', stake: 0 }); const id = tv(A).id;
+  B.send({ t: 'tjoin', id }); A.send({ t: 'tbot', id, level: 2 }); A.send({ t: 'tstart', id });
+  check('ludo ved brætspilsbordet med en ven og en robot', tv(A).phase === 'play' && tv(A).seats.length === 3 && tv(A).seats[2].bot === 2 && tv(A).v.color.join() === '0,1,2' && GAMES.ludo.station === 'games');
+  const who = [A, B];
+  for (let k = 0; k < 20000 && tbl(id).phase === 'play'; k++) { const st = tbl(id).state, i = st.turn; clock += 400; who[i].send({ t: 'tact', id, a: ludo.bot(st, i, 3, rnd) }); }
+  const res = tbl(id).res;
+  check('spillet går til ende, robotten flytter selv, og vinderen har fire brikker i mål', tbl(id).phase === 'over' && !!res && res.win.length === 1 && tbl(id).state.pos[res.win[0]].every(p => p === LGOAL));
+  check('det tæller i tallene', A.me().stats.ludo.p === 1 && B.me().stats.ludo.p === 1 && A.me().stats.ludo.w + B.me().stats.ludo.w === (res.win[0] < 2 ? 1 : 0));
+  for (const c of [A, B]) c.send({ t: 'tleave', id });
+  // a slow player can be passed after 48 hours: the pieces come off, and the game goes on
+  A.send({ t: 'tnew', game: 'ludo', stake: 0 }); const id2 = tv(A).id;
+  B.send({ t: 'tjoin', id: id2 }); C.send({ t: 'tjoin', id: id2 }); A.send({ t: 'tstart', id: id2 });
+  const slow = tbl(id2).state.turn, other = [A, B, C][(slow + 1) % 3];
+  clock += 49 * 3600e3; other.send({ t: 'tclaim', id: id2 });
+  check('efter 48 timer spilles der videre uden den, der ikke slår', tbl(id2).phase === 'play' && tbl(id2).state.gone[slow] && tbl(id2).state.turn !== slow && tbl(id2).seats[slow].left === 1, other.err());
+  for (const c of [A, B, C]) c.send({ t: 'tleave', id: id2 });
 }
 
 section('glemt kodeord');

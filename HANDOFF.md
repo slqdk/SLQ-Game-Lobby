@@ -1,6 +1,6 @@
 # SLQ Game Lobby — handoff
 
-Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is pull request #2 on top of it (it contains #1); v0.4.0 (poker) is pull request #3 on top of that; v0.5.0 (Yatzy) is pull request #4 on top of poker; v0.6.0 (Meyer) is a pull request on top of Yatzy. Each contains the ones before it. Read this first when continuing in a new chat.
+Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is pull request #2 on top of it (it contains #1); v0.4.0 (poker) is pull request #3 on top of that; v0.5.0 (Yatzy) is pull request #4 on top of poker; v0.6.0 (Meyer) is pull request #5 on top of Yatzy; v0.7.0 (Ludo) is a pull request on top of Meyer. Each contains the ones before it. Read this first when continuing in a new chat.
 
 - The code lives in **https://github.com/slqdk/SLQ-Game-Lobby** (public, branch `main`). Søren's server pulls from `main` with `lobby-update`, so `main` must always work; larger work goes on a branch and a pull request.
 - It runs in a Proxmox LXC behind Nginx Proxy Manager, which needs **Websockets Support** switched on (see the README).
@@ -33,7 +33,7 @@ Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, c
 
 **v0.6.0** adds Meyer at the dice table (see "Meyer" below).
 
-The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table).
+**v0.7.0** adds Ludo at the board-game table (see "Ludo" below). With that, every piece of furniture has its game; `SOON` in `games/index.js` is empty and "Kommer snart" is only shown for an id that a piece of furniture lists and no module answers to.
 
 ## Decisions made without asking (tell Søren, change if he wants)
 
@@ -150,6 +150,18 @@ The lying game with two dice and a cup, two to six players, six lives each; the 
 - The robot estimates how likely the last claim is a lie from what the claimant had to beat (`prev.need`: somebody who had to beat 65 has probably thrown too low) and from how lies tend to land just above that; then it weighs what lifting risks against what throwing on risks. The hard one lies with claims a real throw could have been; the easy one lifts at random and always says the least that will pass; the middle one is the two mixed. Of six robots, two of each, the hard ones win about three times as often as the easy ones.
 - Decisions made without asking: "the same or higher" (not strictly higher); six lives; Meyer costs two for whoever loses that round; Lille Meyer is just the second highest throw (no special rule); no rule about what the loser must do.
 
+### Ludo (v0.7.0)
+
+Ludo at the board-game table, two to four players, by the rules most people in Denmark play. The first with four pieces in the goal wins.
+
+- `public/shared/games/ludo.js`. The track has 52 squares counted clockwise; colour c starts on `START[c]` (13 apart). A piece is kept as how far it has come: -1 in the yard, 0 on its start square, 50 on the last square before its lane, 51-55 in the lane, 56 in the goal; `abs(color, rel)` gives the square on the track. With two players the colours are 0 and 2, across from each other.
+- Moves: `{roll}` and `{move: piece}`. A throw that leaves no choice (one piece can move, or those that can stand on the same place) is carried out at once, and a throw that cannot be used passes the turn, so most turns are one tap. `last` tells the screen what happened (`steps`: the squares the piece went over; `hit`: who was sent home and from where; `self`, `star`, `pass`, `more`), and `count` goes up with every throw so that the screen can tell a new event from a redraw.
+- The rules: a six brings a piece out and gives another throw; three throws when nothing is on the board; a stranger on the square one lands on goes home; whoever lands on somebody who stands safely goes home instead (on a globe, on their own start square, or two of one colour together); a piece that comes out sends home whatever stands on its start square; a star carries the piece on to the next star, and the star in front of one's own lane leads straight into the goal; the goal must be hit exactly, and what is thrown too much is walked back.
+- No clock: like Yatzy it can be played over days. After 48 hours without a throw the others can go on without that player (`drop` takes the pieces off the board).
+- The robot tries each piece it may move on a copy of the state and values the board afterwards: how far everybody's pieces have come, and (the hard one only) how likely each of its own pieces is to be sent home before its next turn: strangers within six squares behind it, a star behind it, a yard that opens onto it. The middle one sees what a move wins but not what it risks; the easy one moves any piece. In 300 games of four the hard ones won 209, the middle ones 74 and the easy ones 17.
+- `public/js/games/ludo.js` draws the board as a grid of 15 x 15 (`CELL` maps the track to grid cells) with the pieces as buttons on top. The last move is played back along `last.steps` with the Web Animations API, once per event (`seen`). The players' names stand in their yards, and the yard of whoever has the turn has a white ring. Status, board and die fit a phone screen without scrolling; the list of players is below them.
+- Decisions made without asking: the star and globe rules as above; too many eyes at the goal are walked back (rather than the piece standing still); no rule about three sixes in a row; a move without a choice is made automatically; the game ends with the first winner (no second and third place); no clock.
+
 ### Adding a game
 
 1. `public/shared/games/<id>.js`: an object with `id`, `name`, `min`, `max`, `station` (the furniture), `setup`, `act`, `turn`, `result`, `view`, `bot` (see `base.js`; `c4.js` is the example). The state must be plain data. `view(state, seat)` is where hidden cards or dice are kept from the others.
@@ -165,7 +177,7 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 
 ## What comes next
 
-- **Milestone 2**: Ludo (poker is done in v0.4.0, Yatzy in v0.5.0, Meyer in v0.6.0). Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer needs `view` to hide the dice (poker shows how). The tables now handle more than two seats, robots with names, leaving in the middle and a clock (see "Poker"). Poker itself could get a loose table (sit down with one's own chips, leave at will) and a second prize.
+- ~~Milestone 2: poker, Yatzy, Meyer and Ludo~~ done in v0.4.0 to v0.7.0. The tables handle more than two seats, robots with names, leaving in the middle and a clock (see "Poker"). Left to do there: whatever real play shows, and what was decided without asking (listed under each game). Poker itself could get a loose table (sit down with one's own chips, leave at will) and a second prize.
 - ~~Milestone 3: the shooter~~ done in v0.3.0. Left to do there: controls for phones (touch sticks), text chat inside a match, the clubhouse's teasing inside a match, more arenas (the arena is one module, `world.js`), spectating, and tuning after real play: how good the robots are, how eager they are for the star, the rewards.
 - ~~Milestone 4: EagleEye Commander in the clubhouse~~ done in v0.2.0. Left to do there: the game still polls its server every few seconds (the lobby's WebSocket could tell it at once), and the clubhouse avatar is not shown inside the game.
 
@@ -185,3 +197,4 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 12. The shooter's sounds are the old ones plus a few new blips, unheard like the rest.
 13. **Poker has only been played by scripts and robots**: thousands of tournaments of random and robot players on the server (no chip appears or disappears), and one person with four robots in a browser at desk and phone size. Whether the robots are fun to play against, and whether 40 seconds and blinds every eighth hand feel right, nobody has tried.
 14. In the shooter a shooter's own browser says what its bullets hit. The server checks that it is plausible, not that it is true: fine among friends, not against cheats.
+15. **Yatzy, Meyer and Ludo have only been played by scripts and robots** as well: the rules are tested move by move, robots have played hundreds of games against each other, and one person with two robots has played each in a browser at desk and phone size. In Ludo the robots take about a second for each throw and each move, so a round of three robots takes a while; whether that feels right, nobody has tried.

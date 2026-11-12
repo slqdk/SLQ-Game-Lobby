@@ -6,5 +6,7 @@ import meyer from './meyer.js';
 import ludo from './ludo.js';
 
 export const GAMES = { c4, ludo, poker, yatzy, meyer };
-export const SOON = {};
+export const SOON = {
+  blackjack: 'Blackjack',
+};
 export { GameError } from './base.js';

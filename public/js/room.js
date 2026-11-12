@@ -3,7 +3,7 @@
 import { ROOM, STATIONS, STATION, pathLen, posAt } from '../shared/room.js';
 import { PRANKS, EMOTES, BAR } from '../shared/defs.js';
 import { drawAvatar, drawPrank, INK } from './avatar.js';
-import { KY, VIEW_H, V, paintBackground, paintStation, paintStool, paintLive, paintBartender, boundsOf, seatHeight } from './roomart.js';
+import { KY, VIEW_H, V, paintBackground, paintStation, paintStool, paintLive, paintOver, OVER, paintBartender, boundsOf, seatHeight } from './roomart.js';
 import { play } from './sfx.js';
 
 const TAU = Math.PI * 2, FONT = 'Fredoka, system-ui, sans-serif';
@@ -19,6 +19,7 @@ export function createRoom(canvas, hooks) {
   let s = 40, dpr = 1, cw = 0, ch = 0, ox = 0, oy = 0, camX = 0, camFree = false;
   let bg = null, pieces = [], stools = {}, builtFor = '', groupName = '';
   let labels = {}, hover = null, hintUntil = 0, soundOn = true, down = null;
+  const casino = { pot: 0, lines: [], spin: {} }, spins = [];     // the jackpot, today's board, which machines turn; results that wait for the reels to stop
 
   // ---------- layout and the pictures that are kept ----------
   function resize() {
@@ -27,7 +28,7 @@ export function createRoom(canvas, hooks) {
     dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
     s = ch / VIEW_H;
-    if (ROOM.w * s > cw && ROOM.w * s < cw * 1.22) s = cw / ROOM.w;       // nearly fits: show the whole room
+    if (ROOM.w * s > cw && ROOM.w * s < cw * (cw >= 900 ? 1.45 : 1.22)) s = cw / ROOM.w;       // nearly fits (on a wide screen: fits at up to a third smaller): show the whole room
     s = clamp(s, 18, 96);
     oy = Math.max(0, (ch - VIEW_H * s) / 2);
     build();
@@ -48,7 +49,9 @@ export function createRoom(canvas, hooks) {
     for (const st of STATIONS) {
       if (!st.box && !st.round) continue;
       const b = boundsOf(st), cv = sheet(b[2] - b[0], b[3] - b[1], k, g => { g.translate(-b[0], -b[1]); paintStation(g, st); });
-      pieces.push({ key: st.box ? st.box[1] + st.box[3] : st.round[1] + st.round[3] * 0.5, cv, x: b[0], y: b[1], w: b[2] - b[0], h: b[3] - b[1] });
+      const key = st.box ? st.box[1] + st.box[3] : st.round[1] + st.round[3] * 0.5;
+      pieces.push({ key, cv, x: b[0], y: b[1], w: b[2] - b[0], h: b[3] - b[1] });
+      if (OVER.has(st.id)) pieces.push({ key: key + 0.001, live: st.id });          // what moves on it, drawn right on top of its picture
       for (const q of st.on ? [] : st.seats || []) pieces.push({ key: q[1], stool: st.high ? 'high' : 'low', x: q[0] - 0.5, y: V(q[1]) - 1.0, w: 1, h: 1.2 });
     }
     for (const kind of ['low', 'high']) stools[kind] = sheet(1, 1.2, k, g => { g.translate(0.5, 1.0 - V(0)); paintStool(g, 0, 0, kind === 'high'); });
@@ -59,7 +62,7 @@ export function createRoom(canvas, hooks) {
   function actor(m) {
     const p = m.p && m.p.length ? m.p : [[ROOM.spawn[0], ROOM.spawn[1]]];
     const a = { id: m.id, name: m.name, look: m.look, dnd: m.dnd, path: p, len: pathLen(p), dist: 0, x: p[0][0], y: p[0][1], sit: m.sit || null, seated: false,
-      moving: false, walk: 0, phase: 0, dir: 0, dirT: 0, hop: 0, emote: '', emoteAt: 0, fxs: {}, drink: null, buzz: m.buzz || 0, buzzAt: T, bubble: null,
+      moving: false, walk: 0, phase: 0, dir: 0, dirT: 0, hop: 0, emote: '', emoteAt: 0, fxs: {}, drink: null, buzz: m.buzz || 0, buzzAt: T, bubble: null, net: m.busy === 'slot' ? m.net || 0 : null,
       talkUntil: 0, seed: (m.id * 2.399) % 6.28, born: T };
     if (a.sit && p.length < 2) a.seated = true;
     for (const [k, left] of m.fx || []) if (PRANKS[k]) a.fxs[k] = T - Math.max(0, PRANKS[k].dur - left / 1000);
@@ -148,6 +151,12 @@ export function createRoom(canvas, hooks) {
     placed.push([cx, top, w]);
     c.beginPath(); c.roundRect(cx - w / 2, top - h, w, h, h / 2); c.fillStyle = a.id === me ? 'rgba(255,179,71,.94)' : 'rgba(28,23,40,.72)'; c.fill();
     c.fillStyle = a.id === me ? '#2b1a08' : '#fff'; c.fillText(name, cx, top - h / 2 + 0.5);
+    if (a.net !== null) {                  // at the slot machines: what this player is up or down since walking up to them
+      const t = (a.net > 0 ? '+' : '') + a.net, nw = c.measureText(t).width + size * 1.1;
+      c.beginPath(); c.roundRect(cx - nw / 2, top - h * 2 - 2, nw, h, h / 2); c.fillStyle = a.net > 0 ? '#1f7a4a' : a.net < 0 ? '#a8323c' : 'rgba(28,23,40,.86)'; c.fill();
+      c.fillStyle = '#fff'; c.fillText(t, cx, top - h * 1.5 - 1.5);
+      top -= h + 2;                        // a speech bubble goes above it
+    }
     if (a.bubble) {
       const b = a.bubble, fs = clamp(s * 0.28, 12.5, 15.5), lh = fs * 1.28, age = T - b.at, pop = Math.min(1, age * 7), fade = Math.min(1, (b.until - T) * 3);
       c.font = '500 ' + fs + 'px ' + FONT;
@@ -168,7 +177,7 @@ export function createRoom(canvas, hooks) {
     c.font = '600 ' + size + 'px ' + FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
     const mid = X((b[0] + b[2]) / 2);
     if (mid < 12 || mid > cw - 12) return;                       // the furniture is outside the picture: no label piling up at the edge
-    const w = c.measureText(text).width + size * 1.4, h = size * 1.7, cx = clamp(mid, w / 2 + 4, cw - w / 2 - 4), y = Math.max(h + 2, oy + b[1] * s - 6);
+    const w = c.measureText(text).width + size * 1.4, h = size * 1.7, cx = clamp(mid, w / 2 + 4, cw - w / 2 - 4), y = Math.max(h + 2, oy + (b[1] - (st.lift || 0)) * s - 6);
     c.globalAlpha = strong ? 1 : 0.9;
     c.beginPath(); c.roundRect(cx - w / 2, y - h, w, h, h / 2); c.fillStyle = labels[st.id] ? '#ffb347' : 'rgba(28,23,40,.86)'; c.fill();
     c.fillStyle = labels[st.id] ? '#2b1a08' : '#fff'; c.fillText(text, cx, y - h / 2 + 0.5);
@@ -191,14 +200,15 @@ export function createRoom(canvas, hooks) {
     c.clearRect(0, 0, cw, ch);
     if (!bg) return;
     c.drawImage(bg, ox, oy, roomW, VIEW_H * s);
-    c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; paintLive(c, T, soundOn); c.restore();
+    for (let i = spins.length - 1; i >= 0; i--) if (T >= spins[i].at) { const q = spins[i]; spins.splice(i, 1); landSpin(q); }
+    c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; paintLive(c, T, soundOn, casino); c.restore();
     // furniture and people, the ones at the back first
     const list = pieces.map(p => ({ key: p.key, p }));
     for (const a of actors.values()) list.push({ key: place(a)[3], a });
     list.sort((u, v) => u.key - v.key);
     for (const it of list) {
       if (it.a) drawActor(it.a);
-      else if (it.p.live) { c.save(); c.translate(ox, oy); c.scale(s, s); paintBartender(c, T); c.restore(); }
+      else if (it.p.live) { c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; if (it.p.live === 'bartender') paintBartender(c, T); else paintOver(c, it.p.live, T, soundOn, casino); c.restore(); }
       else c.drawImage(it.p.stool ? stools[it.p.stool] : it.p.cv, X(it.p.x), oy + it.p.y * s, it.p.w * s, it.p.h * s);
     }
     drawFx(dt);
@@ -220,6 +230,17 @@ export function createRoom(canvas, hooks) {
     }
   }
   function word(text, x, y, z, col = '#fff') { fx.push({ kind: 'w', text, x, y, z, t: 0, life: 1.3, col }); }
+  // The reels have stopped: what the spin gave rises from the player's head, and coins fly when it paid.
+  function landSpin(q) {
+    const a = actors.get(q.id);
+    if (!a) return;
+    if (a.net !== null) a.net = q.net;
+    const [x, y, z] = headOf(a), d = q.win - q.bet;
+    // it starts above the name and the tally, so that it is not hidden behind them
+    fx.push({ kind: 'w', text: (d > 0 ? '+' : '') + d, x, y, z: z + 1.95, t: 0, life: q.win >= q.bet * 10 && q.win ? 2.4 : 1.6, big: d > 0, col: d > 0 ? '#ffd45e' : d < 0 ? '#ff9a8c' : '#fff' });
+    if (q.win > 0) burst(x, y, z + 0.6, Math.min(40, 6 + Math.round(q.win / Math.max(1, q.bet || 1)) * 2), { cols: ['#ffd45e', '#ffb347', '#fff1c4'], speed: 2.2, up: 2.2, size: 0.07, life: 1.0 });
+    if (q.win > 0 && q.id !== me) play('coin');
+  }
   const headOf = a => { const [x, y, z] = place(a); return [x, y, z + (isHen(a) ? 0.85 : seatOf(a) ? 1.02 : 1.48)]; };
 
   function land(k, a) {
@@ -254,7 +275,7 @@ export function createRoom(canvas, hooks) {
       if (f.t >= f.life) { fx.splice(i, 1); continue; }
       const u = f.t / f.life;
       if (f.kind === 'w') {
-        const size = clamp(s * 0.42, 15, 26) * (0.6 + Math.min(1, f.t * 8) * 0.4);
+        const size = clamp(s * 0.42, 15, 26) * (f.big ? 1.3 : 1) * (0.6 + Math.min(1, f.t * 8) * 0.4);
         c.save(); c.globalAlpha = Math.min(1, (1 - u) * 2.5); c.translate(X(f.x), Y(f.y, f.z + u * 0.7)); c.rotate(-0.08);
         c.font = '700 ' + size + 'px ' + FONT; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
         c.lineWidth = size * 0.28; c.strokeStyle = INK; c.strokeText(f.text, 0, 0); c.fillStyle = f.col; c.fillText(f.text, 0, 0);
@@ -353,7 +374,15 @@ export function createRoom(canvas, hooks) {
     },
     join(m) { actors.set(m.id, actor(m)); if (m.id !== me) play('door'); },
     leave(id) { const a = actors.get(id); if (a) { const [x, y] = place(a); burst(x, y, 1, 10, { cols: ['#fff', '#e9e3f5'], speed: 1.6, g: -0.5, size: 0.12 }); } actors.delete(id); },
-    patch(m) { const a = actors.get(m.id); if (!a) return; if (m.look) a.look = m.look; if (m.name) a.name = m.name; if ('dnd' in m) a.dnd = m.dnd; },
+    patch(m) {
+      const a = actors.get(m.id);
+      if (!a) return;
+      if (m.look) a.look = m.look; if (m.name) a.name = m.name; if ('dnd' in m) a.dnd = m.dnd;
+      if ('busy' in m) a.net = m.busy === 'slot' ? (m.net ?? a.net ?? 0) : null;
+    },
+    // the casino: the jackpot and today's board; and one spin by somebody (the result shows when the reels have stopped)
+    setCasino(o) { Object.assign(casino, o); },
+    spin(id, station, bet, win, net, ms) { casino.spin[station] = T + ms / 1000; spins.push({ at: T + ms / 1000, id, bet, win, net }); },
 
     move(id, path, sit) {
       const a = actors.get(id);
@@ -401,6 +430,6 @@ export function createRoom(canvas, hooks) {
     },
     // where on the canvas an avatar's head is (for a menu next to it)
     screenOf(id) { const a = actors.get(id); if (!a) return null; const [x, y, z] = place(a); return [X(x), Y(y, z + topOf(a))]; },
-    _debug: { actors, get s() { return s; }, pick, X, Y, place },
+    _debug: { actors, fx, get s() { return s; }, pick, X, Y, place },
   };
 }

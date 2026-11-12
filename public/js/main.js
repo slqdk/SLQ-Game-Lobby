@@ -10,6 +10,8 @@ import { renderPoker } from './games/poker.js';
 import { renderYatzy } from './games/yatzy.js';
 import { renderMeyer } from './games/meyer.js';
 import { renderLudo } from './games/ludo.js';
+import { slotView } from './slots.js';
+import { MACHINES, MACHINE_IDS } from '../shared/slots.js';
 import { ECON, LIMITS, EMOTES, PRANKS, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
 import { ROOM, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
@@ -224,7 +226,7 @@ const on = {
     $('#chatlog').replaceChildren();
     for (const c of m.chat) addChat(c, true);
     setView('room');
-    if (!st.hinted) $('#friends').hidden = window.innerWidth < 1680;       // room for the list beside the clubhouse only on a wide screen
+    if (!st.hinted) $('#friends').hidden = true;                           // the room fills the screen now: the list opens from the top bar
     renderFriends(); tablesChanged();
     if (st.tv) send({ t: 'topen', id: st.tv.id });            // back after a lost connection: the game is still open here
     if (!st.hinted) { st.hinted = true; room.hint(9); toast('Tryk på gulvet for at gå. Tryk på møblerne og på de andre for at bruge dem.', { ms: 7000 }); }
@@ -322,6 +324,7 @@ const chipIcon = (size = 26) => icon(size, c => { c.beginPath(); c.arc(0, 0, 12,
 const glassIcon = (k, size = 52) => icon(size, c => { c.translate(0, 10); c.scale(1.25, 1.25); drawGlass(c, k, 1, 1); });
 function updateMe(delta = 0) {
   if (!st.me) return;
+  if (st.hold != null) { $('#chipCount').textContent = st.hold; return; }          // a slot machine is turning: the counter waits for the reels
   $('#chipCount').textContent = st.me.chips;
   drawBust($('#meBust'), st.me.look, 36);
   if (delta) { const c = $('#btnChips'); c.classList.remove('bump'); void c.offsetWidth; c.classList.add('bump'); if (delta > 0) play('coin'); }
@@ -350,6 +353,7 @@ function statusOf(m) {
   if (!m.on) return ['sidst set ' + ago(m.seen), ''];
   const t = m.open ? st.tables.get(m.open) : null;
   if (t && GAMES[t.game]) return [(t.seats.some(s => s.u === m.id) ? 'spiller ' : 'ser på ') + GAMES[t.game].name, 'play'];
+  if (m.busy === 'slot') return ['ved ' + (MACHINES[m.slot] ? MACHINES[m.slot].name : 'en slotmaskine') + (m.net ? ' (' + (m.net > 0 ? '+' : '') + m.net + ')' : ''), 'play'];
   if (m.busy) return ['spiller ' + (BUSY[m.busy] || 'et spil'), 'play'];
   return [m.dnd ? 'vil ikke forstyrres' : 'i klubhuset', ''];
 }
@@ -414,6 +418,8 @@ function onStation(sn) {
   else if (sn.kind === 'shop') { goTo(sn); openShop(); }
   else if (sn.kind === 'wardrobe') { goTo(sn); openWardrobe(); }
   else if (sn.kind === 'scores') { goTo(sn); openScores(); }
+  else if (sn.kind === 'slot') send({ t: 'sopen', m: sn.machine });
+  else if (sn.kind === 'casino') { goTo(sn); openCasino(); }
   else if (sn.kind === 'door') { goTo(sn); openMenu(); }
   else if (sn.kind === 'sit') send({ t: 'sit', st: sn.id });
   else if (sn.kind === 'sound') { goTo(sn); setSound(!soundOn()); room.setSound(soundOn()); toast(soundOn() ? 'Lyden er slået til.' : 'Lyden er slået fra.'); }
@@ -565,6 +571,8 @@ function openScores() {
     ...board('Drab i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.k) || 0),
     ...board('Vundne runder i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.w) || 0),
     ...board('Sejre i EagleEye Commander', m => (m.stats && m.stats.ee && m.stats.ee.w) || 0),
+    ...board('Største gevinst på en slotmaskine', m => (m.stats && m.stats.slots && m.stats.slots.best) || 0),
+    ...board('Mest vundet i kasinoet (netto)', m => (m.stats && m.stats.slots ? m.stats.slots.won - m.stats.slots.bet : 0)),
     ...board('Flest omgange givet i baren', stat('rounds')),
     ...board('Største drillepind', stat('teased')),
     ...board('Mest drillet', stat('gotTeased')),
@@ -803,6 +811,64 @@ const meBefore = on.me;
 on.me = m => { meBefore(m); shopRefresh(); barRefresh(); };
 const welcomeBefore = on.welcome;
 on.welcome = m => { st.version = m.version; st.pushKey = m.push || ''; welcomeBefore(m); awayNow = null; reportVis(); pushSync(st.pushKey, send); };
+
+// ---------- the casino ----------
+const num = n => String(n).replace(/\B(?=(\d{3})+$)/g, '.'), signed = n => (n > 0 ? '+' : '') + num(n);
+// What the room shows of it: the jackpot over the pig machine and the board with who is up and down today.
+function casinoChanged() {
+  if (!room || !st.g) return;
+  const lines = [...st.mem.values()].filter(m => m.today && (m.today[0] || m.today[1])).map(m => [m.name, m.today[1] - m.today[0]]).sort((a, b) => b[1] - a[1]);
+  room.setCasino({ pot: st.pot || 0, lines });
+  if (sheet.kind === 'casino') openCasino();
+}
+// The board on the wall: the jackpot, and what everybody has staked and won, today and in all.
+function openCasino() {
+  const all = [...st.mem.values()], net = v => h('b', { class: v > 0 ? 'up' : v < 0 ? 'down' : '' }, signed(v));
+  const today = all.filter(m => m.today && (m.today[0] || m.today[1])).sort((a, b) => (b.today[1] - b.today[0]) - (a.today[1] - a.today[0]));
+  const ever = all.filter(m => m.stats && m.stats.slots && m.stats.slots.n).sort((a, b) => (b.stats.slots.won - b.stats.slots.bet) - (a.stats.slots.won - a.stats.slots.bet));
+  const row = (m, sub, a, b) => h('div', { class: 'cs-row' }, bustOf(m, 30), h('span', { class: 'n' }, m.name, h('small', {}, sub)), h('span', {}, num(a)), h('span', {}, num(b)), net(b - a));
+  const head = () => h('div', { class: 'cs-row head' }, h('span'), h('span'), h('span', {}, 'Satset'), h('span', {}, 'Vundet'), h('span', {}, 'Netto'));
+  const where = m => m.on && m.busy === 'slot' && MACHINES[m.slot] ? 'ved ' + MACHINES[m.slot].name + ' nu' : '';
+  const body = [
+    h('div', { class: 'cs-pot' }, h('span', {}, 'Jackpot på Sparegrisen'), h('b', {}, num(st.pot || 0))),
+    h('div', { class: 'sec' }, 'I dag'),
+    today.length ? h('div', {}, head(), today.map(m => row(m, where(m), m.today[0], m.today[1]))) : h('p', { class: 'empty' }, 'Ingen har spillet på maskinerne i dag.'),
+    h('div', { class: 'sec' }, 'I alt'),
+    ever.length ? h('div', {}, head(), ever.map(m => row(m, num(m.stats.slots.n) + ' spin · største gevinst ' + num(m.stats.slots.best), m.stats.slots.bet, m.stats.slots.won))) : h('p', { class: 'empty' }, 'Ingen har prøvet maskinerne endnu.'),
+    h('div', { class: 'sec' }, 'Maskinerne'),
+    h('div', { class: 'row' }, MACHINE_IDS.map(id => h('button', { class: 'btn alt', onclick: () => send({ t: 'sopen', m: id }) }, MACHINES[id].name))),
+    h('p', { class: 'hint' }, 'Alle i klubhuset ser hvert spin, mens det sker: tallet, der stiger op fra den, der spiller, er gevinsten eller tabet, og tallet over navnet er, hvad de står til.'),
+  ];
+  if (sheet.kind === 'casino' && sheet.isOpen) sheet.fill(body); else sheet.open({ title: 'Kasinoet', kind: 'casino', body });
+}
+// The server has let one walk up to a machine: open it.
+on.slot = m => {
+  if (!MACHINES[m.m]) return;
+  if (st.slot) st.slot.close();
+  const view = st.slot = slotView(m.m, { send, chips: () => st.me.chips, hold: v => { st.hold = v; $('#chipCount').textContent = v; }, release: d => { st.hold = null; updateMe(d > 0 ? -1 : d); } });
+  st.pot = m.pot;
+  sheet.open({ title: MACHINES[m.m].name, kind: 'slot', body: view.el, closed: () => { view.close(); if (st.slot === view) { st.slot = null; send({ t: 'sclose' }); } if (st.hold != null) { st.hold = null; updateMe(); } } });
+  view.init(m);
+};
+const later = (ms, f) => setTimeout(() => { if (st.g) f(); }, ms);
+on.spun = m => {
+  const mach = MACHINES[m.m], me = st.mem.get(mine());
+  if (!mach) return;
+  if (st.slot && st.slot.id === m.m) st.slot.spun(m); else { st.hold = null; updateMe(); }
+  room.spin(mine(), mach.station, m.was ? 0 : m.bet, m.win, m.net, mach.spinMs);
+  later(mach.spinMs, () => { if (me) { me.net = m.net; me.today = m.today; } st.pot = m.pot; casinoChanged(); renderFriends(); });
+};
+// somebody else's spin: seen in the room when their reels stop
+on.spin = m => {
+  const mach = MACHINES[m.m], x = st.mem.get(m.u);
+  if (!mach) return;
+  room.spin(m.u, mach.station, m.bet, m.win, m.net, mach.spinMs);
+  later(mach.spinMs, () => { if (x) { x.net = m.net; x.today = m.today; } st.pot = m.pot; if (st.slot) st.slot.setPot(m.pot); casinoChanged(); renderFriends(); });
+};
+const errBefore = on.err;
+on.err = m => { if (m.re === 'spin' && st.slot) st.slot.refused(); errBefore(m); };
+const roomBefore = on.room;
+on.room = m => { st.pot = m.pot || 0; st.slot = null; st.hold = null; roomBefore(m); casinoChanged(); };
 
 // ---------- notifications ----------
 // The server only sends a notification to somebody who is not looking: the page tells it whether it is in front

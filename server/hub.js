@@ -10,6 +10,7 @@ import { randomCode } from './store.js';
 import { GameError as EagleEyeError } from './eagleeye.js';
 import { ArenaError, FAST } from './arena.js';
 import { MODES, TEAMS } from '../public/shooter/rules.js';
+import { MACHINES, spin as slotSpin } from '../public/shared/slots.js';
 
 export class LobbyError extends Error {}
 const fail = msg => { throw new LobbyError(msg); };
@@ -176,9 +177,10 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
   function member(g, uid) {
     const u = store.users.get(uid), p = rooms.has(g.id) ? rooms.get(g.id).get(uid) : null;
-    const out = { id: uid, name: u.name, role: roleOf(g, uid), look: u.look, chips: u.chips, dnd: !!u.dnd, seen: u.seen, stats: u.stats, on: !!p };
+    const out = { id: uid, name: u.name, role: roleOf(g, uid), look: u.look, chips: u.chips, dnd: !!u.dnd, seen: u.seen, stats: u.stats, on: !!p, today: todayOf(u) };
     if (p) {
       out.p = pathFrom(p.path, (now() - p.t0) / 1000 * ROOM.speed); out.sit = p.sit; out.open = p.open; out.busy = p.busy;
+      if (p.busy === 'slot') { out.slot = p.slot; out.net = p.net; }
       out.fx = Object.entries(p.fx).filter(e => e[1] > now()).map(e => [e[0], e[1] - now()]);
       out.drink = p.drink && p.drink[1] > now() ? [p.drink[0], p.drink[1] - now()] : null; out.buzz = buzzOf(uid);
     }
@@ -239,7 +241,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   function release(g, p) {
     if (!p.busy) return;
     const was = p.busy;
-    p.busy = ''; standUp(g.id, p);
+    p.busy = ''; p.slot = ''; standUp(g.id, p);
     if (was === 'shooter' && arena) arena.leave(p.u.id);
     cast(g.id, { t: 'mem', m: { id: p.u.id, busy: '' } });
   }
@@ -464,6 +466,13 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     cast(g.id, { t: 'mem', m: { id: p.u.id, open: 0 } });
   }
 
+  // ---------- the casino ----------
+  // The slot machines: the avatar stands at the machine, the server spins and pays, and everybody in the clubhouse
+  // is told what was staked and won. The pig's jackpot belongs to the group and grows with every stake on it.
+  const potOf = g => Math.floor(g.jack ?? MACHINES.pig.seed);
+  // what somebody has staked and won at the machines today: [staked, won]
+  const todayOf = u => u.casino && u.casino.day === today() ? [u.casino.bet, u.casino.won] : [0, 0];
+
   // ---------- messages to people who are away ----------
   // Somebody whose turn it is, and who is not looking at this clubhouse, gets a notification on the devices where
   // they have asked for it: once per table until they have been back at it, and only when a person waits for them.
@@ -606,13 +615,13 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       leaveRoom(conn);
       if (!rooms.has(g.id)) rooms.set(g.id, new Map());
       const spot = nearestFree(ROOM.spawn[0] + (rand() - 0.5) * 2, ROOM.spawn[1] + rand() * 0.9);
-      rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, busy: '', fx: {}, drink: null });
+      rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, busy: '', slot: '', net: 0, fx: {}, drink: null });
       conn.gid = g.id;
       cast(g.id, { t: 'on', m: member(g, u.id) }, u.id);
       conn.send(J({
         t: 'room', g: { id: g.id, name: g.name, owner: g.owner, invite: isAdmin(g, u.id) ? g.invite : '' },
         mem: Object.keys(g.members).map(id => member(g, +id)), chat: g.chat.slice(-LIMITS.chatSend),
-        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], now: now(),
+        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), now: now(),
       }));
     },
 
@@ -962,6 +971,56 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
     topen(conn, m) { const p = need(conn), g = groupOf(conn), t = tableOf(g, m.id); if (p.open && p.open !== t.id) closeTable(g, p); pinged.delete(g.id + ':' + t.id + ':' + conn.user.id); openTable(g, p, t); },
     tclose(conn) { const p = presOf(conn); if (p) closeTable(groupOf(conn), p); },
+
+    // ---- the slot machines ----
+    // Walk up to a machine. Whoever stands at one is seen there by the others, with what they are up or down.
+    sopen(conn, m) {
+      const p = need(conn), g = groupOf(conn), u = conn.user, mach = pick(MACHINES, m.m) || fail('Den maskine findes ikke.');
+      if (p.open) closeTable(g, p);
+      if (p.busy && p.busy !== 'slot') release(g, p);
+      if (p.busy !== 'slot' || p.slot !== mach.id) {
+        const st = STATION[mach.station];
+        if (p.busy !== 'slot') p.net = 0;
+        p.busy = 'slot'; p.slot = mach.id;
+        walk(g.id, p, [st.use[0] + (rand() - 0.5) * 0.5, st.use[1] + rand() * 0.25]);
+        cast(g.id, { t: 'mem', m: { id: u.id, busy: 'slot', slot: mach.id, net: p.net } });
+      }
+      const fs = u.slots && u.slots[mach.id];
+      conn.send(J({ t: 'slot', m: mach.id, pot: potOf(g), free: fs ? fs.free : 0, bet: fs ? fs.bet : 0, net: p.net }));
+    },
+    sclose(conn) { const p = presOf(conn); if (p && p.busy === 'slot') release(groupOf(conn), p); },
+    // One spin. The stake is taken, the reels stop where the server's dice say, and the win is paid at once; free
+    // spins (won on the five-reel machine) cost nothing and are kept on the account until they are used.
+    spin(conn, m) {
+      const p = need(conn), g = groupOf(conn), u = conn.user, mach = pick(MACHINES, m.m);
+      if (!mach || p.busy !== 'slot' || p.slot !== mach.id) fail('Gå hen til maskinen først.');
+      if (now() - (conn.spinAt || 0) < 400) return;                          // faster than any reel turns
+      conn.spinAt = now();
+      const slots = u.slots || (u.slots = {}), fs = slots[mach.id], free = !!(fs && fs.free > 0), bet = free ? fs.bet : m.bet;
+      if (!free && !mach.bets.includes(bet)) fail('Den indsats tager maskinen ikke.');
+      if (!free && u.chips < bet) fail('Du har ikke jetoner nok.');
+      const r = slotSpin(mach.id, bet, rand, free);
+      let win = r.win, jack = 0;
+      if (!free) { u.chips -= bet; if (mach.share) g.jack = Math.round(((g.jack ?? mach.seed) + bet * mach.share) * 100) / 100; }
+      if (r.jack) {                                                          // the whole pot at the highest stake, a share of it at a lower one
+        jack = Math.floor(potOf(g) * bet / mach.bets[mach.bets.length - 1]);
+        g.jack = Math.max(mach.seed, Math.round((g.jack - jack) * 100) / 100); win += jack;
+      }
+      u.chips += win;
+      if (free) { fs.free--; if (fs.free <= 0) delete slots[mach.id]; }
+      else if (r.frees) slots[mach.id] = { free: r.frees, bet };
+      const st = u.stats.slots || (u.stats.slots = { n: 0, bet: 0, won: 0, best: 0 }), day = today();
+      st.n++; st.won += win; if (!free) st.bet += bet; if (win > st.best) st.best = win;
+      if (!u.casino || u.casino.day !== day) u.casino = { day, bet: 0, won: 0 };
+      u.casino.won += win; if (!free) u.casino.bet += bet;
+      p.net += win - (free ? 0 : bet);
+      if (mach.share) store.saveGroup(g);
+      conn.send(J({ t: 'spun', m: mach.id, stops: r.stops, lines: r.lines, bet, win, jack, frees: r.frees, free: slots[mach.id] ? slots[mach.id].free : 0, was: free ? 1 : 0, pot: potOf(g), chips: u.chips, net: p.net, today: todayOf(u) }));
+      pushMe(u);
+      cast(g.id, { t: 'spin', u: u.id, m: mach.id, bet: free ? 0 : bet, win, net: p.net, pot: potOf(g), today: todayOf(u) }, u.id);
+      if (jack) addChat(g, null, u.name + ' tømte ' + mach.name + ' for ' + jack + ' jetoner!');
+      else if (win >= 200 && win >= bet * 40) addChat(g, null, u.name + ' vandt ' + win + ' jetoner på ' + mach.name + '.');
+    },
 
     // ---- notifications ----
     // Whether the page is in front of somebody: a hidden tab, a window behind another, nobody touching it.

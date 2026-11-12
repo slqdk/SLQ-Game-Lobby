@@ -380,3 +380,46 @@ label small { color: var(--mute); font-weight: 500; }
 .die.rolled { animation: ld-roll .4s ease-out; }
 @keyframes ld-roll { 0% { transform: rotate(-220deg) scale(.4); } 70% { transform: rotate(12deg) scale(1.08); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .ld .tok.can { animation: none !important; box-shadow: 0 2px 0 var(--ink), 0 0 0 4px rgba(255, 255, 255, .9); } }
+
+/* ---------- slot machines and the casino board ---------- */
+.sl { --sc: min(96px, calc((100vw - 96px) / 3)); display: grid; gap: 12px; justify-items: center; }
+.sl.five { --sc: min(78px, calc((100vw - 92px) / 5)); }
+.sl-win { position: relative; display: flex; gap: 6px; padding: 10px; border-radius: 18px; background: #171220; border: 3px solid var(--ink); box-shadow: 0 5px 0 var(--ink), inset 0 0 0 3px #ffd45e; }
+.sl-robot .sl-win { box-shadow: 0 5px 0 var(--ink), inset 0 0 0 3px #7fe0c3; }
+.sl-pig .sl-win { box-shadow: 0 5px 0 var(--ink), inset 0 0 0 3px #ff9fc0; }
+.sl-reel { width: var(--sc); height: calc(var(--sc) * 3); overflow: hidden; border-radius: 10px; background: linear-gradient(#ddd5c3, #fffaf0 24%, #fffaf0 76%, #ddd5c3); }
+.sl-strip { will-change: transform; }
+.sl-cell { height: var(--sc); display: grid; place-items: center; border-radius: 10px; }
+.sl-cell svg { width: 78%; height: 78%; display: block; }
+.sl-cell.hit { background: rgba(255, 196, 60, .6); animation: sl-hit .45s ease-in-out 5 alternate; }
+@keyframes sl-hit { to { transform: scale(1.13); } }
+.sl-line { position: absolute; left: 3px; right: 3px; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: rgba(226, 64, 58, .8); pointer-events: none; }
+.sl-status { min-height: 1.5em; }
+.sl-status.jack { font-size: 1.45rem; animation: sl-hit .4s ease-in-out infinite alternate; }
+.sl-bets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; }
+.sl-lbl { color: var(--mute); font-weight: 600; margin-right: 4px; }
+.sl-go { width: min(100%, 340px); }
+.sl-info b.up, .cs-row b.up { color: #7fe08a; }
+.sl-info b.down, .cs-row b.down { color: #ff8f80; }
+.sl-info b.pot { color: var(--amber); }
+.sl-pays { width: 100%; }
+.sl-pays summary { cursor: pointer; font-weight: 600; padding: 8px 0; color: var(--mute); }
+.sl-pay { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+.sl-pay .sy { display: flex; gap: 3px; flex: none; }
+.sl-pay .sy i { width: 30px; height: 30px; border-radius: 7px; background: #fffaf0; display: grid; place-items: center; }
+.sl-pay .sy i.any { background: rgba(255, 255, 255, .1); }
+.sl-pay .sy svg { width: 24px; height: 24px; display: block; }
+.sl-pay b { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sl-lines { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 10px 0; }
+.sl-lines .ln { display: grid; gap: 2px; }
+.sl-lines .ln div { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; }
+.sl-lines .ln i { height: 6px; border-radius: 2px; background: rgba(255, 255, 255, .12); }
+.sl-lines .ln i.on { background: var(--amber); }
+.cs-pot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-radius: 16px; background: #2a1830; border: 2px solid #c9983f; font-weight: 600; }
+.cs-pot b { font-size: 1.5rem; color: #ffe9a8; font-variant-numeric: tabular-nums; }
+.cs-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 64px 64px 68px; align-items: center; gap: 8px; padding: 5px 2px; font-variant-numeric: tabular-nums; }
+.cs-row > span, .cs-row > b { text-align: right; }
+.cs-row .n { text-align: left; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-row .n small { display: block; color: var(--mute); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.cs-row canvas { border-radius: 50%; border: 2px solid var(--ink); }
+.cs-row.head { color: var(--mute); font-size: .8rem; font-weight: 600; padding-bottom: 0; }

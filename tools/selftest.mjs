@@ -19,7 +19,7 @@ import { createHub } from '../server/hub.js';
 import { createEagleEye } from '../server/eagleeye.js';
 import { createArena } from '../server/arena.js';
 import { buildNav } from '../server/arena-nav.js';
-import { buildWorld, nullThree, EYE } from '../public/shooter/world.js';
+import { buildWorld, nullThree, EYE, RAD, STEP } from '../public/shooter/world.js';
 import { WEAPONS, MODES, ARENA, TEAMS, FLAG, dirAim, aimDir, falloff, zoneAt, flyShot, newShot } from '../public/shooter/rules.js';
 import { ECON, PRANKS, ITEMS, DRINKS, BAR, LOOK, cleanLook, randomLook } from '../public/shared/defs.js';
 import { ROOM, STATIONS, STATION, isFree, findPath, pathLen } from '../public/shared/room.js';
@@ -88,7 +88,7 @@ let A, B, C, tokA, tokB, tokC, GID, INV;
   check('installationskoden har formen XXXX-XXXX', /^[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(CODE), CODE);
   check('forkert kode afvises', /Koden passer ikke/.test(throws(() => hub.api.register({ name: 'Søren', pass: 'hemmelig1', code: 'NOPE' }, '1.1.1.1'))));
   check('for kort kodeord afvises', /mindst 6/.test(throws(() => hub.api.register({ name: 'Søren', pass: '123', code: CODE }, '1.1.1.1'))));
-  check('mærkeligt navn afvises', /Navnet skal/.test(throws(() => hub.api.register({ name: '<b>x</b>', pass: 'hemmelig1', code: CODE }, '1.1.1.1'))));
+  check('mærkeligt navn afvises', /Brugernavnet skal/.test(throws(() => hub.api.register({ name: '<b>x</b>', pass: 'hemmelig1', code: CODE }, '1.1.1.1'))));
   const r = hub.api.register({ name: 'Søren', pass: 'hemmelig1', code: CODE.toLowerCase().replace('-', ' ') }, '1.1.1.1');
   tokA = r.token;
   check('konto oprettet med installationskoden', r.name === 'Søren' && /^\d+\.\d+\.[\w-]{32}$/.test(tokA));
@@ -505,7 +505,7 @@ section('skydespillet: banen, og hvor robotterne kan gå');
   const N = nullThree(), w = buildWorld(N, N, N);
   const sig = o => crypto.createHash('sha1').update(JSON.stringify(o)).digest('hex').slice(0, 16);
   // Is the arena changed on purpose, this number must be changed with it.
-  check('banen har de vægge, gulve og lofter, den plejer', w.colliders.length === 1017 && w.surfaces.length === 534 && w.ceilings.length === 5 && sig([w.colliders, w.surfaces, w.ceilings]) === 'f2574a4bf0300b1c', [w.colliders.length, w.surfaces.length, w.ceilings.length, sig([w.colliders, w.surfaces, w.ceilings])].join(' '));
+  check('banen har de vægge, gulve og lofter, den plejer', w.colliders.length === 1223 && w.surfaces.length === 855 && w.ceilings.length === 5 && sig([w.colliders, w.surfaces, w.ceilings]) === '3b34c9baaa61d24a', [w.colliders.length, w.surfaces.length, w.ceilings.length, sig([w.colliders, w.surfaces, w.ceilings])].join(' '));
   // the browser builds it with the real three.js: the same numbers must come out
   const THREE = await import('../public/shooter/vendor/three.module.min.js'), { makeTextures } = await import('../public/shooter/tex.js');
   const hadDoc = 'document' in globalThis;
@@ -552,6 +552,44 @@ section('skydespillet: banen, og hvor robotterne kan gå');
     }
     check('op ad trappen i det ' + name + ' tårn, i gang og i løb, med slinger til begge sider', up);
     check('og ned igen', down);
+  }
+  // the stairs under the two middle towers, from the bottom of the shaft to the door and back
+  for (const [name, x] of [['venstre', -16], ['højre', 16]]) {
+    const s = x < 0 ? 1 : -1, top = nav.near(x + s * 4.8, 0, 0, 3), bottom = nav.near(x - s * 2.5, -3.8, s * 3, 3);
+    let up = top >= 0 && bottom >= 0, down = up;
+    if (up) for (const o of [{ sprint: false, dt: 1 / 60, drift: 0.25 }, { sprint: true, dt: 1 / 60, drift: -0.25 }, { sprint: false, dt: 1 / 30, drift: 0.2 }]) {
+      if (!walk(bottom, top, o)) up = false;
+      if (!walk(top, bottom, o)) down = false;
+    }
+    check('op ad kældertrappen under det ' + name + ' midttårn, og ned igen', up && down, [top, bottom, up, down].join(' '));
+  }
+  // Nobody falls down beside the stairs. From every place one can stand on a tower's stairs and deck (and, in the
+  // middle towers, on the stairs to the cellar) every step to the side is tried: it may lead down into the
+  // stairwell, onto steps further down, but never to the floor of the tower or the shaft.
+  {
+    const G = 0.1, stopped = (x, z, y) => { for (const c of w.colliders) { if (c.top <= y + STEP || c.base >= y + 1.9) continue; const qx = Math.min(Math.max(x, c.minX), c.maxX), qz = Math.min(Math.max(z, c.minZ), c.maxZ); if ((x - qx) ** 2 + (z - qz) ** 2 < RAD * RAD - 1e-9) return true; } return false; };
+    for (const [name, tx, tz, lo, floor] of [['røde', -30, -46, 0.2, 0], ['blå', 30, 46, 0.2, 0], ['venstre midt', -16, 0, -3.9, -3.8], ['højre midt', 16, 0, -3.9, -3.8]]) {
+      const seen = new Set(), q = [], bad = [];
+      let deep = 0;
+      const add = (i, j, y) => { const k = i + ',' + j + ',' + Math.round(y * 4); if (!seen.has(k)) { seen.add(k); q.push([i, j, y]); } };
+      for (const s of w.surfaces) {
+        const mx = (s.minX + s.maxX) / 2, mz = (s.minZ + s.maxZ) / 2;
+        if (s.dir !== undefined || Math.hypot(mx - tx, mz - tz) > 6.4 || s.h < lo || s.h > 8.1) continue;
+        const i = Math.round((mx - tx) / G), j = Math.round((mz - tz) / G);
+        if (Math.abs(w.groundUnder(tx + i * G, tz + j * G, s.h) - s.h) < 0.01 && !stopped(tx + i * G, tz + j * G, s.h)) add(i, j, s.h);
+      }
+      while (q.length) {
+        const [i, j, y] = q.pop();
+        for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = tx + (i + di) * G, z = tz + (j + dj) * G;
+          if (Math.hypot(x - tx, z - tz) > 6.4 || stopped(x, z, y)) continue;
+          const gy = w.groundUnder(x, z, y);
+          if (gy < y - 0.6) { deep = Math.max(deep, y - gy); if (Math.abs(gy - floor) < 0.05) bad.push([(x - tx).toFixed(1), (z - tz).toFixed(1), y.toFixed(2)].join('/')); }
+          else if (gy >= lo - 0.01) add(i + di, j + dj, gy);
+        }
+      }
+      check('ved trapperne i det ' + name + ' tårn kan man ikke falde ned ved siden af (' + seen.size + ' steder prøvet)', seen.size > 9000 && bad.length === 0 && deep < 3.2, bad.length + ' steder, fx ' + bad.slice(0, 4).join(' ') + ' · dybeste fald ' + deep.toFixed(2));
+    }
   }
   // bullets
   const pistol = WEAPONS.pistol, d = aimDir(...dirAim(0.3, 0.1, -1));
@@ -1160,7 +1198,9 @@ section('kasinoet: blackjack');
 
   // ---- at the table in the clubhouse ----
   for (const x of [A, B, C]) x.send({ t: 'tclose' });
-  const idA = A.me().id, idB = B.me().id, uA = store.users.get(idA), uB = store.users.get(idB), g = store.groups.get(GID), a0 = uA.chips, b0 = uB.chips;
+  const idA = A.me().id, idB = B.me().id, uA = store.users.get(idA), uB = store.users.get(idB), g = store.groups.get(GID);
+  uA.chips = uB.chips = 20000;          // enough for sixty rounds whatever the cards are
+  const a0 = uA.chips, b0 = uB.chips;
   const bj = x => x.last('bj').v, memOf = (x, id) => x.got.filter(m => m.t === 'mem' && m.m.id === id).pop().m;
   mark(C); A.send({ t: 'bjsit' });
   check('man sætter sig ved blackjackbordet, og de andre ser det', bj(A).seats[0].u === idA && memOf(C, idA).busy === 'bj' && memOf(C, idA).net === 0 && C.since('mv')[0].sit.join() === 'blackjack,0' && C.last('bjs').s.n === 1);

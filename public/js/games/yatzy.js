@@ -8,7 +8,7 @@ import { face, list, waiting } from './common.js';
 const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 const keep = new Map();          // table id -> { key, held }: the dice this browser has put aside in the turn that is on
 
-function die(v, cls, onclick) {
+export function die(v, cls, onclick) {
   const d = h('button', { class: 'die ' + cls, disabled: !onclick, 'aria-label': v ? 'Terning ' + v : 'Terning', onclick });
   for (let i = 0; i < 9; i++) d.append(h('i', { class: v && PIPS[v].includes(i) ? 'on' : '' }));
   return d;

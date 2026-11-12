@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import crypto from 'node:crypto';
+import meyer, { rankOf, rankName, chance as meyerChance, LIVES, MEYER } from '../public/shared/games/meyer.js';
 import yatzy, { scoreOf, sums as yzSums, FIELDS } from '../public/shared/games/yatzy.js';
 import poker, { handValue, handName, equity, START as PSTART, THINK, SHOW } from '../public/shared/games/poker.js';
 import { spawn } from 'node:child_process';
@@ -865,6 +866,65 @@ section('yatzy');
   clock += 49 * 3600e3; other.send({ t: 'tclaim', id: id2 });
   check('efter 48 timer spilles der videre uden den, der ikke slår', tbl(id2).phase === 'play' && tbl(id2).state.gone[slow] && tbl(id2).state.turn !== slow && tbl(id2).seats[slow].left === 1);
   for (const c of [A, B, C]) c.send({ t: 'tleave', id: id2 });
+}
+
+section('meyer');
+{
+  const row = [[3, 2], [4, 1], [6, 5], [1, 1], [6, 6], [3, 1], [2, 1]].map(d => rankOf(d[0], d[1]));
+  check('slagene står i den rigtige rækkefølge: 32 lavest, så parrene, Lille Meyer og Meyer', row.every((r, i) => i === 0 || r > row[i - 1]) && rankOf(1, 2) === MEYER && rankName(rankOf(5, 6)) === '65' && rankName(rankOf(4, 4)) === 'Par 4');
+  check('to terninger giver Meyer to ud af 36 gange', Math.abs(meyerChance(MEYER) - 2 / 36) < 1e-9 && meyerChance(0) === 1);
+  let s = meyer.setup(3, { first: 0 }, rnd);
+  const no = (seat, a) => { try { meyer.act(s, seat, a, rnd); return false; } catch { return true; } };
+  check('den første i en runde skal slå og kigge', no(0, { lift: true }) && no(0, { blind: true }) && no(1, { roll: true }));
+  meyer.act(s, 0, { roll: true }, rnd);
+  check('kun den, der slog, ser slaget', Array.isArray(meyer.view(s, 0).mine) && meyer.view(s, 1).mine === 1 && meyer.view(s, -1).mine === 1);
+  s.mine = [4, 3]; meyer.act(s, 0, { say: rankOf(5, 4) }, rnd);                       // a lie: 43 under the cup, "54" said
+  check('man må lyve, og ingen ser, hvad der ligger under bægeret', s.turn === 1 && s.prev.said === rankOf(5, 4) && meyer.view(s, 1).cup === 1 && meyer.view(s, 0).cup === 1);
+  meyer.act(s, 1, { roll: true }, rnd); s.mine = [6, 1];
+  check('man skal sige det samme eller højere', no(1, { say: rankOf(5, 3) }));
+  meyer.act(s, 1, { say: rankOf(6, 1) }, rnd);                                        // true
+  meyer.act(s, 2, { lift: true }, rnd);
+  check('løfter man, og det passede, mister man selv et liv', s.phase === 'show' && !s.last.lie && s.last.loser === 2 && s.lives[2] === LIVES - 1 && s.last.cup.join() === '6,1');
+  meyer.act(s, -1, { next: true }, rnd);
+  check('taberen begynder næste runde', s.turn === 2 && s.phase === 'turn' && !s.prev);
+  meyer.act(s, 2, { roll: true }, rnd); s.mine = [3, 2]; meyer.act(s, 2, { say: MEYER }, rnd);     // a lie, and the big one
+  meyer.act(s, 0, { lift: true }, rnd);
+  check('en løgn bliver afsløret, og Meyer koster to liv', s.last.lie && s.last.loser === 2 && s.lives[2] === LIVES - 3 && s.last.lost === 2);
+  meyer.act(s, -1, { next: true }, rnd);
+  meyer.act(s, 2, { roll: true }, rnd); s.mine = [4, 1]; meyer.act(s, 2, { say: rankOf(4, 1) }, rnd);
+  meyer.act(s, 0, { blind: true }, rnd);
+  check('«det eller derover»: bægeret går videre uset med samme melding', s.turn === 1 && s.prev.blind && s.prev.said === rankOf(4, 1) && s.prev.seat === 0);
+  s.cup = [3, 2]; meyer.act(s, 1, { lift: true }, rnd);
+  check('lå der mindre under det usete slag, mister den, der sendte det videre', s.last.loser === 0 && s.last.blind);
+  // robots: every game ends with one alive, and the hard ones win more than the easy ones
+  const wins = [0, 0, 0, 0]; let ended = 0;
+  for (let g = 0; g < 90; g++) {
+    const lv = [0, 1, 2, 3, 4, 5].map(i => [1, 2, 3][(i + g) % 3]); s = meyer.setup(6, { first: g }, rnd); let steps = 0;
+    while (!meyer.result(s) && steps++ < 20000) { if (s.phase === 'show') meyer.act(s, -1, { next: true }, rnd); else meyer.act(s, s.turn, meyer.bot(s, s.turn, lv[s.turn], rnd), rnd); }
+    if (meyer.result(s) && s.lives.filter(x => x > 0).length === 1) { ended++; wins[lv[s.winner]]++; }
+  }
+  check('robotterne spiller til én er tilbage, og de svære vinder flest', ended === 90 && wins[3] > wins[1], wins.join(' '));
+
+  // at the dice table: two people and a robot, with the clock
+  for (const c of [A, B, C]) c.send({ t: 'tclose' });
+  const tv = c => c.last('tv').tv, tbl = id => store.groups.get(GID).tables[id];
+  mark(A, B, C);
+  A.send({ t: 'tnew', game: 'meyer', stake: 0 }); const id = tv(A).id;
+  B.send({ t: 'tjoin', id }); A.send({ t: 'tbot', id, level: 1 }); A.send({ t: 'tstart', id });
+  check('meyer ved terningebordet', tv(A).phase === 'play' && tv(A).v.lives.join() === '6,6,6' && tv(A).clock > 0);
+  const who = [A, B], first = tbl(id).state.turn;
+  if (first < 2) {
+    who[first].send({ t: 'tact', id, a: { roll: true } });
+    check('den, der slog, får sit slag at se; den anden gør ikke', Array.isArray(tv(who[first]).v.mine) && tv(who[1 - first]).v.mine === 1);
+    clock += 41000; hub.tick();
+    check('siger man ikke noget i tide, bliver sandheden sagt for en', tbl(id).state.prev && tbl(id).state.prev.seat === first && tbl(id).state.away[first] === 1);
+  }
+  for (let k = 0; k < 3000 && tbl(id).phase === 'play'; k++) {
+    const st = tbl(id).state; clock += 500;
+    if (st.phase === 'show') { clock += 7000; hub.tick(); } else if (st.turn < 2) who[st.turn].send({ t: 'tact', id, a: meyer.bot(st, st.turn, 3, rnd) });
+  }
+  check('spillet ender med én vinder', tbl(id).phase === 'over' && tbl(id).state.lives.filter(x => x > 0).length === 1 && A.me().stats.meyer.p === 1);
+  for (const c of [A, B]) c.send({ t: 'tleave', id });
 }
 
 section('glemt kodeord');

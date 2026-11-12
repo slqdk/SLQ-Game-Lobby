@@ -2,9 +2,10 @@
 import c4 from './c4.js';
 import poker from './poker.js';
 import yatzy from './yatzy.js';
+import meyer from './meyer.js';
 
-export const GAMES = { c4, poker, yatzy };
+export const GAMES = { c4, poker, yatzy, meyer };
 export const SOON = {
-  ludo: 'Ludo', meyer: 'Meyer',
+  ludo: 'Ludo',
 };
 export { GameError } from './base.js';

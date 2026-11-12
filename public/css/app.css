@@ -302,3 +302,27 @@ label small { color: var(--mute); font-weight: 500; }
 .pk-raise { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
 .pk-raise input { width: 100%; accent-color: var(--amber); min-height: 32px; }
 @media (max-width: 520px) { .pk-wrap { padding: 60px 34px 54px; } .pk-seat { width: 78px; } .card { width: 30px; height: 44px; } .card b { font-size: .9rem; } .card i { font-size: .95rem; } .pk-seat .who span { max-width: 70px; } }
+
+/* ---------- yatzy ---------- */
+.dice { display: flex; justify-content: center; gap: 10px; padding: 6px 0 2px; }
+.die { width: 52px; height: 52px; border-radius: 12px; background: #fbf7ee; border: 2px solid var(--ink); box-shadow: 0 4px 0 var(--ink); display: grid; grid-template-columns: repeat(3, 1fr); padding: 7px; gap: 2px; transition: transform .1s; }
+.die i { border-radius: 50%; } .die i.on { background: #1d1a22; }
+.die:disabled { cursor: default; }
+.die.held { transform: translateY(8px); background: #ffe2a8; box-shadow: 0 1px 0 var(--ink), 0 0 0 3px var(--amber); }
+.hint.center { text-align: center; }
+.yz { display: grid; grid-template-columns: minmax(96px, 1.3fr) repeat(var(--cols), minmax(0, 1fr)); gap: 2px; font-size: .92rem; }
+.yz .f { padding: 5px 8px; background: var(--panel2); border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yz .f.head { background: none; }
+.yz .c { display: grid; place-items: center; min-height: 30px; background: var(--panel2); border-radius: 6px; border: 0; color: inherit; font: inherit; font-variant-numeric: tabular-nums; padding: 0; }
+.yz .c.me { background: #3d3355; }
+.yz .c.head { background: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 0 4px; min-width: 0; }
+.yz .c.head canvas { border-radius: 50%; border: 2px solid var(--ink); }
+.yz .c.head b { font-size: .78rem; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yz .c.head.turn canvas { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(255, 179, 71, .35); }
+.yz .c.head.gone { opacity: .4; }
+.yz .c.new { color: var(--teal); font-weight: 700; }
+.yz .c.pick { background: var(--amber); color: var(--amber-ink); font-weight: 700; cursor: pointer; box-shadow: 0 2px 0 var(--ink); }
+.yz .c.pick.zero { background: #5a4d75; color: var(--mute); font-weight: 500; }
+.yz .f.sum, .yz .c.sum { font-size: .82rem; color: var(--mute); }
+.yz .f.total, .yz .c.total { font-weight: 700; color: var(--amber); }
+@media (max-width: 520px) { .die { width: 46px; height: 46px; } .yz { font-size: .85rem; } }

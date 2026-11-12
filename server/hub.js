@@ -823,6 +823,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (GAMES[t.game].clock) fail('Her passer uret selv på tiden.');
       if (turn === seat || turn < 0 || t.seats[turn].bot) fail('Det er ikke den anden, der skal rykke.');
       if (now() - t.turnAt < ECON.claimHours * HOUR) fail('Du kan tage sejren, når den anden har haft ' + ECON.claimHours + ' timer til sit træk.');
+      if (GAMES[t.game].drop) return giveUp(g, t, turn);          // more than two can play on: the slow one is out, the game goes on
       finish(g, t, { win: [seat], draw: false, why: 'time', by: turn });
     },
 

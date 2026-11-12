@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import crypto from 'node:crypto';
+import yatzy, { scoreOf, sums as yzSums, FIELDS } from '../public/shared/games/yatzy.js';
 import poker, { handValue, handName, equity, START as PSTART, THINK, SHOW } from '../public/shared/games/poker.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -804,6 +805,66 @@ section('poker: et bord i klubhuset');
   winner.send({ t: 'tagain', id: id2 });
   check('en ny turnering kræver, at ingen er gået', /gået fra bordet/.test(winner.err()));
   for (const c of [A, C]) c.send({ t: 'tleave', id: id2 });
+}
+
+section('yatzy');
+{
+  const T = [['ones', [1, 1, 3, 4, 1], 3], ['sixes', [6, 6, 6, 6, 6], 30], ['pair', [3, 3, 5, 5, 6], 10], ['pair', [1, 2, 3, 4, 5], 0], ['twopair', [3, 3, 5, 5, 6], 16], ['twopair', [3, 3, 3, 3, 6], 0], ['three', [4, 4, 4, 2, 4], 12],
+    ['four', [4, 4, 4, 2, 4], 16], ['small', [1, 2, 3, 4, 5], 15], ['small', [2, 3, 4, 5, 6], 0], ['large', [2, 3, 4, 5, 6], 20], ['house', [2, 2, 5, 5, 5], 19], ['house', [5, 5, 5, 5, 5], 0], ['chance', [1, 2, 3, 4, 6], 16], ['yatzy', [4, 4, 4, 4, 4], 50], ['yatzy', [4, 4, 4, 4, 5], 0]];
+  check('hvert felt giver de point, det skal', T.every(([f, d, p]) => scoreOf(f, d) === p));
+  check('bonus på 50 fra 63 i den øverste halvdel', yzSums({ ones: 3, twos: 6, threes: 9, fours: 12, fives: 15, sixes: 18 }).total === 113 && yzSums({ ones: 3, twos: 6, threes: 9, fours: 12, fives: 15, sixes: 12, chance: 20 }).total === 77);
+  let s = yatzy.setup(2, { first: 1 }, rnd);
+  const no = (seat, a) => { try { yatzy.act(s, seat, a, rnd); return false; } catch { return true; } };
+  check('man kan ikke skrive noget, før man har slået, og ikke uden for tur', s.turn === 1 && no(1, { score: 'chance' }) && no(0, { roll: [] }));
+  yatzy.act(s, 1, { roll: [true, true, true, true, true] }, rnd);
+  check('første slag slår alle fem, uanset hvad man beder om', s.rolls === 1 && s.dice.every(d => d >= 1 && d <= 6) && s.held.every(h => !h));
+  const d0 = s.dice.slice(); yatzy.act(s, 1, { roll: [true, false, true, false, false] }, rnd);
+  check('gemte terninger bliver liggende', s.dice[0] === d0[0] && s.dice[2] === d0[2] && s.rolls === 2);
+  check('man kan ikke slå om uden at slå noget om', no(1, { roll: [true, true, true, true, true] }) && s.rolls === 2);
+  yatzy.act(s, 1, { roll: [] }, rnd);
+  check('efter tre slag skal der skrives', no(1, { roll: [] }) && s.rolls === 3);
+  const sum = s.dice.reduce((a, b) => a + b, 0); yatzy.act(s, 1, { score: 'chance' }, rnd);
+  check('slaget skrives, og turen går videre', s.cards[1].chance === sum && s.turn === 0 && s.rolls === 0 && s.last.field === 'chance');
+  yatzy.act(s, 0, { roll: [] }, rnd); yatzy.act(s, 0, { score: 'yatzy' }, rnd); yatzy.act(s, 1, { roll: [] }, rnd);
+  check('et felt kan kun bruges én gang', no(1, { score: 'chance' }));
+  // whole games of robots: every sheet is filled, and the better robots score more
+  const avg = [0, 0, 0, 0];
+  for (const level of [1, 3]) for (let g = 0; g < 14; g++) {
+    s = yatzy.setup(3, { first: g }, rnd); let moves = 0;
+    while (!yatzy.result(s) && moves++ < 2000) yatzy.act(s, s.turn, yatzy.bot(s, s.turn, level, rnd), rnd);
+    if (!yatzy.result(s) || !s.cards.every(c => FIELDS.every(f => f in c))) avg[0]++;
+    avg[level] += s.cards.reduce((a, c) => a + yzSums(c).total, 0) / 3 / 14;
+  }
+  check('robotterne fylder hele blokken, og den svære får flere point end den lette', avg[0] === 0 && avg[3] > avg[1] + 8 && avg[1] > 150, avg.map(x => x.toFixed(0)).join(' '));
+  // somebody leaves: the others go on; alone, one has won
+  s = yatzy.setup(3, { first: 0 }, rnd); yatzy.drop(s, 0, rnd);
+  check('går den, der har turen, får den næste den', s.turn === 1 && !yatzy.result(s));
+  yatzy.drop(s, 2, rnd);
+  check('er man alene tilbage, har man vundet', yatzy.result(s).win.join() === '1');
+
+  // at the dice table in the clubhouse: two people and a robot
+  for (const c of [A, B, C]) c.send({ t: 'tclose' });
+  const tv = c => c.last('tv').tv, tbl = id => store.groups.get(GID).tables[id];
+  mark(A, B, C);
+  A.send({ t: 'tnew', game: 'yatzy', stake: 0 });
+  const id = tv(A).id;
+  B.send({ t: 'tjoin', id }); A.send({ t: 'tbot', id, level: 2 }); A.send({ t: 'tstart', id });
+  check('yatzy ved terningebordet med en ven og en robot', tv(A).phase === 'play' && tv(A).seats.length === 3 && tv(A).seats[2].bot === 2 && tv(A).v.cards.length === 3);
+  const who = [A, B];
+  for (let k = 0; k < 400 && tbl(id).phase === 'play'; k++) { const st = tbl(id).state, i = st.turn; clock += 400; who[i].send({ t: 'tact', id, a: yatzy.bot(st, i, 2, rnd) }); }
+  const res = tbl(id).res;
+  check('spillet går til ende, robotten slår selv, og nogen vinder', tbl(id).phase === 'over' && !!res && (res.win.length >= 1 || res.draw) && tbl(id).state.cards.every(c => FIELDS.every(f => f in c)));
+  check('det tæller i tallene', A.me().stats.yatzy.p === 1 && B.me().stats.yatzy.p === 1);
+  for (const c of [A, B]) c.send({ t: 'tleave', id });
+  // a slow player can be passed after 48 hours, and the game goes on
+  A.send({ t: 'tnew', game: 'yatzy', stake: 0 }); const id2 = tv(A).id;
+  B.send({ t: 'tjoin', id: id2 }); C.send({ t: 'tjoin', id: id2 }); A.send({ t: 'tstart', id: id2 });
+  const slow = tbl(id2).state.turn, other = [A, B, C][(slow + 1) % 3];
+  other.send({ t: 'tclaim', id: id2 });
+  check('man kan ikke springe en over med det samme', /timer/.test(other.err()) && tbl(id2).state.turn === slow);
+  clock += 49 * 3600e3; other.send({ t: 'tclaim', id: id2 });
+  check('efter 48 timer spilles der videre uden den, der ikke slår', tbl(id2).phase === 'play' && tbl(id2).state.gone[slow] && tbl(id2).state.turn !== slow && tbl(id2).seats[slow].left === 1);
+  for (const c of [A, B, C]) c.send({ t: 'tleave', id: id2 });
 }
 
 section('glemt kodeord');

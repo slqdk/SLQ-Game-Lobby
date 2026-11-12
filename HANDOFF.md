@@ -1,6 +1,6 @@
 # SLQ Game Lobby — handoff
 
-Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is pull request #2 on top of it (it contains #1); v0.4.0 (poker) is a pull request on top of that (it contains both). Read this first when continuing in a new chat.
+Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is pull request #2 on top of it (it contains #1); v0.4.0 (poker) is pull request #3 on top of that; v0.5.0 (Yatzy) is a pull request on top of poker. Each contains the ones before it. Read this first when continuing in a new chat.
 
 - The code lives in **https://github.com/slqdk/SLQ-Game-Lobby** (public, branch `main`). Søren's server pulls from `main` with `lobby-update`, so `main` must always work; larger work goes on a branch and a pull request.
 - It runs in a Proxmox LXC behind Nginx Proxy Manager, which needs **Websockets Support** switched on (see the README).
@@ -29,7 +29,9 @@ Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, c
 
 **v0.4.0** adds poker at the card table (see "Poker" below).
 
-The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table), Yatzy and Meyer (dice table).
+**v0.5.0** adds Yatzy at the dice table (see "Yatzy" below).
+
+The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table) and Meyer (dice table).
 
 ## Decisions made without asking (tell Søren, change if he wants)
 
@@ -128,6 +130,14 @@ Søren chose Texas Hold'em. It is built as a **small tournament** (a "sit and go
 - Chips: the buy-ins go to the winner; the usual rewards on top (25 for winning, 5 for the others; 5 for beating robots). A tournament that is over in fewer than three moves per seat earns no reward.
 - Decisions made without asking: a tournament and not a loose table; winner takes all (no second prize); robots only at tables without a buy-in (as in 4 på stribe); everybody still in at the end shows their cards (no mucking); somebody who leaves loses their poker chips (they are taken out of play); the poker words are the English ones players use (fold, check, call, raise, all-in), the hands have Danish names.
 
+### Yatzy (v0.5.0)
+
+Five dice and the sheet most people in Denmark use (Søren did not answer "five or six dice", so five): the six upper fields with 50 extra from 63, one pair, two pairs, three and four of a kind, small straight (1-5, 15 points), large straight (2-6, 20), house, chance, Yatzy (50). Two to four players, with or without a stake, robots at tables without one.
+
+- `public/shared/games/yatzy.js`: moves are `{roll: [five booleans: which dice to keep]}` (the first throw of a turn throws all five; three throws a turn) and `{score: field}`. The dice are thrown on the server. Everything is open, so `view` hides nothing. `drop` takes a player out and the others finish; alone at the table one has won. No clock: like 4 på stribe it can be played one turn now and the next tomorrow, and after 48 hours any other player can pass the slow one (`tclaim` drops them when the game has `drop`).
+- The robot tries every way of keeping dice, throws the rest in its head (10, 28 or 90 times by level; the hard one also looks one throw further), and keeps what gives the best field on average, measured against what each field is normally worth (`PAR`). It averages about 195, 215 and 220 points.
+- `public/js/games/yatzy.js`: the dice (tap to keep), the sheet with one column per player, one's own open fields as buttons showing what the throw would give. `public/js/games/common.js` holds what the screens for more than two share (the table before the start, faces); poker still has its own copy of the pre-start screen.
+
 ### Adding a game
 
 1. `public/shared/games/<id>.js`: an object with `id`, `name`, `min`, `max`, `station` (the furniture), `setup`, `act`, `turn`, `result`, `view`, `bot` (see `base.js`; `c4.js` is the example). The state must be plain data. `view(state, seat)` is where hidden cards or dice are kept from the others.
@@ -143,7 +153,7 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 
 ## What comes next
 
-- **Milestone 2**: Yatzy, Meyer, Ludo (poker is done in v0.4.0). Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer needs `view` to hide the dice (poker shows how). The tables now handle more than two seats, robots with names, leaving in the middle and a clock (see "Poker"). Poker itself could get a loose table (sit down with one's own chips, leave at will) and a second prize.
+- **Milestone 2**: Meyer and Ludo (poker is done in v0.4.0, Yatzy in v0.5.0). Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer needs `view` to hide the dice (poker shows how). The tables now handle more than two seats, robots with names, leaving in the middle and a clock (see "Poker"). Poker itself could get a loose table (sit down with one's own chips, leave at will) and a second prize.
 - ~~Milestone 3: the shooter~~ done in v0.3.0. Left to do there: controls for phones (touch sticks), text chat inside a match, the clubhouse's teasing inside a match, more arenas (the arena is one module, `world.js`), spectating, and tuning after real play: how good the robots are, how eager they are for the star, the rewards.
 - ~~Milestone 4: EagleEye Commander in the clubhouse~~ done in v0.2.0. Left to do there: the game still polls its server every few seconds (the lobby's WebSocket could tell it at once), and the clubhouse avatar is not shown inside the game.
 

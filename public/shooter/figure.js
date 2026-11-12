@@ -82,8 +82,8 @@ export function makeFigures(THREE) {
   // look: a clubhouse look. opt: { team: 'A' | 'B' | '', bot, name, tag: colour of the name or '' for none }
   function make(look, opt = {}) {
     const L = look || {}, pick = (k) => LOOK[k][L[k]] !== undefined ? LOOK[k][L[k]] : LOOK[k][0];
-    const skinC = opt.bot ? 0xaab4bd : hex(pick('skin')), topC = hex(pick('topCol')), botC = hex(pick('bottomCol')), shoeC = hex(pick('shoeCol')), hairC = hex(pick('hairCol'));
-    const skin = mat(skinC, opt.bot ? 0.35 : 0.8, opt.bot ? { metalness: 0.7 } : null), top = mat(topC), bottom = mat(botC), shoe = mat(shoeC), hairM = mat(hairC, 0.9), ink = mat(0x1d1a22, 0.6);
+    const skinC = opt.bot ? 0xc3ccd3 : hex(pick('skin')), topC = hex(pick('topCol')), botC = hex(pick('bottomCol')), shoeC = hex(pick('shoeCol')), hairC = hex(pick('hairCol'));
+    const skin = mat(skinC, opt.bot ? 0.42 : 0.8, opt.bot ? { metalness: 0.25 } : null), top = mat(topC), bottom = mat(botC), shoe = mat(shoeC), hairM = mat(hairC, 0.9), ink = mat(0x1d1a22, 0.6);
     const root = new THREE.Group(), body = new THREE.Group();
     root.add(body);
 

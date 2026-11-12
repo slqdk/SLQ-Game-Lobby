@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from '../server/store.js';
 import { createHub } from '../server/hub.js';
 import { createEagleEye } from '../server/eagleeye.js';
+import { createArena } from '../server/arena.js';
+import { buildNav } from '../server/arena-nav.js';
+import { buildWorld, nullThree, EYE } from '../public/shooter/world.js';
+import { WEAPONS, MODES, ARENA, TEAMS, FLAG, dirAim, aimDir, falloff, zoneAt, flyShot, newShot } from '../public/shooter/rules.js';
 import { ECON, PRANKS, ITEMS, DRINKS, BAR, LOOK, cleanLook, randomLook } from '../public/shared/defs.js';
 import { ROOM, STATIONS, STATION, isFree, findPath, pathLen } from '../public/shared/room.js';
 import { GAMES } from '../public/shared/games/index.js';
@@ -24,11 +28,12 @@ const section = name => console.log('· ' + name);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slq-lobby-test-'));
 let clock = new Date(2026, 10, 12, 12, 0, 0).getTime();
 const rnd = mulberry32(42);
-let store = createStore(dir, { delay: -1 }), ee, hub;
-function startLobby() {           // the lobby with EagleEye Commander in it, as server.js puts them together
+let store = createStore(dir, { delay: -1 }), ee, hub, arena;
+function startLobby() {           // the lobby with EagleEye Commander and the shooter in it, as server.js puts them together
   let tell = () => {};
   ee = createEagleEye({ dir: path.join(dir, 'eagleeye'), secret: store.config.secret, now: () => Math.floor(clock / 1000), changed: (m, g) => tell(m, g) });
-  hub = createHub({ store, ee, version: 'test', now: () => clock, botDelay: 0, rand: rnd });
+  arena = createArena({ now: () => clock, rand: rnd, timer: false, changed: (...a) => hub.arChanged(...a), ended: r => hub.arEnded(r), left: (...a) => hub.arLeft(...a) });
+  hub = createHub({ store, ee, arena, version: 'test', now: () => clock, botDelay: 0, rand: rnd });
   tell = hub.eeChanged;
 }
 startLobby();
@@ -483,6 +488,177 @@ let EE;
   A.send({ t: 'eleave', code: code2 });
   check('og den sidste, der går, lukker kampen', C.last('eex').code === code2 && !ee.get(code2));
   A.send({ t: 'eclose' }); B.send({ t: 'eclose' });
+}
+
+section('skydespillet: banen, og hvor robotterne kan gå');
+{
+  const N = nullThree(), w = buildWorld(N, N, N);
+  const sig = o => crypto.createHash('sha1').update(JSON.stringify(o)).digest('hex').slice(0, 16);
+  // Is the arena changed on purpose, this number must be changed with it.
+  check('banen har de vægge, gulve og lofter, den plejer', w.colliders.length === 1017 && w.surfaces.length === 534 && w.ceilings.length === 5 && sig([w.colliders, w.surfaces, w.ceilings]) === 'f2574a4bf0300b1c', [w.colliders.length, w.surfaces.length, w.ceilings.length, sig([w.colliders, w.surfaces, w.ceilings])].join(' '));
+  // the browser builds it with the real three.js: the same numbers must come out
+  const THREE = await import('../public/shooter/vendor/three.module.min.js'), { makeTextures } = await import('../public/shooter/tex.js');
+  const hadDoc = 'document' in globalThis;
+  if (!hadDoc) globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => N }) };
+  const scene = new THREE.Scene(), w3 = buildWorld(THREE, scene, makeTextures(THREE));
+  if (!hadDoc) delete globalThis.document;
+  check('browserens bane (med three.js) er den samme som serverens', sig([w3.colliders, w3.surfaces, w3.ceilings]) === sig([w.colliders, w.surfaces, w.ceilings]) && scene.children.length > 1000);
+  check('toget kører i ring og er samme sted til samme tid', (() => { w.setTrain(50); const a = [w.bazCar.cx, w.bazCar.cz]; w3.setTrain(50); w.setTrain(50 + w.LOOP_L); return Math.hypot(a[0] - w3.bazCar.cx, a[1] - w3.bazCar.cz) < 1e-9 && Math.hypot(a[0] - w.bazCar.cx, a[1] - w.bazCar.cz) < 1e-6; })());
+
+  const nav = buildNav(w, [[0, -52, 0], [0, 52, 0]]);
+  check('gå-nettet lader banen være, som den var', sig([w.colliders, w.surfaces]) === sig([w3.colliders, w3.surfaces]));
+  const home = nav.near(0, 0, -52), spots = { 'det røde tårns top': [-29.5, 7.98, -45.5], 'det blå tårns top': [30.5, 7.98, 46.5], 'venstre midttårns top': [-15.5, 7.98, 0.5], 'højre midttårns top': [16.5, 7.98, 0.5],
+    'den røde kælder': [8, -3.8, -46], 'den blå kælder': [-10, -3.8, 46], 'tunnelen': [-2, -3.8, -4.5] };
+  for (const p of w.PICKUPS) spots['våbnet ved ' + p.x + ',' + p.z] = [p.x + (p.y ? 0.5 : 0), p.y ? 7.98 : 0, p.z + (p.y ? 0.5 : 0)];
+  for (const p of w.HEALTH_PACKS) spots['førstehjælpen ved ' + p.x + ',' + p.z] = [p.x, 0, p.z];
+  for (const [name, [x, y, z]] of Object.entries(spots)) {
+    const n = nav.near(x, y, z, 3);
+    check('robotter kan gå til ' + name + ' og tilbage', n >= 0 && !!nav.path(home, n) && !!nav.path(n, home));
+  }
+  // A real walker (the arena's own movement rules) follows the path: steering a little ahead, swaying to both sides.
+  // When it gets nowhere it hops and finds a new way, as the robots do. It must arrive, and must not fall on the way.
+  function walk(from, to, { sprint, dt, drift }) {
+    let path = nav.path(from, to), i = 1, t = 0, stuck = 0, best = 1e9, tries = 0, air = 0;
+    const p = w.newWalker(nav.x[from], nav.z[from], nav.y[from]), inp = { mx: 0, mz: 0, sprint, jump: false };
+    while (path && i < path.length && t < 45) {
+      const n = path[Math.min(path.length - 1, i + (sprint ? 1 : 0))], dx = nav.x[n] - p.x, dz = nav.z[n] - p.z, d = Math.hypot(dx, dz) || 1, sway = Math.sin(t * 2.3) * drift;
+      inp.mx = dx / d - dz / d * sway; inp.mz = dz / d + dx / d * sway;
+      const l = Math.hypot(inp.mx, inp.mz); inp.mx /= l; inp.mz /= l;
+      inp.jump = stuck > 0.5 && stuck < 0.6;
+      w.stepPlayer(p, inp, dt); t += dt;
+      if (!p.grounded && !inp.jump && p.vy < -4) air += dt;
+      while (i < path.length && Math.hypot(nav.x[path[i]] - p.x, nav.z[path[i]] - p.z) < (sprint ? 0.7 : 0.45) && Math.abs(nav.y[path[i]] - p.y) < 0.45) { i++; best = 1e9; stuck = 0; }
+      if (i < path.length) { const dn = Math.hypot(nav.x[path[i]] - p.x, nav.z[path[i]] - p.z); if (dn < best - 0.02) { best = dn; stuck = 0; } else stuck += dt; }
+      if (stuck > 1.5 && tries++ < 6) { path = nav.path(nav.near(p.x, p.y, p.z, 3), to); i = 1; stuck = 0; best = 1e9; }
+    }
+    return !!path && i >= path.length && air < 0.25;
+  }
+  for (const [name, x, z] of [['røde', -30, -46], ['blå', 30, 46], ['venstre midt', -16, 0], ['højre midt', 16, 0]]) {
+    const top = nav.near(x + 0.5, 7.98, z + 0.5, 3), base = nav.near(x, 0, z + (z > 0 ? -9 : 9), 3);
+    let up = true, down = true;
+    for (const o of [{ sprint: false, dt: 1 / 60, drift: 0.25 }, { sprint: true, dt: 1 / 60, drift: 0.25 }, { sprint: false, dt: 1 / 40, drift: -0.25 }, { sprint: true, dt: 1 / 20, drift: 0.2 }]) {
+      if (!walk(base, top, o)) up = false;
+      if (!walk(top, base, o)) down = false;
+    }
+    check('op ad trappen i det ' + name + ' tårn, i gang og i løb, med slinger til begge sider', up);
+    check('og ned igen', down);
+  }
+  // bullets
+  const pistol = WEAPONS.pistol, d = aimDir(...dirAim(0.3, 0.1, -1));
+  check('sigte og retning passer sammen', Math.abs(d[0] - 0.3 / Math.hypot(0.3, 0.1, 1)) < 1e-9 && Math.abs(d[1] - 0.1 / Math.hypot(0.3, 0.1, 1)) < 1e-9);
+  check('skaden falder med afstanden', falloff(pistol, 10) === 1 && falloff(pistol, 90) === pistol.fallMin && falloff(pistol, 57.5) > pistol.fallMin && falloff(pistol, 57.5) < 1);
+  check('hoved og krop rammes hver for sig', zoneAt(0, 0, 0, 0, 1.9, 0.2) === 'head' && zoneAt(0, 0, 0, 0.3, 1.0, 0) === 'body' && zoneAt(0, 0, 0, 0.9, 1.0, 0) === null);
+  // a sniper bullet at 200 m/s must not jump through a wall or a person, even with long steps
+  const s1 = newShot([0, 1.5, 40], [0, 0, 1], 200, 0), hit1 = flyShot(s1, 0.05, (x, y, z) => zoneAt(0, 0, 46, x, y, z));
+  const s2 = newShot([0, 1.5, 40], [0, 0, 1], 200, 0); let wall = null; for (let k = 0; k < 10 && !wall; k++) wall = flyShot(s2, 0.05, (x, y, z) => w.hitWorld(x, y, z) ? 'wall' : null);
+  check('en hurtig kugle springer ikke gennem en person eller ud gennem hækken', hit1 === 'body' && wall === 'wall' && s2.z < 55.5);
+}
+
+section('skydespillet: en kamp i arkaden');
+{
+  const idA = A.me().id, idB = B.me().id, idC = C.me().id;
+  for (const c of [A, B, C]) { c.send({ t: 'eclose' }); c.send({ t: 'tclose' }); }
+  const tickFor = secs => { for (let i = 0; i < Math.round(secs * 20); i++) { clock += 50; arena.tick(0.05); } };
+  const mine = c => arena.of(c.me().id);
+  // says where one is (as the browser does 20 times a second)
+  const at = (c, x, y, z, yaw = 0, flags = FLAG.ground, w = 0) => { const r = mine(c); c.send({ t: 'as', q: r.e.seq, d: [x, y, z, yaw, 0, flags, w, -1] }); };
+  // a long way at once is only believed when it is said for a second (as a browser does after a hiccup)
+  const go = (c, x, y, z, yaw = 0, w = 0) => { for (let k = 0; k < 22; k++) { at(c, x, y, z, yaw, FLAG.ground, w); tickFor(0.05); } };
+  let shot = 100;
+  const shoot = (c, wi, to, zone) => {          // fires at somebody and says where the bullet hit
+    const r = mine(c), e = r.e, v = arena.of(to).e, o = [e.x, e.y + EYE, e.z], p = [v.x, v.y + (zone ? 1.85 : 1.1), v.z], l = Math.hypot(p[0] - o[0], p[1] - o[1], p[2] - o[2]);
+    c.send({ t: 'af', w: wi, o, d: [(p[0] - o[0]) / l, (p[1] - o[1]) / l, (p[2] - o[2]) / l], i: ++shot });
+    tickFor(0.2);
+    c.send({ t: 'ah', i: shot, to: v.id, z: zone, p });
+  };
+
+  mark(A, B, C);
+  A.send({ t: 'anew', mode: 'ffa', fill: 0, level: 2 });
+  const ain = A.last('ain');
+  check('en ny kamp sender spilleren ind på banen', !!ain && ain.mode === 'ffa' && ain.ents.length === 1 && ain.you === ain.ents[0].id && A.last('asp').id === ain.you);
+  check('gruppen ser kampen og hvem der er i den', C.last('ar').m.who.length === 1 && C.last('ar').m.who[0] === idA && C.last('ar').m.mode === 'ffa');
+  check('spilleren står ved arkaden imens', C.got.filter(m => m.t === 'mem' && m.m.id === idA).pop().m.busy === 'shooter');
+  B.send({ t: 'ajoin', id: ain.id });
+  check('en ven går med i kampen', !!B.last('ain') && B.last('ain').ents.length === 2 && A.last('aent').add[0].n === B.me().name && C.last('ar').m.who.length === 2);
+  check('uden robotter er der ingen', C.last('ar').m.bots === 0);
+  tickFor(ARENA.countdown + 0.2);
+  check('efter nedtællingen er runden i gang', A.last('ast').state === 'active');
+  check('alle får at vide, hvor de andre er', A.last('ax').p.length === 2 && A.last('ax').s > 0);
+  // a shot before one has a firearm does nothing; the knife is always there
+  mark(A); at(A, 2, 0, 44, Math.PI); tickFor(0.1);
+  check('et langt hop på én gang tror serveren ikke på', Math.abs(mine(A).e.z - 44) > 1);
+  go(A, 2, 0, 44, Math.PI); go(B, 2, 0, 50, 0); tickFor(ARENA.protect);
+  check('serveren tror på, hvor spillerne siger, de er', Math.abs(mine(A).e.z - 44) < 0.01 && Math.abs(mine(B).e.z - 50) < 0.01);
+  mark(A, B); shoot(A, 1, idB, 0);
+  check('man kan ikke skyde med et våben, man ikke har', B.since('ahit').length === 0 && mine(B).e.hp === 100);
+  // the pistol lies at (-34, 0): walk over it
+  go(A, -34, 0, 0); tickFor(0.2);
+  check('et våben samles op ved at gå hen over det', (mine(A).e.owned & 2) === 2 && A.last('apk').by === mine(A).e.id && A.last('apk').on === 0);
+  go(B, -34, 0, 0); tickFor(0.2);
+  check('og er væk for den næste, til det kommer igen', (mine(B).e.owned & 2) === 0);
+  tickFor(ARENA.pickupBack);
+  check('det kommer igen efter et stykke tid, og så får den næste det', (mine(B).e.owned & 2) === 2);
+  go(A, 2, 0, 44, Math.PI, 1); go(B, 2, 0, 50, 0); tickFor(0.3);
+  mark(A, B); shoot(A, 1, idB, 0);
+  check('et skud, der rammer, giver skade', mine(B).e.hp === 100 - WEAPONS.pistol.dmg && B.last('ahit').hp === 70 && B.last('ahit').by === mine(A).e.id);
+  tickFor(0.3); shoot(A, 1, idB, 1);
+  check('et hovedskud giver mere', mine(B).e.hp === 70 - WEAPONS.pistol.dmg * WEAPONS.pistol.head);
+  // a claim about somebody far from where the bullet is said to have hit is not believed
+  tickFor(0.3); mark(B);
+  { const e = mine(A).e; A.send({ t: 'af', w: 1, o: [e.x, e.y + EYE, e.z], d: [0, 0, 1], i: ++shot }); tickFor(0.2); A.send({ t: 'ah', i: shot, to: mine(B).e.id, z: 0, p: [20, 1, 30] }); }
+  check('en træffer et helt andet sted tæller ikke', B.since('ahit').length === 0);
+  tickFor(0.3); mark(B); A.send({ t: 'ah', i: shot, to: mine(B).e.id, z: 0, p: [2, 1.1, 50] });
+  check('og samme skud kan ikke ramme to gange', B.since('ahit').length === 0);
+  tickFor(0.3); shoot(A, 1, idB, 0);
+  const kill = A.last('akill');
+  check('den sidste skade slår ihjel, og drabet tælles', !mine(B).e.alive && kill.to === mine(B).e.id && kill.by === mine(A).e.id && mine(A).e.kills === 1 && mine(B).e.deaths === 1);
+  tickFor(ARENA.respawn + 0.2);
+  check('man kommer tilbage et nyt sted med fuldt liv', mine(B).e.alive && mine(B).e.hp === 100 && B.last('asp').id === mine(B).e.id);
+  // the knife
+  { const b = mine(B).e; go(A, b.x, b.y, b.z - 1.5, Math.PI, 0); tickFor(ARENA.protect);
+    A.send({ t: 'af', w: 0, o: [b.x, b.y + EYE, b.z - 1.5], d: [0, 0, 1], i: ++shot }); }
+  check('kniven rammer den, der står lige foran', mine(B).e.hp === 100 - WEAPONS.knife.dmg);
+  // standing still for a long time
+  mark(C);
+  for (let k = 0; k < 4; k++) { const a = mine(A).e; at(A, a.x + 0.2 * (k + 1), a.y, a.z, Math.PI); tickFor(ARENA.idleKick / 4 + 1); }
+  check('den, der står stille længe, sendes tilbage til klubhuset', !mine(B) && B.last('aout').why === 'idle' && !!mine(A));
+  check('og rejser sig fra arkaden', C.got.filter(m => m.t === 'mem' && m.m.id === idB).pop().m.busy === '');
+  A.send({ t: 'aleave' });
+  check('når den sidste går, er kampen væk', arena.size() === 0 && C.last('arx').id === ain.id && A.last('aout').why === '');
+
+  // --- with robots, on teams ---
+  mark(A, B, C);
+  A.send({ t: 'anew', mode: 'tdm', fill: 6, level: 2 });
+  const m2 = mine(A).m, botsOf = () => [...m2.ents.values()].filter(e => e.kind === 'bot'), team = t => [...m2.ents.values()].filter(e => e.team === t).length;
+  check('robotter fylder op til det ønskede antal, lige mange på hvert hold', botsOf().length === 5 && team('A') === 3 && team('B') === 3 && A.last('ain').ents.filter(e => e.bot).length === 5);
+  B.send({ t: 'ajoin', id: A.last('ain').id });
+  check('en robot giver plads, når en ven kommer, og vennen kommer på det andet hold', botsOf().length === 4 && team('A') === 3 && team('B') === 3 && mine(B).e.team !== mine(A).e.team);
+  mark(A); A.send({ t: 'at' });
+  check('man kan ikke skifte hold, så alle mennesker står på samme side', A.since('amsg')[0].k === 'full' && mine(B).e.team !== mine(A).e.team);
+  A.send({ t: 'anew', mode: 'stars', fill: 0, level: 1 });
+  check('en ny kamp tager en ud af den gamle', mine(A).m !== m2 && [...m2.ents.values()].filter(e => e.kind === 'human').length === 1 && botsOf().length === 5);
+  C.send({ t: 'anew', mode: 'ffa', fill: 0, level: 1 });
+  check('en gruppe kan have to kampe ad gangen, ikke tre', /allerede 2 kampe/.test(C.err()));
+  A.send({ t: 'aleave' });
+  // B and the robots: a whole round is played out
+  const a0 = B.me().chips, start = clock;
+  let ended = null;
+  for (let k = 0; k < 20 * 60 * 12 && !ended; k++) {
+    clock += 50; arena.tick(0.05);
+    if (k % 20 === 0 && mine(B) && mine(B).e.alive) { const e = mine(B).e; at(B, e.x + (k % 40 ? 0.3 : -0.3), e.y, e.z, k / 100); }
+    const st = B.last('ast'); if (st && st.state === 'ended') ended = st;
+  }
+  check('robotterne spiller en runde til ende', !!ended && (ended.kills[0] >= MODES.tdm.goal || ended.kills[1] >= MODES.tdm.goal || (clock - start) / 1000 >= MODES.tdm.time), ended ? JSON.stringify(ended.kills) : 'ingen ende');
+  check('alle står på tavlen bagefter', !!ended && ended.rows.length === 6 && ended.rows.reduce((n, r) => n + r.k, 0) >= 20);
+  const mineRow = ended && ended.rows.find(r => r.id === mine(B).e.id), paid = B.me().chips - a0;
+  check('mod robotter alene giver en runde den lille belønning', !!mineRow && paid === mineRow.chips && (paid === ECON.shooter.botWin || paid === ECON.shooter.botPlay), String(paid));
+  check('runden står i spillerens tal', B.me().stats.sh && B.me().stats.sh.p === 1);
+  tickFor(ARENA.endShow + 0.5);
+  check('en ny runde begynder af sig selv', B.last('ast').state === 'countdown' && B.last('ast').round === 2);
+  // the connection drops: out of the match
+  B.conn.close();
+  check('når forbindelsen ryger, er spilleren ude af kampen', arena.size() === 0);
+  B = client(tokB); B.send({ t: 'enter', g: GID });
 }
 
 section('glemt kodeord');

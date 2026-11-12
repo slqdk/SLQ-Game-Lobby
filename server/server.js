@@ -15,6 +15,7 @@ import { createStore } from './store.js';
 import { createHub, LobbyError } from './hub.js';
 import { upgrade } from './ws.js';
 import { createEagleEye, GameError as EagleEyeError } from './eagleeye.js';
+import { createArena } from './arena.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, '..', 'public');
@@ -26,8 +27,11 @@ const store = createStore(DATA);
 // EagleEye Commander keeps its matches in a folder of its own and tells the lobby when one changes.
 let eeChanged = () => {};
 const ee = createEagleEye({ dir: path.join(DATA, 'eagleeye'), secret: store.config.secret, changed: (m, g) => eeChanged(m, g) });
-const hub = createHub({ store, ee, version: VERSION });
-eeChanged = hub.eeChanged;
+// the shooter's matches: the lobby hears when one changes, when a round ends and when somebody is out of one
+let arHooks = null;
+const arena = createArena({ changed: (...a) => arHooks.arChanged(...a), ended: r => arHooks.arEnded(r), left: (...a) => arHooks.arLeft(...a) });
+const hub = createHub({ store, ee, arena, version: VERSION });
+eeChanged = hub.eeChanged; arHooks = hub;
 
 // ---------- HTTP ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml',

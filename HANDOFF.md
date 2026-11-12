@@ -1,6 +1,6 @@
 # SLQ Game Lobby — handoff
 
-Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is a pull request. Read this first when continuing in a new chat.
+Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is a pull request on top of it (it contains #1). Read this first when continuing in a new chat.
 
 - The code lives in **https://github.com/slqdk/SLQ-Game-Lobby** (public, branch `main`). Søren's server pulls from `main` with `lobby-update`, so `main` must always work; larger work goes on a branch and a pull request.
 - It runs in a Proxmox LXC behind Nginx Proxy Manager, which needs **Websockets Support** switched on (see the README).
@@ -25,7 +25,9 @@ Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, c
 
 **v0.2.0** adds EagleEye Commander at the command table (see "EagleEye Commander in the lobby" below).
 
-The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table), Yatzy and Meyer (dice table), poker (card table, Texas Hold'em: Søren's choice), the shooter (arcade cabinet).
+**v0.3.0** adds the shooter in the arcade (see "The shooter in the arcade" below).
+
+The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table), Yatzy and Meyer (dice table), poker (card table, Texas Hold'em: Søren's choice).
 
 ## Decisions made without asking (tell Søren, change if he wants)
 
@@ -89,6 +91,30 @@ Søren asked for EagleEye Commander to be integrated, after the shooter; it was 
 - Chips: when a match that lasted at least three rounds ends, the winners get 150 and the other players 40 (30 for beating only AI generals), once.
 - The page has its own content security policy (it writes styles into its markup) and may only be framed by the lobby itself.
 
+### The shooter in the arcade (v0.3.0)
+
+Søren asked for the shooter to be "improved a lot" and built in, on all four fronts: network through the server, figures and graphics, game feel, robots and game types. He was not going to test for a while, so it was built in one go.
+
+**What was kept.** The arena, the train, the golden stars, the dinos and the five weapons of the stand-alone shooter, with their numbers. The arena, the train and the movement functions were moved over as they were, Danish comments and all (`public/shooter/world.js`; the textures, sounds, view model and small props likewise, in `tex.js`, `sfx.js`, `viewmodel.js`, `fx.js`). Do not "improve" `groundUnder`, `pushOut`, `moveHoriz` or the order of things in `stepPlayer`.
+
+**What is new.**
+- *One arena for both sides.* `buildWorld(THREE, scene, texLib)` builds the picture in the browser; the server calls it with `nullThree()` (a stand-in that answers everything with itself) and gets only the colliders, surfaces, ceilings and the train. The self test compares the two builds number for number.
+- *The server decides* (`server/arena.js`): a match lives in memory while somebody plays it. Each browser moves its own player (the same `stepPlayer`) and says where it is 20 times a second (`as`); the server passes that on in one message per step (`ax`) and decides health, kills, respawn, pickups, health packs, stars, dinos and rounds. A shooter's browser flies its own bullets and says what they hit (`ah`, `ae` for explosions); the server checks that the shot exists, was fired with a weapon the player has, can have flown that far by now, and that the victim was near that point during the last 0.8 seconds, and works out the damage itself. No host any more, and no WebRTC.
+- *The train runs by the clock*: every browser works its place out from the match clock (synchronised with small pings), so it is in the same spot for everybody. Somebody riding it is sent as "wagon and place on it", so they do not slide about on other people's screens.
+- *Robots* (`arena-nav.js`, `arena-bots.js`): a grid of standing places half a metre apart, joined where a walker really gets from one to the next with the arena's own movement rules (about 35,000 places, built in 0.3 s when the first match starts). Robots follow paths on it, see only along a free line of sight, aim with an error and a reaction time that depend on their level, fetch weapons, health, the star on the train, and now and then steal a star from the other tower. They fill a match up to the chosen number and leave when people come; teams are kept even.
+- *Three game types*: Stjernejagt (the old rules: star on the train every 60 s, taken with E, carried to the tower top by itself, five stars win, stealing by holding E for 3 s on the other tower; a star not put in place within 30 s is lost), Holdkamp (first team to 30 kills or 8 minutes), Alle mod alle (first to 15 kills or 8 minutes). Rounds follow each other until the last person leaves.
+- *The players are the clubhouse avatars* in 3D (`figure.js`: skin, hair, beard, clothes, shoes, hats, glasses and the rest of the kiosk), with the team's vest over the clothes; robots are steel with an antenna.
+- *Feel*: speed eases in and out, a jump is still taken just after an edge, the weapon sways, bobs and kicks, the view dips on landing and shakes near explosions, hit markers (yellow for the head), an arc showing where a hit came from, a kill list, three seconds out after a death and 2.5 seconds of protection after coming back, hold the mouse button to keep firing, a scope picture for the sniper.
+- *Faster drawing*: the arena's 1,800 still meshes are joined into 27 when the game starts (`merge.js`), shadows are redrawn every second or third frame, and there are four graphics steps; the game steps down by itself when it runs under 36 frames a second.
+
+**Bugs of the stand-alone version that were fixed on the way.** Bullets moved once a frame and could jump through walls and people (a sniper bullet covers 3 m in a frame); now they fly in steps of 0.3 m. One row of deck tiles hung over the first of the upper tower steps and shoved everybody sideways there; those four tiles per tower are gone. The knife did nothing to other players. Other players' figures faced backwards. Dinos could shoot through thin walls (line of sight was sampled every 0.7 m).
+
+**Messages** (all start with `a`). From the browser: `anew {mode, fill, level}`, `ajoin {id}`, `aleave`, `at` (change sides), and many times a second `as` (where I am), `af` (fired), `ah` (hit), `ae` (explosion), `ap` (ping): these five have a message budget of their own in `hub.js`. To the browser: `ain` (everything about the match on the way in), `aout`, `aent` (players in and out), `asp` (spawn or teleport), `ax` (where everybody is), `af`, `ahit`, `akill`, `abm` (explosion), `apk`/`ahp` (pickups), `astar`, `ast` (round state and the final table), `adino`, `adh`, `ap`, `amsg`. The group's room gets `ar`/`arx` when a match changes or is gone, and the room message carries `arenas: [...]`.
+
+**Chips**: for a round of at least 90 seconds in which one played at least 60: 40 for winning and 10 for playing when people stood on both sides; 10 and 3 against robots only (`ECON.shooter`). Standing still for three minutes sends one back to the clubhouse.
+
+**Decisions made without asking**: one starts every round with the knife only and keeps what one picks up until the round ends (as before); a weapon one already has is left for the others; robots take 6, 12 or 20 seconds (by level) to notice a new star, so people get a head start; robots never jump off edges (they take the stairs); a match holds eight players, a group two matches at a time; no friendly fire; one cannot change sides so that all people end up on one team.
+
 ### Adding a game
 
 1. `public/shared/games/<id>.js`: an object with `id`, `name`, `min`, `max`, `station` (the furniture), `setup`, `act`, `turn`, `result`, `view`, `bot` (see `base.js`; `c4.js` is the example). The state must be plain data. `view(state, seat)` is where hidden cards or dice are kept from the others.
@@ -105,7 +131,7 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 ## What comes next
 
 - **Milestone 2**: Yatzy, Meyer, Ludo, poker. Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer and poker need `view` to hide things, poker needs betting with the shared chips (the table's `stake`/`pot` is a fixed buy-in today).
-- **Milestone 3**: the shooter. What the attached version is: three.js r160, everything in one file with globals; collision by colliders, surfaces and ceilings (`groundUnder`, `pushOut`, `moveHoriz`, `updatePlayer`, with round towers as the fragile part); an arena with tunnels and a train one can ride; golden stars as the objective (first team to five); dinosaurs that guard; projectile weapons with spread, recoil, falloff and headshots; rounds with a warm-up; players as a cylinder with a ball for a head. Its network is peer to peer over WebRTC with a PHP page for signalling, each player's own browser decides hits, and the lowest id is "host". The plan: keep the arena, train, stars and dinosaurs; move the network to this server (the WebSocket is ready for binary frames; hits and rounds decided by the server); draw players as the lobby avatars in 3D; work on feel (movement, weapons, hit feedback); add bots and modes. Before starting, check whether the robot's 30 ms of thinking on the server's only thread is a problem for a 20-30 Hz game (move it to a worker, or run the shooter as its own process).
+- ~~Milestone 3: the shooter~~ done in v0.3.0. Left to do there: controls for phones (touch sticks), text chat inside a match, the clubhouse's teasing inside a match, more arenas (the arena is one module, `world.js`), spectating, and tuning after real play: how good the robots are, how eager they are for the star, the rewards.
 - ~~Milestone 4: EagleEye Commander in the clubhouse~~ done in v0.2.0. Left to do there: the game still polls its server every few seconds (the lobby's WebSocket could tell it at once), and the clubhouse avatar is not shown inside the game.
 
 ## Not verified, and known gaps
@@ -119,4 +145,7 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 7. **No notification when one is away** (it is your turn, somebody is in the clubhouse). The page shows it when one opens it.
 8. The avatar always faces the viewer; walking sideways leans and turns the face a little, but there is no real side view.
 9. Two tables at the same piece of furniture share its label; with many games at once the avatars run out of stools and stand next to the table.
-10. The robot at 4 på stribe thinks for up to about 30 ms on the server's only thread (see milestone 3).
+10. The robot at 4 på stribe thinks for up to about 30 ms on the server's only thread, and so does the first shooter match after a start (0.3 s for the robots' walking grid); a shooter match steps 20 times a second, so a long think shows as a short hitch there.
+11. **The shooter has never run on a real graphics card.** It was driven by scripts in a headless browser with a software renderer at one to three frames a second: starting from the arcade, joining, walking, picking up a pistol, shooting somebody else, dying, coming back, the table, leaving; and whole matches of robots against each other on the server. How it *feels* (movement, recoil, the mouse, the frame rate, whether the robots are fun) nobody has tried. Catching the mouse (pointer lock) was not tested either; the scripts play without it.
+12. The shooter's sounds are the old ones plus a few new blips, unheard like the rest.
+13. In the shooter a shooter's own browser says what its bullets hit. The server checks that it is plausible, not that it is true: fine among friends, not against cheats.

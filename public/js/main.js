@@ -8,13 +8,14 @@ import { renderC4 } from './games/c4.js';
 import { ECON, LIMITS, EMOTES, PRANKS, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
 import { ROOM, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
+import { MODES, MODE_IDS, LEVELS, FILLS } from '../shooter/rules.js';
 
 const load = k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const save = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch {} };
 
 const st = {
   token: load('slq-token'), gid: load('slq-group'), invite: '',
-  me: null, groups: [], g: null, mem: new Map(), tables: new Map(), ee: new Map(),
+  me: null, groups: [], g: null, mem: new Map(), tables: new Map(), ee: new Map(), arenas: new Map(), game: null, gameQ: null,
   view: 'boot', sock: null, skew: 0, tv: null, everOpen: false, leaving: false, hinted: false,
 };
 const RENDER = { c4: renderC4 };
@@ -150,11 +151,12 @@ function connect() {
   st.everOpen = false;
   st.sock = createSocket({
     getToken: () => st.token,
-    onMessage: m => { const f = on[m.t]; if (f) f(m); },
+    onMessage: m => { const f = on[m.t]; if (f) f(m); else if (m.t[0] === 'a') arenaMsg(m); },
     onState(state, tries) {
       const lost = $('#lost');
       if (state === 'open') { st.everOpen = true; lost.hidden = true; return; }
       if (state !== 'lost') { lost.hidden = true; return; }
+      if (arenaOpen()) { closeArena(); toast('Forbindelsen røg, så du er tilbage i klubhuset.'); }
       lost.hidden = st.view === 'boot';
       $('#lostText').textContent = st.everOpen || tries < 3 ? 'Forbinder igen …'
         : 'Kan ikke få forbindelse til klubhuset. Kører siden bag Nginx Proxy Manager, skal «Websockets Support» være slået til.';
@@ -207,6 +209,8 @@ const on = {
     st.mem = new Map(m.mem.map(x => [x.id, x]));
     st.tables = new Map(m.tables.map(t => [t.id, t]));
     st.ee = new Map((m.ee || []).map(x => [x.code, x]));
+    st.arenas = new Map((m.arenas || []).map(x => [x.id, x]));
+    closeArena();
     room.setName(m.g.name);
     room.setRoom(m.mem, mine());
     room.setSound(soundOn());
@@ -261,6 +265,12 @@ const on = {
   },
   eex(m) { st.ee.delete(m.code); tablesChanged(); if (sheet.kind === 'station') reopen(); },
   eopen(m) { sheet.close(); openEmbed('EagleEye Commander', 'eagleeye/index.html', m.token); },
+
+  // the shooter: a match of the group changed or is gone; this player is let into one, or is out of it again
+  ar(m) { st.arenas.set(m.m.id, m.m); if (sheet.kind === 'station' || sheet.kind === 'tables') reopen(); },
+  arx(m) { st.arenas.delete(m.id); if (sheet.kind === 'station' || sheet.kind === 'tables') reopen(); },
+  ain(m) { openArena(m); },
+  aout(m) { closeArena(m.why); },
 
   tb(m) {
     const t = m.tb, old = st.tables.get(t.id), wasMine = old && old.phase === 'play' && old.seats[old.turn] && old.seats[old.turn].u === mine();
@@ -375,7 +385,7 @@ $('#chatForm').addEventListener('submit', e => {
 });
 $('#btnChat').addEventListener('click', () => { app.classList.toggle('chat-open'); const log = $('#chatlog'); log.scrollTop = log.scrollHeight; });
 document.addEventListener('keydown', e => {
-  if (st.view !== 'room' || sheet.isOpen || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (st.view !== 'room' || sheet.isOpen || arenaOpen() || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === 'Enter' && document.activeElement !== $('#chatInput')) { $('#chatInput').focus(); e.preventDefault(); }
 });
 
@@ -541,6 +551,9 @@ function openScores() {
   sheet.open({ title: 'Opslagstavlen', kind: 'scores', body: [
     ...board('Flest jetoner', m => m.chips),
     ...board('Sejre i 4 på stribe', m => (m.stats && m.stats.c4 && m.stats.c4.w) || 0),
+    ...board('Drab i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.k) || 0),
+    ...board('Vundne runder i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.w) || 0),
+    ...board('Sejre i EagleEye Commander', m => (m.stats && m.stats.ee && m.stats.ee.w) || 0),
     ...board('Flest omgange givet i baren', stat('rounds')),
     ...board('Største drillepind', stat('teased')),
     ...board('Mest drillet', stat('gotTeased')),
@@ -572,6 +585,7 @@ function openStation(sn) {
     const body = [];
     for (const gid of sn.games) {
       if (gid === 'eagleeye') { body.push(...eagleSection()); continue; }
+      if (gid === 'shooter') { body.push(...arenaSection()); continue; }
       if (!GAMES[gid]) { body.push(h('div', { class: 'trow soon' }, h('div', { class: 't' }, h('b', {}, SOON[gid] || gid), h('span', {}, 'Kommer snart')))); continue; }
       body.push(...newGame(gid));
       const list = [...st.tables.values()].filter(t => t.game === gid).sort((a, b) => rank(a) - rank(b) || b.at - a.at);
@@ -585,8 +599,9 @@ function openStation(sn) {
 function openTables() {
   const build = () => {
     const list = [...st.tables.values()].filter(t => GAMES[t.game]).sort((a, b) => rank(a) - rank(b) || b.at - a.at);
-    return [list.length ? list.map(tableRow) : h('p', { class: 'empty' }, 'Der er ingen spil i gang lige nu.'), ...newGame('c4'),
-      h('p', { class: 'hint' }, 'Yatzy, Meyer, Ludo, poker, skydespillet og EagleEye Commander får deres egne borde i klubhuset senere.')].flat();
+    const shoot = [...st.arenas.values()].map(arenaRow);
+    return [list.length || shoot.length ? [...shoot, ...list.map(tableRow)] : h('p', { class: 'empty' }, 'Der er ingen spil i gang lige nu.'), ...newGame('c4'),
+      h('p', { class: 'hint' }, 'Skydespillet står i arkaden, og EagleEye Commander ved kommandobordet. Yatzy, Meyer, Ludo og poker får deres egne borde senere.')].flat();
   };
   sheet.open({ title: 'Spil', kind: 'tables', body: build() });
   reopen = () => sheet.fill(build());
@@ -616,6 +631,63 @@ function eagleSection() {
     h('div', { class: 'row' }, name, h('button', { class: 'btn', style: 'flex:none', onclick: () => send({ t: 'enew', name: name.value }) }, 'Ny kamp')),
     list.length ? h('div', { class: 'sec' }, 'Gruppens kampe') : null, ...list.map(eagleRow),
     h('button', { class: 'btn alt', onclick: () => { sheet.close(); openEmbed('EagleEye Commander · træning', 'eagleeye/index.html#traening', ''); } }, 'Øv dig alene mod AI')];
+}
+
+// ---------- the shooter in the arcade ----------
+// A match is shown on top of the clubhouse, on the same connection; the game itself (three.js and all) is only
+// fetched when somebody plays.
+const arenaPick = { mode: 'stars', fill: 4, level: 2 };
+function arenaRow(x) {
+  const names = x.who.map(id => id === mine() ? 'dig' : (st.mem.get(id) || { name: '?' }).name).join(', ');
+  return h('div', { class: 'trow' }, h('div', { class: 't' }, h('b', {}, 'Skydespillet · ' + MODES[x.mode].name),
+    h('span', {}, names + (x.bots ? ' + ' + x.bots + (x.bots === 1 ? ' robot' : ' robotter') : '') + (x.state === 'ended' ? ' · runden er lige slut' : ''))),
+    h('button', { class: 'btn small', onclick: () => send({ t: 'ajoin', id: x.id }) }, 'Gå med'));
+}
+function arenaSection() {
+  const seg = (list, key) => h('div', { class: 'seg' }, list.map(([v, n]) => h('button', { class: arenaPick[key] === v ? 'on' : '', onclick: () => { arenaPick[key] = v; reopen(); } }, n)));
+  const list = [...st.arenas.values()];
+  return [h('div', { class: 'sec' }, 'Skydespillet'),
+    h('p', { class: 'hint' }, 'Første person i 3D, med mus og tastatur (ikke på telefon endnu). Man kan gå med i en kamp, mens den er i gang, og robotterne giver plads, når der kommer folk.'),
+    matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches ? h('p', { class: 'hint' }, 'Denne enhed har ingen mus, så her kan man kun kigge på banen, ikke spille.') : null,
+    list.length ? [h('div', { class: 'sec' }, 'Kampe i gang'), ...list.map(arenaRow)] : null,
+    h('div', { class: 'sec' }, 'Ny kamp'),
+    seg(MODE_IDS.map(id => [id, MODES[id].name]), 'mode'),
+    h('p', { class: 'hint' }, MODES[arenaPick.mode].text),
+    h('div', { class: 'sec' }, 'Robotter'),
+    seg(FILLS.map(f => [f, f ? 'Fyld op til ' + f : 'Ingen']), 'fill'),
+    arenaPick.fill ? seg(LEVELS.map((n, i) => [i + 1, n]), 'level') : null,
+    h('button', { class: 'btn', onclick: () => send({ t: 'anew', mode: arenaPick.mode, fill: arenaPick.fill, level: arenaPick.level }) }, 'Start kampen')].flat();
+}
+const arenaOpen = () => !$('#arena').hidden;
+function arenaMsg(m) { if (st.game) st.game.on(m); else if (st.gameQ) st.gameQ.push(m); }
+async function openArena(info) {
+  const root = $('#arena');
+  sheet.close();
+  if (st.game) { st.game.stop(); st.game = null; }
+  root.replaceChildren(h('div', { class: 'sh-wait' }, 'Henter banen …'));
+  root.hidden = false;
+  room.stop();
+  const q = st.gameQ = [];
+  try {
+    const mod = await import('../shooter/game.js');
+    if (st.gameQ !== q) return;                         // left (or started again) while it was being fetched
+    st.game = mod.startGame({ root, info, send, sound: soundOn(), leave: () => send({ t: 'aleave' }) });
+    for (const m of q) st.game.on(m);
+    st.gameQ = null;
+  } catch (e) {
+    console.error(e);
+    if (st.gameQ === q) { send({ t: 'aleave' }); closeArena(); toast('Skydespillet kunne ikke starte i denne browser (det kræver WebGL).'); }
+  }
+}
+function closeArena(why) {
+  st.gameQ = null;
+  if (st.game) { st.game.stop(); st.game = null; }
+  const root = $('#arena');
+  if (root.hidden) return;
+  root.hidden = true; root.replaceChildren();
+  if (st.view === 'room') room.start();
+  if (why === 'idle') toast('Du stod stille længe og er tilbage i klubhuset.');
+  else if (why === 'error') toast('Kampen gik i stykker. Start en ny i arkaden.');
 }
 
 // ---------- a game with a page of its own, in a frame over the clubhouse ----------

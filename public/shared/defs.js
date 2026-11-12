@@ -11,6 +11,9 @@ export const ECON = {
   claimHours: 48,        // a player who has waited this long for the other one's move may claim the game
   // EagleEye Commander: for a match that lasted at least `rounds` rounds
   ee: { win: 150, play: 40, botWin: 30, rounds: 3 },
+  // The shooter: for a round of at least `minSec` seconds in which one played at least `minPlayed` of them.
+  // win/play when people were on both sides, botWin/botPlay against robots only.
+  shooter: { win: 40, play: 10, botWin: 10, botPlay: 3, minSec: 90, minPlayed: 60 },
 };
 
 export const LIMITS = {

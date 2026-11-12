@@ -20,7 +20,7 @@ import { createEagleEye } from '../server/eagleeye.js';
 import { createArena } from '../server/arena.js';
 import { buildNav } from '../server/arena-nav.js';
 import { buildWorld, nullThree, EYE, RAD, STEP } from '../public/shooter/world.js';
-import { WEAPONS, MODES, ARENA, TEAMS, FLAG, dirAim, aimDir, falloff, zoneAt, flyShot, newShot } from '../public/shooter/rules.js';
+import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, FLAG, dirAim, aimDir, falloff, zoneAt, flyShot, newShot } from '../public/shooter/rules.js';
 import { ECON, PRANKS, ITEMS, DRINKS, BAR, LOOK, cleanLook, randomLook } from '../public/shared/defs.js';
 import { ROOM, STATIONS, STATION, isFree, findPath, pathLen } from '../public/shared/room.js';
 import { GAMES } from '../public/shared/games/index.js';
@@ -498,6 +498,85 @@ let EE;
   A.send({ t: 'eleave', code: code2 });
   check('og den sidste, der går, lukker kampen', C.last('eex').code === code2 && !ee.get(code2));
   A.send({ t: 'eclose' }); B.send({ t: 'eclose' });
+}
+
+section('skydespillet: våbnene som modeller, og hvordan de bevæger sig');
+{
+  const THREE = await import('../public/shooter/vendor/three.module.min.js');
+  const { makeArsenal } = await import('../public/shooter/weapons.js'), VM = await import('../public/shooter/viewmodel.js');
+  const { makeFigures } = await import('../public/shooter/figure.js'), { makeFx } = await import('../public/shooter/fx.js');
+  const A = makeArsenal(THREE), guns = WEAPON_IDS.filter(id => !WEAPONS[id].melee);
+  const tris = g => { let n = 0; g.traverse(o => { if (o.isMesh) n += o.geometry.attributes.position.count / 3; }); return n; };
+  const box = g => { g.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(g); return b; };
+  const built = Object.fromEntries(WEAPON_IDS.map(id => [id, A.build(id)])), long = id => { const b = box(built[id].group); return b.max.z - b.min.z; };
+  check('hvert våben er en model for sig og ikke en kasse (flere hundrede flader, få tegnekald)', WEAPON_IDS.every(id => built[id].id === id && tris(built[id].group) > 300 && tris(built[id].group) < 3000 && (() => { let n = 0; built[id].group.traverse(o => { if (o.isMesh) n++; }); return n <= 16; })()), WEAPON_IDS.map(id => id + ':' + tris(built[id].group)).join(' '));
+  check('modellerne har de mål, sådan et våben har', long('knife') > 0.28 && long('knife') < 0.38 && long('pistol') > 0.15 && long('pistol') < 0.24 && long('badgun') > 0.28 && long('badgun') < 0.4 && long('sniper') > 1.0 && long('sniper') < 1.3 && long('bazooka') > 1.05 && long('bazooka') < 1.4, WEAPON_IDS.map(id => id + ':' + long(id).toFixed(2)).join(' '));
+  check('de dele, der bevæger sig, er dele for sig: slæde, magasin, bundstykke, raket', !!(built.pistol.parts.slide && built.pistol.parts.mag && built.badgun.parts.bolt && built.badgun.parts.mag && built.sniper.parts.bolt && built.sniper.parts.mag && built.bazooka.parts.rocket));
+  check('mundingen sidder forrest, og grebet ligger i hånden', guns.every(id => { const d = built[id].def, b = box(built[id].group); return Math.abs(d.muzzle[2] - b.min.z) < 0.03 && Math.hypot(d.hand[0], d.hand[1], d.hand[2]) < 0.05 && d.len[0] < 0 && d.len[1] > 0; }));
+  check('alle kopier deler de samme former (ét sæt i hukommelsen)', A.build('pistol').group.children[0].geometry === built.pistol.group.children[0].geometry && tris(A.piece('bazooka', 'rocket')) > 100);
+
+  // the tables the moves are read from
+  const rest = k => { const o = []; VM.knifeAt(k, 0, o); return o; }, near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+  check('knivens tre hug begynder og ender i hvilestillingen og er færdige, før man kan hugge igen', VM.KNIFE.length === 3 && VM.KNIFE.every((sw, k) => {
+    const end = []; VM.knifeAt(k, sw.dur, end);
+    return sw.dur <= WEAPONS.knife.rate && sw.cut > 0 && sw.cut < sw.dur && sw.keys.every((m, i) => m.length === 10 && m[0] > (i ? sw.keys[i - 1][0] : 0) && m[0] < sw.dur) && near(rest(k), [...VM.REST.knife.p, ...VM.REST.knife.tip, ...VM.REST.knife.edge]) && near(end, rest(k));
+  }));
+  const reachOf = k => { let far = 0, path = 0, last = null; for (let t = 0; t <= VM.KNIFE[k].dur; t += 0.005) { const o = []; VM.knifeAt(k, t, o); const r0 = rest(k); far = Math.max(far, Math.hypot(o[0] - r0[0], o[1] - r0[1], o[2] - r0[2])); if (last) path += Math.hypot(o[0] - last[0], o[1] - last[1], o[2] - last[2]); last = o; } return [far, path]; };
+  check('i hvert hug kommer bladet langt omkring (det er et hug, ikke et ryk)', [0, 1, 2].every(k => reachOf(k)[1] > 0.5) && reachOf(0)[0] > 0.35 && reachOf(1)[0] > 0.2, [0, 1, 2].map(k => reachOf(k).map(v => v.toFixed(2)).join('/')).join(' '));
+  check('ladning: hvert skydevåben har sin egen, kanalerne går fra 0 til 1, og alt er på plads til sidst', guns.every(id => {
+    const T = VM.RELOAD[id];
+    return T && ['rig', 'mag', 'left', 'bolt'].every(c => T[c][0][0] === 0 && T[c][T[c].length - 1][0] === 1 && T[c].every((m, i) => !i || m[0] >= T[c][i - 1][0])) && T.rig[T.rig.length - 1].slice(1).every(v => v === 0) && T.rig[0].slice(1).every(v => v === 0)
+      && T.mag[T.mag.length - 1][1] === 0 && T.bolt[T.bolt.length - 1].slice(1).every(v => v === 0) && T.say.every((m, i) => m[0] > 0 && m[0] < 1 && (!i || m[0] > T.say[i - 1][0]));
+  }));
+  check('bundstykket på riflen når frem og tilbage, før den kan skyde igen', VM.BOLT_CYCLE.to <= WEAPONS.sniper.rate && VM.BOLT_CYCLE.say.map(m => m[1]).join() === 'boltUp,boltBack,boltFwd');
+
+  // the weapon in one's own hands, run without a screen
+  const said = [], vm = VM.makeViewModel(THREE, A, { sound: n => said.push(n) }), st = () => vm._debug.state;
+  const run = secs => { for (let k = 0; k < Math.round(secs * 120); k++) vm.update(1 / 120, { bob: k / 20, move: 0.5, swayX: 0.1, swayY: -0.1 }); };
+  const sane = () => { let ok = true; vm.scene.updateMatrixWorld(true); vm.scene.traverse(o => { for (const v of o.matrixWorld.elements) if (!Number.isFinite(v)) ok = false; }); return ok; };
+  vm.set('knife', true); run(0.3);
+  const kinds = [vm.swing()]; run(0.5); kinds.push(vm.swing()); run(0.5); kinds.push(vm.swing()); run(1.2); kinds.push(vm.swing()); run(0.5);
+  check('kniven: et hug fra højre, et tilbage fra venstre, det tredje hurtige er et stik, og efter en pause forfra', kinds.join() === '0,1,2,0' && said.filter(n => n === 'swish').length === 4 && st().swing === null && sane(), kinds.join() + ' ' + said.join());
+  said.length = 0; vm.set('pistol', true); run(0.2); vm.fire(false); run(0.2);
+  const slideHome = vm._debug.weapon.parts.slide.position.z === 0;
+  vm.fire(true); run(0.2);
+  const locked = st().slideLock && vm._debug.weapon.parts.slide.position.z > 0.03;
+  vm.reload(WEAPONS.pistol.reload); run(WEAPONS.pistol.reload / 2);
+  const magAway = Math.abs(vm._debug.weapon.parts.mag.position.y) > 0.05 || !vm._debug.weapon.parts.mag.visible;
+  run(WEAPONS.pistol.reload / 2 + 0.05); vm.loaded();
+  check('pistolen: slæden slår tilbage og hjem, står åben når den er tom, magasinet skiftes, og slæden slipper', slideHome && locked && magAway && said.join() === 'magOut,magIn,slide' && st().reload === null && !st().slideLock && vm._debug.weapon.parts.mag.position.y === 0 && sane(), [slideHome, locked, magAway, said.join()].join(' '));
+  said.length = 0; vm.set('sniper', true); run(0.2); vm.fire(false); run(0.5);
+  const boltBack = vm._debug.weapon.parts.bolt.position.z > 0.03 || vm._debug.weapon.parts.bolt.rotation.z > 0.5;
+  run(0.6);
+  check('riflen: bundstykket føres op, tilbage og frem efter hvert skud', boltBack && said.join() === 'boltUp,boltBack,boltFwd' && st().bolt === null && vm._debug.weapon.parts.bolt.position.z === 0 && vm._debug.weapon.parts.bolt.rotation.z === 0 && sane(), boltBack + ' ' + said.join());
+  said.length = 0; vm.set('bazooka', true); run(0.2);
+  const hadRocket = vm._debug.weapon.parts.rocket.visible;
+  vm.fire(true); run(0.1);
+  const gone = !vm._debug.weapon.parts.rocket.visible;
+  vm.reload(WEAPONS.bazooka.reload); run(WEAPONS.bazooka.reload + 0.05); vm.loaded();
+  check('bazookaen: raketten er væk efter skuddet, og en ny skubbes i', hadRocket && gone && vm._debug.weapon.parts.rocket.visible && said.join() === 'rocketIn' && sane(), [hadRocket, gone, said.join()].join(' '));
+  said.length = 0; vm.set('badgun'); run(0.05);
+  const mid = vm.current() === 'badgun' && st().id === 'bazooka';
+  run(0.5);
+  check('skift af våben: det gamle ned, det nye op', mid && st().id === 'badgun' && st().drawK === 1 && said.join() === 'switch' && sane());
+  vm.set('badgun', false, false); vm.fire(false); run(0.3); vm.reload(WEAPONS.badgun.reload); run(WEAPONS.badgun.reload + 0.05);
+  check('den dårlige pistol lades også færdig', st().reload === null && sane());
+
+  // the others, and what lies ready
+  const F = makeFigures(THREE, A), fig = F.make({ skin: 2, top: 1 }, { team: 'A' }), v = new THREE.Vector3();
+  const figOk = WEAPON_IDS.every(id => {
+    fig.setWeapon(id);
+    for (let k = 0; k < 40; k++) fig.update(1 / 60, 3, 0.2, false, k > 20);
+    fig.shoot(); for (let k = 0; k < 30; k++) fig.update(1 / 60, 0, -0.3, false, false);
+    fig.group.updateMatrixWorld(true);
+    let ok = fig.muzzle(v) && Number.isFinite(v.x + v.y + v.z) && v.z > 0.2 && v.y > 0.6 && v.y < 2.4;
+    fig.group.traverse(o => { for (const e of o.matrixWorld.elements) if (!Number.isFinite(e)) ok = false; });
+    return ok && tris(fig.group) > 300;
+  });
+  check('de andre bærer de samme modeller, med mundingen foran sig', figOk);
+  const N = nullThree(), W = buildWorld(N, N, N), fx = makeFx(THREE, new THREE.Scene(), W.PICKUPS, W.HEALTH_PACKS, A);
+  check('det, der ligger klar på banen, er våbnet selv', fx.pickups.length === W.PICKUPS.length && fx.pickups.every(p => tris(p.spin) > 300) && (() => { fx.tick(0.016, 1); fx.smoke(v, 0.2, 0.5, 0.4); fx.flashAt(v, new THREE.Vector3(0, 0, -1), 2); fx.tick(0.016, 1.016); return true; })());
+  vm.dispose(); A.dispose();
 }
 
 section('skydespillet: banen, og hvor robotterne kan gå');

@@ -1,13 +1,38 @@
 // SLQ Game Lobby — a player in the shooter: the clubhouse avatar as a figure in three dimensions. Skin, hair,
 // beard, clothes, shoes and what was bought in the kiosk all come from the same look as in the clubhouse. On a
 // team one wears the team's vest over it; robots are made of steel and carry an antenna.
-// The feet are at y = 0 and the figure looks along +z.
+// The feet are at y = 0 and the figure looks along +z (so its right hand is at -x).
+//
+// What it carries is the arsenal's model of the weapon (weapons.js), made bigger to fit the figure's big hands.
+// A firearm is held with both hands in front of the chest or at the shoulder and follows where the player looks;
+// the knife is in the right hand, and a swing of it is a real swing of the arm.
 import { LOOK } from '../shared/defs.js';
+import { channel } from './viewmodel.js';
 
 const hex = s => parseInt(s.slice(1), 16);
 const TEAM_COL = { A: 0xcf4a58, B: 0x4a78cf };
+// How a weapon is held. s: how much bigger than life it is [across, along the barrel] (the figures have big heads
+// and hands; a long weapon is made thicker rather than longer); at: where its grip is, seen from the middle between
+// the shoulders (x: to the figure's left, y: up, z: ahead); turn: how far the body is turned to get both hands on it;
+// off: where the left hand holds when the weapon has no place for it (from the right hand, in the weapon's own measure).
+const HOLD = {
+  knife: { s: [2.4, 2.4], turn: 0 },
+  pistol: { s: [2.4, 2.4], at: [0.0, -0.05, 0.42], turn: 0, off: [-0.036, -0.014, 0.004] },
+  badgun: { s: [2.2, 2.2], at: [0.0, -0.05, 0.42], turn: 0, off: [-0.036, -0.014, 0.004] },
+  sniper: { s: [2.0, 1.55], at: [-0.31, 0.02, 0.3], turn: -0.62 },
+  bazooka: { s: [1.7, 1.4], at: [-0.4, 0.03, 0.26], turn: -0.7 },
+};
+// The knife as the others see it: two swings that take turns. Moments: [seconds, the arm forward (x), the arm
+// across the body (z), how the body turns with it].
+const ARM_REST = [-0.9, 0.15, 0];
+const SWINGS = [
+  { dur: 0.42, keys: [[0, ...ARM_REST], [0.1, -2.45, -0.4, -0.4], [0.2, -1.2, 0.85, 0.45], [0.29, -0.55, 1.0, 0.35], [0.42, ...ARM_REST]] },
+  { dur: 0.42, keys: [[0, ...ARM_REST], [0.1, -1.5, 1.15, 0.45], [0.2, -1.35, -0.25, -0.4], [0.29, -0.9, -0.55, -0.3], [0.42, ...ARM_REST]] },
+];
+const ARM = 0.55;      // from the shoulder to the middle of the hand
 
-export function makeFigures(THREE) {
+// arsenal: makeArsenal() from weapons.js; without it the figures carry nothing.
+export function makeFigures(THREE, arsenal) {
   // every shape is made once and shared by all figures
   const G = {
     sphere: new THREE.SphereGeometry(1, 18, 14), half: new THREE.SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2),
@@ -66,18 +91,7 @@ export function makeFigures(THREE) {
     return s;
   }
 
-  // Simple weapons for the hand of somebody else (the long axis is +z, the grip at the origin).
-  function buildWeapon(g, id) {
-    while (g.children.length) g.remove(g.children[0]);
-    const dark = mat(0x2a2c30, 0.6);
-    const box = (w, hh, d, x, y, z, m) => part(g, G.box, m || dark, w, hh, d, x, y, z);
-    const cyl = (r, len, x, y, z, m) => { part(g, G.cyl, m || dark, r, len, r, x, y, z).rotation.x = Math.PI / 2; };
-    if (id === 'knife') box(0.05, 0.09, 0.5, 0, 0, 0.3, mat(0xd0d4d8, 0.3, { metalness: 0.6 }));
-    else if (id === 'pistol') { box(0.09, 0.15, 0.26, 0, 0, 0.08); cyl(0.03, 0.22, 0, 0.03, 0.26); }
-    else if (id === 'sniper') { cyl(0.035, 1.0, 0, 0.02, 0.45); box(0.1, 0.13, 0.34, 0, -0.03, 0.06); box(0.07, 0.1, 0.2, 0, 0.13, 0.34); }
-    else if (id === 'bazooka') { cyl(0.12, 1.0, 0, 0, 0.45, mat(0x3f5a2a, 0.75)); cyl(0.14, 0.12, 0, 0, 0.06); }
-    else { box(0.1, 0.14, 0.32, 0, 0, 0.12); cyl(0.028, 0.26, 0, 0.02, 0.34); }
-  }
+  const DOWN = new THREE.Vector3(0, -1, 0), V = new THREE.Vector3(), ch = [0, 0, 0];
 
   // look: a clubhouse look. opt: { team: 'A' | 'B' | '', bot, name, tag: colour of the name or '' for none }
   function make(look, opt = {}) {
@@ -112,20 +126,25 @@ export function makeFigures(THREE) {
       vest = part(upper, G.open, mat(TEAM_COL[opt.team], 0.6, { emissive: TEAM_COL[opt.team], emissiveIntensity: 0.25, side: THREE.DoubleSide }), 0.365, 0.46, 0.335, 0, 0.4, 0);
       for (const s of [-1, 1]) part(upper, G.box, vest.material, 0.1, 0.06, 0.3, s * 0.2, 0.66, 0);
     }
-    // arms (they turn at the shoulder; the hand is at the end)
-    const arms = [];
+    // arms (they turn at the shoulder; the hand is at the end). arms[0] is the right one.
+    const arms = [], hands = [];
     for (const s of [-1, 1]) {
       const arm = new THREE.Group(); arm.position.set(s * 0.41, 0.6, 0); upper.add(arm);
       const sleeve = style === 'tee' || style === 'stripes' ? 0.24 : 0.5;
       part(arm, G.cyl, top, 0.092, sleeve, 0.092, 0, -sleeve / 2, 0, true);
       if (sleeve < 0.5) part(arm, G.cyl, skin, 0.078, 0.5 - sleeve, 0.078, 0, -sleeve - (0.5 - sleeve) / 2, 0);
-      part(arm, G.sphere, skin, 0.1, 0.1, 0.1, 0, -0.55, 0);
+      hands.push(part(arm, G.sphere, skin, 0.1, 0.1, 0.1, 0, -ARM, 0));
       arms.push(arm);
     }
-    const weapon = new THREE.Group(); weapon.position.set(0, -0.58, 0.04); weapon.rotation.x = Math.PI / 2; arms[1].add(weapon);
+    // what is held with both hands hangs in `aim`, which follows where one looks; the knife sits in the right hand:
+    // its point ahead and a little up when the arm is half raised, the edge down
+    const aim = new THREE.Group(); aim.position.set(0, 0.6, 0); aim.rotation.order = 'YXZ'; upper.add(aim);
+    const gunHold = new THREE.Group(); gunHold.rotation.y = Math.PI; aim.add(gunHold);         // the arsenal's weapons point along -z
+    const knifeHold = new THREE.Group(); arms[0].add(knifeHold);
+    knifeHold.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0.866, 0.5), new THREE.Vector3(0, 0.5, -0.866)));
 
     // head
-    const head = new THREE.Group(); head.position.y = 1.08; upper.add(head);
+    const head = new THREE.Group(); head.position.y = 1.08; head.rotation.order = 'YXZ'; upper.add(head);
     const skull = part(head, G.sphere, skin, 0.42, 0.42, 0.42, 0, 0, 0, true);
     const eyes = pick('eyes'), eyeM = opt.bot ? mat(0x7fe8ff, 0.3, { emissive: 0x39c8f0, emissiveIntensity: 1.2 }) : ink;
     for (const s of [-1, 1]) {
@@ -162,13 +181,34 @@ export function makeFigures(THREE) {
 
     // ---- moving ----
     const f = { group: root, weaponId: '', walk: 0, flashT: 0, shootT: 0, deadT: -1, tag };
-    f.setWeapon = id => { if (id !== f.weaponId) { f.weaponId = id; buildWeapon(weapon, id); } };
+    let held = null, hold = HOLD.knife, swingT = -1, swingKind = 0, swingNo = 0, twist = 0, loadK = 0, loadT = 0;
+    f.setWeapon = id => {
+      if (id === f.weaponId) return;
+      f.weaponId = id; hold = HOLD[id] || HOLD.pistol; swingT = -1;
+      if (held) held.group.parent.remove(held.group);
+      held = arsenal ? arsenal.build(id, { shadow: true }) : null;
+      if (!held) return;
+      held.group.scale.set(hold.s[0], hold.s[0], hold.s[1]);
+      if (id === 'knife') { knifeHold.add(held.group); const a = held.def.hand; knifeHold.position.set(0, -ARM, 0).addScaledVector(V.set(0, 0.5, -0.866), -a[2] * hold.s[1]); }
+      else { gunHold.add(held.group); gunHold.position.set(hold.at[0], hold.at[1], hold.at[2]); }
+    };
     f.flash = () => { f.flashT = 0.18; };
-    f.shoot = () => { f.shootT = 0.15; };
+    // a shot, or a swing of the knife
+    f.shoot = () => { f.shootT = 0.15; if (f.weaponId === 'knife') { swingT = 0; swingKind = swingNo++ % 2; } };
+    // where the muzzle (or the knife's point) is in the world; false when nothing is carried
+    f.muzzle = out => { if (!held) return false; held.group.updateWorldMatrix(true, false); const m = held.def.muzzle; out.set(m[0], m[1], m[2]).applyMatrix4(held.group.matrixWorld); return true; };
+    // A hand goes to a place on the weapon (in the weapon's own measure): the arm points there, and gives a little.
+    function reach(i, x, y, z) {
+      const arm = arms[i], s = hold.s;
+      V.set(gunHold.position.x - x * s[0], gunHold.position.y + y * s[0], gunHold.position.z - z * s[1]).applyEuler(aim.rotation).add(aim.position).sub(arm.position);
+      const len = V.length(), k = Math.max(0.72, Math.min(1.32, len / ARM));
+      arm.quaternion.setFromUnitVectors(DOWN, V.divideScalar(len || 1));
+      arm.scale.y = k; hands[i].scale.y = 0.1 / k;
+    }
     f.die = () => { if (f.deadT < 0) f.deadT = 0; };
     f.alive = () => { f.deadT = -1; body.rotation.x = 0; body.position.y = 0; root.visible = true; };
-    // speed: metres a second over the ground; pitch: where they look; air: off the ground
-    f.update = (dt, speed, pitch, air) => {
+    // speed: metres a second over the ground; pitch: where they look; air: off the ground; loading: a magazine is being changed
+    f.update = (dt, speed, pitch, air, loading) => {
       if (f.flashT > 0) { f.flashT -= dt; const e = Math.max(0, f.flashT / 0.18) * 0.9; torso.material.emissive.setRGB(e, 0, 0); skull.material.emissive.setRGB(e * 0.7, 0, 0); }
       if (f.deadT >= 0) {
         f.deadT += dt;
@@ -182,17 +222,47 @@ export function makeFigures(THREE) {
       f.walk += dt * Math.min(12, speed * 1.9);
       const amp = air ? 0.5 : Math.min(0.85, speed * 0.13), sw = Math.sin(f.walk) * amp;
       legs[0].rotation.x = air ? -0.5 : sw; legs[1].rotation.x = air ? 0.35 : -sw;
-      const knife = f.weaponId === 'knife';
+      const knife = f.weaponId === 'knife' || !held;
       const kick = f.shootT > 0 ? (f.shootT / 0.15) : 0;
-      arms[1].rotation.x = knife ? -1.0 - kick * 1.1 : -Math.PI / 2 - pitch + kick * 0.35;
-      arms[0].rotation.x = knife ? -sw * 0.8 : -1.15 - pitch * 0.7;
-      arms[0].rotation.z = knife ? 0 : -0.45;
-      head.rotation.x = -pitch * 0.6;
-      upper.rotation.x = -pitch * 0.15 + (speed > 7 ? 0.12 : 0);
+      let turn = hold.turn;
+      if (knife) {
+        // the right arm holds the knife ahead, or swings it; the left one swings with the walk
+        let ax = ARM_REST[0] - pitch * 0.5, az = ARM_REST[1];
+        if (swingT >= 0) {
+          const S = SWINGS[swingKind];
+          swingT += dt;
+          channel(S.keys, Math.min(S.dur, swingT), ch);
+          ax = ch[0] - pitch * 0.6; az = ch[1]; turn = ch[2];
+          if (swingT >= S.dur) swingT = -1;
+        }
+        twist += (turn - twist) * Math.min(1, dt * 22);
+        for (const i of [0, 1]) { arms[i].scale.y = 1; hands[i].scale.y = 0.1; }
+        arms[0].rotation.set(ax, 0, az); arms[1].rotation.set(sw * 0.8, 0, 0);
+        loadK = 0;
+      } else {
+        // both hands on the weapon: it follows the eyes, kicks when it fires, and is tipped down while it is loaded
+        twist += (turn - twist) * Math.min(1, dt * 10);
+        loadK += ((loading ? 1 : 0) - loadK) * Math.min(1, dt * 9); loadT = loading ? loadT + dt : 0;
+        const d = held.def, h = d.hand;
+        aim.rotation.set(-pitch * 0.85 - kick * 0.2 + loadK * 0.5, -twist, loadK * 0.3);
+        gunHold.position.set(hold.at[0], hold.at[1], hold.at[2] - kick * 0.07);
+        reach(0, h[0], h[1], h[2]);
+        // the left hand: where the weapon is supported, or beside the right one; while loading it works the magazine
+        const sup = d.support || [h[0] + hold.off[0], h[1] + hold.off[1], h[2] + hold.off[2]];
+        let lx = sup[0], ly = sup[1], lz = sup[2];
+        if (loadK > 0.01 && d.magHand) {
+          const pv = d.pivots.rocket || [0, 0, 0], out = d.pivots.rocket ? [0, -0.04, -0.26] : d.magOut || [0, -0.15, 0], k = 0.5 + 0.5 * Math.cos(loadT * 7);
+          lx += (pv[0] + d.magHand[0] + out[0] * k - lx) * loadK; ly += (pv[1] + d.magHand[1] + out[1] * k - ly) * loadK; lz += (pv[2] + d.magHand[2] + out[2] * k - lz) * loadK;
+        }
+        reach(1, lx, ly, lz);
+      }
+      head.rotation.set(-pitch * 0.6, -twist, 0);
+      upper.rotation.set(-pitch * 0.15 + (speed > 7 ? 0.12 : 0), twist, 0);
       upper.position.y = 0.7 + (air ? 0 : Math.abs(Math.sin(f.walk)) * amp * 0.05);
       if (f.shootT > 0) f.shootT -= dt;
     };
-    f.dispose = () => { root.traverse(o => { if (o.isSprite) { o.material.map.dispose(); o.material.dispose(); } else if (o.isMesh) o.material.dispose(); }); };
+    // the weapon's shapes and materials belong to the arsenal: they are taken off before the figure's own are freed
+    f.dispose = () => { if (held) { held.group.parent.remove(held.group); held = null; } root.traverse(o => { if (o.isSprite) { o.material.map.dispose(); o.material.dispose(); } else if (o.isMesh) o.material.dispose(); }); };
     f.setWeapon('knife');
     return f;
   }

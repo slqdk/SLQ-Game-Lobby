@@ -14,8 +14,9 @@ const PLACES = {
   6: [[50, 100], [3, 68], [14, 8], [50, 0], [86, 8], [97, 68]],
 };
 
-const card = (c, cls = '') => c < 0 ? h('div', { class: 'card back ' + cls })
-  : h('div', { class: 'card ' + (c >= 13 && c < 39 ? 'red ' : '') + cls, 'aria-label': RANK_NAMES[c % 13] + SUITS[(c / 13) | 0] }, h('b', {}, RANK_NAMES[c % 13]), h('i', {}, SUITS[(c / 13) | 0]));
+// (the class is "pcard": "card" is the panel of the welcome screen)
+const card = (c, cls = '') => c < 0 ? h('div', { class: 'pcard back ' + cls })
+  : h('div', { class: 'pcard ' + (c >= 13 && c < 39 ? 'red ' : '') + cls, 'aria-label': RANK_NAMES[c % 13] + SUITS[(c / 13) | 0] }, h('b', {}, RANK_NAMES[c % 13]), h('i', {}, SUITS[(c / 13) | 0]));
 const list = n => n.length > 2 ? n.slice(0, -1).join(', ') + ' og ' + n[n.length - 1] : n.join(' og ');
 
 export function renderPoker(tv, ctx) {
@@ -69,7 +70,7 @@ export function renderPoker(tv, ctx) {
   });
   const boardCards = show ? last.board : v.board;
   felt.append(h('div', { class: 'pk-mid' }, h('div', { class: 'potline' }, v.phase === 'bet' ? 'I potten: ' + v.pot : ''),
-    h('div', { class: 'board' }, [0, 1, 2, 3, 4].map(k => boardCards[k] !== undefined ? card(boardCards[k]) : h('div', { class: 'card empty' })))));
+    h('div', { class: 'board' }, [0, 1, 2, 3, 4].map(k => boardCards[k] !== undefined ? card(boardCards[k]) : h('div', { class: 'pcard empty' })))));
   out.push(h('div', { class: 'pk-wrap' }, felt));
 
   // ---- what is going on ----

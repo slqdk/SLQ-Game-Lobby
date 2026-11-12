@@ -1001,6 +1001,24 @@ section('ludo');
   for (const c of [A, B, C]) c.send({ t: 'tleave', id: id2 });
 }
 
+section('stilarket');
+{
+  // The welcome screen once shrank to the size of a playing card: poker had given its cards the class "card", which
+  // was already the panel of the welcome screen. So: no class may have a rule of its own in two parts of the sheet
+  // (rules inside @media are the same part's own adjustments and do not count), and the shooter keeps to "sh-".
+  const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
+  const rules = (text, each) => { let depth = 0, sel = ''; for (const ch of text.replace(/\/\*[\s\S]*?\*\//g, '')) { if (ch === '{') { if (depth === 0 && !sel.trim().startsWith('@')) sel.split(',').forEach(x => each(x.trim())); depth++; sel = ''; } else if (ch === '}') { depth--; sel = ''; } else if (depth === 0) sel += ch; } };
+  const parts = read('../public/css/app.css').split(/\/\* -{3,} (.*?) -{3,} \*\//), home = new Map(), twice = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const part = i ? parts[i - 1] : 'toppen';
+    rules(parts[i], x => { if (!/^\.[\w-]+$/.test(x)) return; if (home.has(x) && home.get(x) !== part) twice.push(x + ' (' + home.get(x) + ' og ' + part + ')'); home.set(x, part); });
+  }
+  check('ingen klasse har sin egen regel i to afsnit af stilarket', parts.length > 20 && home.has('.card') && home.has('.pcard') && twice.length === 0, twice.join(', '));
+  const loose = [];
+  rules(read('../public/shooter/shooter.css'), x => { if (x && !/^(\.sh-|#arena)/.test(x)) loose.push(x); });
+  check('skydespillets stilark holder sig til sine egne navne', loose.length === 0, loose.join(', '));
+}
+
 section('glemt kodeord');
 {
   check('uden nøglen er der ingen adgang', /Ingen adgang/.test(throws(() => hub.api.admin({ key: 'x'.repeat(32), op: 'users' }, '7.7.7.7'))));

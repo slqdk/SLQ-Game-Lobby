@@ -31,6 +31,26 @@ export function makeSfx(ear) {
     const g = env(t, 0.006, vol, dur); o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.08);
   }
   function att(x, z, max) { return Math.max(0, 1 - Math.hypot(ear.x - x, ear.z - z) / max); }
+  function whoosh(vol, dur, f0, f1, delay) {                  // air: noise through a narrow filter that slides
+    if (!ensure() || vol <= 0.01) return; const t = ctx.currentTime + (delay || 0);
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf(dur + 0.05);
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.3; f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + dur * 0.4); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(master); src.start(t);
+  }
+  function clack(vol, freq, delay) { bang(vol, 0.035, freq * 2.6, 0, delay); tone(freq, 0.028, vol * 0.55, 'square', 0, delay); }      // metal against metal
+  // what the hands do with a weapon (the view model says when): a swing of the knife, magazines, the slide, the bolt
+  const GEAR = {
+    swish: function () { whoosh(0.5, 0.2, 700, 2800); },
+    switch: function () { whoosh(0.16, 0.14, 420, 1100); clack(0.1, 700, 0.1); },
+    magOut: function () { clack(0.16, 520); whoosh(0.08, 0.1, 900, 500, 0.02); },
+    magIn: function () { clack(0.2, 640); clack(0.16, 980, 0.045); },
+    slide: function () { clack(0.2, 880); clack(0.22, 1250, 0.055); },
+    boltUp: function () { clack(0.16, 1000); },
+    boltBack: function () { clack(0.18, 720); whoosh(0.07, 0.08, 1500, 900, 0.01); },
+    boltFwd: function () { clack(0.2, 820); clack(0.2, 1150, 0.06); },
+    rocketIn: function () { whoosh(0.2, 0.24, 300, 800); bang(0.3, 0.08, 900, 0.1, 0.22); },
+  };
   return {
     unlock: function () { ensure(); },
     toggleMute: function () { muted = !muted; try { localStorage.setItem('slqShooterMute', muted ? '1' : '0'); } catch (e) { } if (master) master.gain.value = muted ? 0 : 0.5; return muted; },
@@ -41,7 +61,9 @@ export function makeSfx(ear) {
       else if (w === 'badgun') bang(0.32, 0.10, 1900, 0.05);
       else tone(700, 0.09, 0.14, 'triangle', 220);            // kniv-svisj
     },
-    reloadS: function () { tone(1300, 0.03, 0.16, 'square'); tone(900, 0.03, 0.16, 'square', 0, 0.13); },
+    gear: function (name) { if (GEAR[name]) GEAR[name](); },
+    knifeHit: function () { bang(0.42, 0.07, 1500, 0.14); tone(170, 0.09, 0.2, 'sine', 80); },
+    remoteSwish: function (x, z) { const v = 0.4 * att(x, z, 16); if (v > 0.02) whoosh(v, 0.2, 700, 2800); },
     hit: function () { tone(2300, 0.045, 0.22, 'triangle'); },
     hurt: function () { bang(0.4, 0.12, 700, 0.15); },
     death: function () { tone(330, 0.16, 0.3, 'sawtooth', 160); tone(180, 0.3, 0.3, 'sawtooth', 80, 0.14); },

@@ -1,7 +1,7 @@
 // SLQ Game Lobby — the shooter's small things: sparks, the flash at a muzzle, the weapons and health packs that
-// lie ready, the golden star and the dinos. Moved here unchanged from the stand-alone shooter; only what one sees,
-// the rules about them are on the server.
-export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS) {
+// lie ready, the golden star and the dinos. Only what one sees; the rules about them are on the server.
+// arsenal: makeArsenal() from weapons.js: the weapons that lie ready are its models, and so is the fire at a muzzle.
+export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
   const mat = function (color, rough) { return new THREE.MeshStandardMaterial({ color: color, roughness: rough == null ? 0.95 : rough, metalness: 0.0 }); };
   const TEAM_COL = { A: 0xcf4a58, B: 0x4a78cf };
 
@@ -26,22 +26,43 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS) {
   const muzzle = new THREE.PointLight(0xffc266, 0, 10); scene.add(muzzle); let muzzleT = 0;
   function flashMuzzle(pos, strength) { muzzle.position.copy(pos); muzzle.intensity = strength || 26; muzzleT = 0.06; }
   function tickMuzzle(dt) { if (muzzleT > 0) { muzzleT -= dt; muzzle.intensity = muzzleT <= 0 ? 0 : muzzle.intensity * 0.72; } }
+  // the fire one sees at somebody else's muzzle: pos, the way the shot goes, how big
+  const flashes = [], AHEAD = new THREE.Vector3(0, 0, -1);
+  function flashAt(pos, dir, size) {
+    if (!arsenal) return;
+    let f = flashes.find(x => x.t <= 0);
+    if (!f) { if (flashes.length >= 8) f = flashes[0]; else { f = { m: new THREE.Mesh(arsenal.flashGeo, arsenal.flashMat.clone()), t: 0 }; scene.add(f.m); flashes.push(f); } }
+    f.m.position.copy(pos); f.m.quaternion.setFromUnitVectors(AHEAD, dir); f.m.rotateZ(Math.random() * Math.PI); f.m.scale.setScalar(size || 2);
+    f.m.visible = true; f.t = 0.065;
+  }
 
-  const pickups = PICKUPS.map(function (p) {
-    const g = new THREE.Group();
-    const shape = p.type === 'bazooka' ? new THREE.CylinderGeometry(0.16, 0.16, 1.2, 10)
-      : p.type === 'sniper' ? new THREE.BoxGeometry(0.14, 0.14, 1.4)
-        : p.type === 'pistol' ? new THREE.BoxGeometry(0.5, 0.4, 0.18)
-          : new THREE.BoxGeometry(0.42, 0.32, 0.16);
-    const m = new THREE.Mesh(shape, new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.4, metalness: 0.3, emissive: p.color, emissiveIntensity: 0.25 }));
-    if (p.type === 'bazooka') m.rotation.z = Math.PI / 2;
-    m.castShadow = true;
-    g.add(m);
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.06, 20), new THREE.MeshStandardMaterial({ color: p.color, transparent: true, opacity: 0.5, emissive: p.color, emissiveIntensity: 0.3 }));
-    ring.position.y = -0.55; g.add(ring);
+  // smoke: soft grey balls that grow, rise and fade (behind a rocket)
+  const puffs = [], puffGeo = new THREE.SphereGeometry(1, 8, 6);
+  function smoke(pos, size, ttl, rise) {
+    let p = puffs.find(x => x.t >= x.ttl);
+    if (!p) { if (puffs.length >= 48) return; p = { m: new THREE.Mesh(puffGeo, new THREE.MeshBasicMaterial({ color: 0xbdb9b0, transparent: true, opacity: 0, depthWrite: false })), t: 0, ttl: 0, s: 1, rise: 0 }; scene.add(p.m); puffs.push(p); }
+    p.m.position.copy(pos); p.m.scale.setScalar(size); p.m.visible = true; p.t = 0; p.ttl = ttl; p.s = size; p.rise = rise || 0.4;
+  }
+
+  // The weapons that lie ready: the real thing, bigger than life, turning slowly over a ring of light in the
+  // colour of its kind, with a faint pillar of the same light so that it is seen from far away.
+  const BIG = { knife: 2.6, pistol: 3.1, badgun: 2.7, sniper: 1.45, bazooka: 1.3 };
+  const ringGeo = new THREE.CylinderGeometry(0.72, 0.72, 0.04, 28), glowGeo = new THREE.CylinderGeometry(0.34, 0.6, 2.3, 24, 1, true);
+  const pickups = PICKUPS.map(function (p, i) {
+    const g = new THREE.Group(), spin = new THREE.Group();
+    if (arsenal) {
+      const w = arsenal.build(p.type, { shadow: true }), s = BIG[p.type] || 2.5, len = w.def.len, tilt = new THREE.Group();
+      w.group.scale.setScalar(s); w.group.position.set(0, -0.03 * s, -(len[0] + len[1]) / 2 * s);       // its middle over the middle of the ring
+      tilt.rotation.x = 0.3; tilt.add(w.group); spin.add(tilt);
+    }
+    g.add(spin);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({ color: p.color, transparent: true, opacity: 0.6, emissive: p.color, emissiveIntensity: 0.55, depthWrite: false }));
+    ring.position.y = -1.07; g.add(ring);
+    const glow = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    glow.position.y = 0.06; g.add(glow);
     g.position.set(p.x, (p.y || 0) + 1.1, p.z);
     scene.add(g);
-    return { type: p.type, x: p.x, z: p.z, y: p.y || 0, mesh: g, active: true, respawn: 0, ride: p.ride || false };
+    return { type: p.type, x: p.x, z: p.z, y: p.y || 0, mesh: g, spin, phase: i * 1.7, active: true, respawn: 0, ride: p.ride || false };
   });
 
 
@@ -88,5 +109,13 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS) {
     return g;
   }
 
-  return { spawnParticles: spawnParticles, updateParticles: updateParticles, flashMuzzle: flashMuzzle, tickMuzzle: tickMuzzle, pickups: pickups, healthPacks: healthPacks, makeStar: makeStar, buildDino: buildDino };
+  // every frame: what lies ready turns and bobs, and the fire at the muzzles dies out. t: seconds, any clock
+  function tick(dt, t) {
+    for (const p of pickups) { p.spin.rotation.y += dt * 1.5; p.spin.position.y = Math.sin(t * 2.1 + p.phase) * 0.07; }
+    for (const p of healthPacks) p.mesh.rotation.y += dt * 1.4;
+    for (const f of flashes) if (f.t > 0) { f.t -= dt; f.m.material.opacity = Math.max(0, f.t / 0.065) * 0.95; if (f.t <= 0) f.m.visible = false; }
+    for (const p of puffs) if (p.t < p.ttl) { p.t += dt; const k = p.t / p.ttl; if (k >= 1) { p.m.visible = false; continue; } p.m.position.y += p.rise * dt; p.m.scale.setScalar(p.s * (1 + k * 2.6)); p.m.material.opacity = 0.5 * (1 - k); }
+  }
+
+  return { spawnParticles: spawnParticles, updateParticles: updateParticles, flashMuzzle: flashMuzzle, tickMuzzle: tickMuzzle, flashAt: flashAt, smoke: smoke, tick: tick, pickups: pickups, healthPacks: healthPacks, makeStar: makeStar, buildDino: buildDino };
 }

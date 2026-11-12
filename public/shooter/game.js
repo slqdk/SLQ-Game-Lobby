@@ -7,14 +7,17 @@ import { buildWorld, EYE } from './world.js';
 import { makeTextures } from './tex.js';
 import { makeSfx } from './sfx.js';
 import { makeFx } from './fx.js';
+import { makeArsenal } from './weapons.js';
 import { makeViewModel } from './viewmodel.js';
 import { makeFigures } from './figure.js';
 import { mergeStatic } from './merge.js';
+import { LOOK } from '../shared/defs.js';
 import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, FLAG, LEVELS, other, aimDir, spreadDir, zoneAt, dinoAt, newShot, flyShot } from './rules.js';
 
 const SENS = 0.0022, PITCH_MAX = 1.5, BASE_FOV = 78, ZOOM_FOV = 32, INTERP = 100;      // INTERP: how far behind the others are shown (ms)
 const DEG = Math.PI / 180;
 const TAG = { A: '#ff9aa0', B: '#9cc2ff', '': '#ffd98a' };
+const FLASH = { pistol: 2.1, badgun: 1.6, sniper: 2.9, bazooka: 3.8 };      // how big the fire at somebody else's muzzle is
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const angLerp = (a, b, t) => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return a + d * t; };
 
@@ -56,10 +59,14 @@ export function startGame({ root, info, send, sound = true, leave }) {
   const world = buildWorld(THREE, scene, makeTextures(THREE));
   // everything that stands still is joined into a few big pieces (the wagons of the train move, so they are left)
   const merged = mergeStatic(THREE, scene, new Set(world.trainCars.map(c => c.grp)));
-  const fx = makeFx(THREE, scene, world.PICKUPS, world.HEALTH_PACKS);
-  const vm = makeViewModel(THREE, camera);
-  const figures = makeFigures(THREE);
-  const euler = new THREE.Euler(0, 0, 0, 'YXZ'), YUP = new THREE.Vector3(0, 1, 0), V = new THREE.Vector3();
+  // The weapons: one arsenal makes the models, for my own hands (the view model, drawn on top of the arena),
+  // for the hands of the others and for what lies ready. My arms have my own skin and sleeves.
+  const arsenal = makeArsenal(THREE, renderer);
+  const fx = makeFx(THREE, scene, world.PICKUPS, world.HEALTH_PACKS, arsenal);
+  const myLook = (info.ents.find(a => a.id === you) || {}).look || {}, lookOf = k => LOOK[k][myLook[k]] !== undefined ? LOOK[k][myLook[k]] : LOOK[k][0], hexOf = s => parseInt(s.slice(1), 16);
+  const vm = makeViewModel(THREE, arsenal, { skin: hexOf(lookOf('skin')), sleeve: hexOf(lookOf('topCol')), bare: ['tee', 'stripes'].includes(lookOf('top')), sound: name => sfx.gear(name) });
+  const figures = makeFigures(THREE, arsenal);
+  const euler = new THREE.Euler(0, 0, 0, 'YXZ'), YUP = new THREE.Vector3(0, 1, 0), V = new THREE.Vector3(), V2 = new THREE.Vector3();
 
   // How fine the picture is: the lines drawn at most, whether there are shadows, and how often they are redrawn.
   const QUALITY = [{ name: 'Lavest', maxH: 480, shadows: 0 }, { name: 'Lav', maxH: 720, shadows: 3 }, { name: 'Mellem', maxH: 1080, shadows: 2 }, { name: 'Høj', maxH: 1440, shadows: 1 }];
@@ -91,7 +98,8 @@ export function startGame({ root, info, send, sound = true, leave }) {
   const trainStarMesh = fx.makeStar(1.6); trainStarMesh.visible = false; scene.add(trainStarMesh);
   const towerStars = { A: [], B: [] };
   const bulletGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.5, 6), bulletMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, emissive: 0xffa838, emissiveIntensity: 0.9 });
-  const rocketGeo = new THREE.SphereGeometry(0.18, 10, 8), rocketMat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0x552200, emissiveIntensity: 0.4 });
+  const rocketFire = arsenal.flashMat.clone(), AHEAD = new THREE.Vector3(0, 0, -1);
+  rocketFire.color.set(0xffa040);
   const dinoBulletMat = new THREE.MeshStandardMaterial({ color: 0xffaa55, emissive: 0xff6622, emissiveIntensity: 0.85 });
   const boomGeo = new THREE.SphereGeometry(0.4, 16, 12);
 
@@ -156,7 +164,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     H.wName.textContent = w.name;
     H.wAmmo.textContent = w.melee ? '' : my.reload > 0 ? 'lader …' : my.mags[my.w] + ' / ' + w.magMax;
     [...H.slots.children].forEach((s, i) => { s.className = (my.owned & (1 << i) ? 'own' : '') + (i === my.w ? ' on' : ''); });
-    vm.set(id);
+    vm.set(id, false, !!w.melee || my.mags[my.w] > 0);
   }
   function healthHud() { H.hpBar.style.width = Math.max(0, my.hp) + '%'; H.hpNum.textContent = String(Math.max(0, my.hp)); H.health.classList.toggle('low', my.hp <= 35); }
   function drawBoard() {
@@ -224,7 +232,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
   const onMenu = e => { if (running) e.preventDefault(); };
   function setZoom(on) {
     my.zoom = !!on && !!WEAPONS[WEAPON_IDS[my.w]].zoom && my.alive;
-    H.scope.style.opacity = my.zoom ? '1' : '0'; vm.group.visible = !my.zoom;
+    H.scope.style.opacity = my.zoom ? '1' : '0';
   }
   function switchTo(i) {
     if (i === my.w || !(my.owned & (1 << i)) || !my.alive) return;
@@ -265,7 +273,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
   function reload() {
     const w = WEAPONS[WEAPON_IDS[my.w]];
     if (w.melee || my.reload > 0 || my.mags[my.w] >= w.magMax) return;
-    my.reload = w.reload; sfx.reloadS(); weaponHud();
+    my.reload = w.reload; vm.reload(w.reload); weaponHud();
   }
   // first: the trigger was just pulled (the knife and an empty click need that; the rest fires as long as it is held)
   function fire(first) {
@@ -274,7 +282,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     const id = WEAPON_IDS[my.w], w = WEAPONS[id], o = [me.x, me.y + EYE, me.z];
     if (w.melee) {
       if (!first) return;
-      my.fireCd = w.rate; kick = 1; sfx.shoot('knife');
+      my.fireCd = w.rate; kick = 1; vm.swing();
       send({ t: 'af', w: my.w, o: o.map(r2), d: aimDir(me.yaw, me.pitch).map(r3), i: shotId++ });
       return;
     }
@@ -287,14 +295,21 @@ export function startGame({ root, info, send, sound = true, leave }) {
     const d = spreadDir(aimDir(me.yaw, me.pitch), sp, Math.random), s = newShot(o, d, w.speed, w.grav);
     addShot(s, !!w.splash, { own: true, wi: my.w, id: shotId });
     send({ t: 'af', w: my.w, o: o.map(r2), d: d.map(r3), i: shotId++ });
-    sfx.shoot(id); kick = 1;
+    sfx.shoot(id); kick = 1; vm.fire(my.mags[my.w] <= 0);
     fx.flashMuzzle(V.set(o[0] + d[0] * 0.9, o[1] + d[1] * 0.9, o[2] + d[2] * 0.9));
     if (my.mags[my.w] <= 0) reload();
     weaponHud();
   }
   const r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1000) / 1000;
   function addShot(s, rocket, extra, material) {
-    const mesh = new THREE.Mesh(rocket ? rocketGeo : bulletGeo, material || (rocket ? rocketMat : bulletMat));
+    let mesh;
+    if (rocket) {
+      // the rocket itself, bigger than life so that it is seen coming, with fire at its tail
+      mesh = arsenal.piece('bazooka', 'rocket'); mesh.scale.setScalar(2.4);
+      const fire = new THREE.Mesh(arsenal.flashGeo, rocketFire); fire.position.z = 0.34; fire.rotation.y = Math.PI; mesh.add(fire);
+      mesh.quaternion.setFromUnitVectors(AHEAD, V.set(s.vx, s.vy, s.vz).normalize());
+      mesh.visible = !(extra && extra.own);            // my own is shown when it is clear of my face
+    } else mesh = new THREE.Mesh(bulletGeo, material || bulletMat);
     mesh.position.set(s.x, s.y, s.z); scene.add(mesh);
     shots.push(Object.assign({ s, mesh, rocket }, extra));
   }
@@ -318,7 +333,12 @@ export function startGame({ root, info, send, sound = true, leave }) {
         return world.hitWorld(x, y, z) ? 'wall' : null;
       });
       sh.mesh.position.set(s.x, s.y, s.z);
-      if (!sh.rocket) sh.mesh.quaternion.setFromUnitVectors(YUP, V.set(s.vx, s.vy, s.vz).normalize());
+      if (sh.rocket) {
+        sh.mesh.quaternion.setFromUnitVectors(AHEAD, V.set(s.vx, s.vy, s.vz).normalize());
+        sh.age = (sh.age || 0) + dt; sh.puff = (sh.puff || 0) + dt;
+        if (sh.age > 0.05) sh.mesh.visible = true;
+        if (sh.puff > 0.022 && sh.mesh.visible) { sh.puff = 0; fx.smoke(V2.set(s.x, s.y, s.z).addScaledVector(V, -1), 0.15, 0.75, 0.5); }
+      } else sh.mesh.quaternion.setFromUnitVectors(YUP, V.set(s.vx, s.vy, s.vz).normalize());
       if (!r) continue;
       const p = [r2(s.x), r2(s.y), r2(s.z)];
       if (sh.own) {
@@ -335,6 +355,8 @@ export function startGame({ root, info, send, sound = true, leave }) {
       if (e.t >= e.ttl) { scene.remove(e.obj); e.obj.material.dispose(); effects.splice(i, 1); }
     }
   }
+  // my knife found somebody: the blade stops for a moment, a thud, and bits fly
+  function knifeHit(x, y, z) { vm.hit(); sfx.knifeHit(); fx.spawnParticles(V.set(x + (me.x - x) * 0.25, y + 1.15, z + (me.z - z) * 0.25), 0xfff1cf, 8, 3.2, 0.3, 1); shake = Math.max(shake, 0.12); }
   function marker(head) { H.hit.className = 'sh-hit' + (head ? ' head' : ''); H.hit.style.opacity = '1'; hitT = 0.12; if (head) sfx.headshot(); else sfx.hit(); }
 
   // ---------- what the server says ----------
@@ -388,6 +410,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
       my.alive = true; my.hp = m.hp; my.owned = m.own; my.protect = ARENA.protect; my.reload = 0; my.fireCd = 0.3;
       my.mags = WEAPON_IDS.map(id => WEAPONS[id].magMax || 0);
       if (!(my.owned & (1 << my.w))) my.w = 0;
+      vm.reset();
       H.dead.style.opacity = '0'; healthHud(); weaponHud(); setZoom(false);
       if (!running) drawMenu();
     },
@@ -411,12 +434,16 @@ export function startGame({ root, info, send, sound = true, leave }) {
       }
       const e = ents.get(m.by);
       if (!e || !e.fig) return;
+      const wid = WEAPON_IDS[m.w], w = WEAPONS[wid];
+      if (w) e.fig.setWeapon(wid);
       e.fig.shoot();
-      const w = WEAPONS[WEAPON_IDS[m.w]];
-      if (!w || w.melee || !m.o) return;
+      if (w && w.melee) { sfx.remoteSwish(e.pos.x, e.pos.z); return; }
+      if (!w || !m.o) return;
       addShot(newShot(m.o, m.d, w.speed, w.grav), !!w.splash, {});
       sfx.remoteShot(m.o[0], m.o[2], !!w.splash);
-      fx.flashMuzzle(V.set(m.o[0] + m.d[0] * 0.9, m.o[1] + m.d[1] * 0.9, m.o[2] + m.d[2] * 0.9), 14);
+      // the fire is at the muzzle of the weapon they carry (or, when they are not shown, a little ahead of their eyes)
+      if (!e.fig.group.visible || !e.fig.muzzle(V)) V.set(m.o[0] + m.d[0] * 0.9, m.o[1] + m.d[1] * 0.9, m.o[2] + m.d[2] * 0.9);
+      fx.flashMuzzle(V, 14); fx.flashAt(V, V2.set(m.d[0], m.d[1], m.d[2]).normalize(), FLASH[wid]);
     },
     ahit(m) {
       if (m.to === you) {
@@ -424,7 +451,11 @@ export function startGame({ root, info, send, sound = true, leave }) {
         if (my.hp > 0) sfx.hurt();
         if (m.from) { arrowT = 1.2; H.arrow.dataset.x = m.from[0]; H.arrow.dataset.z = m.from[1]; }
       } else { const e = ents.get(m.to); if (e && e.fig) e.fig.flash(); }
-      if (m.by === you && m.to !== you && hitT <= 0) marker(!!m.hs);          // the knife and explosions are only known from here
+      if (m.by === you && m.to !== you) {
+        if (hitT <= 0) marker(!!m.hs);          // the knife and explosions are only known from here
+        const e = ents.get(m.to);
+        if (e && WEAPONS[WEAPON_IDS[my.w]].melee) knifeHit(e.pos.x, e.pos.y, e.pos.z);
+      }
     },
     akill(m) {
       const wn = m.kd ? 'Dårlig pistol' : m.self ? 'Bazooka' : WEAPONS[WEAPON_IDS[m.w]] ? WEAPONS[WEAPON_IDS[m.w]].name : '';
@@ -466,7 +497,12 @@ export function startGame({ root, info, send, sound = true, leave }) {
       for (const a of m.add || []) setDino(a[0], a[1], a[2], a[3]);
       for (const id of m.del || []) { const d = dinos.get(id); if (d) { scene.remove(d.group); dinos.delete(id); } }
     },
-    adh(m) { const d = dinos.get(m.id); if (d) d.flash = 0.1; },
+    adh(m) {
+      const d = dinos.get(m.id);
+      if (!d) return;
+      d.flash = 0.1;
+      if (m.by === you && WEAPONS[WEAPON_IDS[my.w]].melee) { if (hitT <= 0) marker(false); knifeHit(d.x, 0, d.z); }
+    },
     ap(m) {
       const rtt = performance.now() - m.c;
       if (rtt < 0 || rtt > 2000) return;
@@ -490,7 +526,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
 
     // --- me ---
     if (my.fireCd > 0) my.fireCd -= dt;
-    if (my.reload > 0) { my.reload -= dt; if (my.reload <= 0) { my.reload = 0; my.mags[my.w] = WEAPONS[WEAPON_IDS[my.w]].magMax; weaponHud(); } }
+    if (my.reload > 0) { my.reload -= dt; if (my.reload <= 0) { my.reload = 0; my.mags[my.w] = WEAPONS[WEAPON_IDS[my.w]].magMax; vm.loaded(); weaponHud(); } }
     if (recoilLeft > 0) { const r = recoilLeft * Math.min(1, 12 * dt); me.pitch -= r; recoilLeft -= r; }
     const inp = { mx: 0, mz: 0, sprint: false, jump: false };
     if (my.alive && !frozen) {
@@ -527,16 +563,15 @@ export function startGame({ root, info, send, sound = true, leave }) {
     dip *= Math.exp(-dt * 9); shake *= Math.exp(-dt * 7); kick *= Math.exp(-dt * 14); swayX *= Math.exp(-dt * 8); swayY *= Math.exp(-dt * 8);
     const bob = my.alive && me.grounded ? Math.sin(bobT * 2) * 0.03 * Math.min(1, Math.hypot(me.vx, me.vz) / 6) : 0;
     const deadK = my.alive || frozen ? 0 : Math.min(1, (ARENA.respawn - my.deadT) / 0.4);
+    // the weapon in my hands: it rides along with the walk, a run, a jump and a landing, and lags a little behind the eyes
+    const pace = Math.hypot(me.vx, me.vz), busy = my.fireCd > 0 || my.reload > 0;
+    vm.visible = my.alive && !my.zoom;
+    vm.update(dt, { bob: bobT, move: my.alive && me.grounded ? Math.min(1, pace / 6) : 0, sprint: my.alive && me.grounded && inp.sprint && pace > 7.5 && !busy, vy: me.vy, dip, swayX, swayY });
     camera.position.set(me.x + (Math.random() - 0.5) * shake * 0.12, me.y + EYE + bob - dip - deadK * 1.25 + (Math.random() - 0.5) * shake * 0.12, me.z);
-    euler.set(me.pitch + (Math.random() - 0.5) * shake * 0.03, me.yaw, deadK * 0.9, 'YXZ');
+    euler.set(me.pitch + (Math.random() - 0.5) * shake * 0.03, me.yaw, deadK * 0.9 + vm.lean, 'YXZ');
     camera.quaternion.setFromEuler(euler);
     const fovT = my.zoom ? ZOOM_FOV : BASE_FOV + (inp.sprint && Math.hypot(me.vx, me.vz) > 7.5 ? 5 : 0);
     if (Math.abs(camera.fov - fovT) > 0.05) { camera.fov += (fovT - camera.fov) * Math.min(1, dt * 14); camera.updateProjectionMatrix(); }
-    // the weapon in my hands: it sways, bobs, kicks, and dips while it is loaded
-    const g = vm.group;
-    if (my.reload > 0) { const s = Math.sin(Math.min(1, 1 - my.reload / WEAPONS[WEAPON_IDS[my.w]].reload) * Math.PI); g.rotation.set(s * 0.7, s * 0.25, 0); g.position.set(0, -s * 0.06, s * 0.02); }
-    else { g.rotation.set(kick * 0.09 + swayY * 0.03, swayX * 0.04, 0); g.position.set(Math.sin(bobT) * 0.006 - swayX * 0.01, Math.abs(Math.cos(bobT)) * 0.006 - 0.006 + swayY * 0.008, kick * 0.045); }
-    g.visible = my.alive && !my.zoom;
 
     // --- the others ---
     const rt = sn - INTERP;
@@ -558,7 +593,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
       f.group.position.set(x, y, z);
       f.group.rotation.y = angLerp(a.yaw, c.yaw, Math.min(1, k)) + Math.PI;
       f.setWeapon(WEAPON_IDS[c.w] || 'knife');
-      f.update(dt, sp, a.pitch + (c.pitch - a.pitch) * Math.min(1, k), !(c.f & FLAG.ground));
+      f.update(dt, sp, a.pitch + (c.pitch - a.pitch) * Math.min(1, k), !(c.f & FLAG.ground), !!(c.f & FLAG.reload));
       f.group.visible = !e.protect || Math.floor(nowT / 110) % 2 === 0;
       if (f.tag) f.tag.visible = f.friend || Math.hypot(x - me.x, z - me.z) < 22;
     }
@@ -573,8 +608,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     // --- things ---
     updateShots(dt);
     fx.updateParticles(dt); fx.tickMuzzle(dt);
-    for (const p of fx.pickups) p.mesh.rotation.y += dt * 1.6;
-    for (const p of fx.healthPacks) p.mesh.rotation.y += dt * 1.4;
+    fx.tick(dt, nowT / 1000);
     for (const t of ['A', 'B']) for (const s of towerStars[t]) s.rotation.y += dt * 1.3;
     const hover = Math.sin(nowT * 0.004) * 0.15;
     if (trainStar) { const c = world.bazCar; trainStarMesh.visible = true; trainStarMesh.position.set(c.cx, world.TRAIN.DECK + 1.1 + hover, c.cz); trainStarMesh.rotation.y += dt * 2.0; }
@@ -631,6 +665,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     const sh = QUALITY[quality].shadows;
     if (sh && frameNo % sh === 0) sun.shadow.needsUpdate = true;
     renderer.render(scene, camera);
+    vm.render(renderer, camera);
   }
 
   // ---------- start and stop ----------
@@ -650,6 +685,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     sfx.stop();
     scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { for (const m of Array.isArray(o.material) ? o.material : [o.material]) { if (m.map) m.map.dispose(); m.dispose(); } } });
+    vm.dispose(); arsenal.dispose();
     renderer.dispose(); try { renderer.forceContextLoss(); } catch { /* already gone */ }
     root.replaceChildren();
   }
@@ -657,6 +693,6 @@ export function startGame({ root, info, send, sound = true, leave }) {
     on(m) { const f = on[m.t]; if (f) f(m); },
     stop,
     // for the test scripts: play without the mouse being caught
-    _debug: { me, my, ents, dinos, world, keys, shots, THREE, camera, scene, renderer, merged, fire, run(v) { forceRun = v; setRunning(v || document.pointerLockElement === canvas); }, freeze(v) { frozen = v; }, state: () => ({ state, left, stars, tkills, trainStar, wait, fps, ping, offset }) },
+    _debug: { me, my, ents, dinos, world, keys, shots, THREE, camera, scene, renderer, merged, fire, vm, arsenal, fx, figures, weaponHud, run(v) { forceRun = v; setRunning(v || document.pointerLockElement === canvas); }, freeze(v) { frozen = v; }, state: () => ({ state, left, stars, tkills, trainStar, wait, fps, ping, offset }) },
   };
 }

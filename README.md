@@ -12,7 +12,7 @@ What is in it:
 - **The bar**: sit on a stool and buy for yourself, for a friend, or a round for everybody. The glass stays in the avatar's hand, and a few too many show.
 - **4 på stribe** against a friend (live, or one move now and the next tomorrow), with or without a stake, or against the house robot in three strengths.
 - **EagleEye Commander** at the command table: the round-based strategy game, with the group's matches listed in the clubhouse and no codes or PINs (the lobby account is the general).
-- **The shooter** in the arcade: a first-person game in 3D for up to eight, with the clubhouse avatars as the players. Three game types (Stjernejagt with the train, the golden stars and the dinos; Holdkamp; Alle mod alle), robots in three strengths that fill the empty places, and one can walk into a match that is already running. Mouse and keyboard; not for phones yet.
+- **The shooter** in the arcade: a first-person game in 3D for up to eight, with the clubhouse avatars as the players. Three game types (Stjernejagt with the train, the golden stars and the dinos; Holdkamp; Alle mod alle), robots in three strengths that fill the empty places, and one can walk into a match that is already running. The weapons are models built by code (a knife, a pistol, a bolt rifle with a scope, a rocket launcher and a home-made pistol): one sees one's own hands swing the knife, change magazines and work the bolt, the others carry the same weapons, and they lie ready in the arena as themselves. Mouse and keyboard; not for phones yet.
 - **Poker** at the card table: Texas Hold'em without a limit as a small tournament for two to six. Everybody starts with 1,000 poker chips, the blinds rise every eighth hand, and the last one with chips takes the buy-ins. A clock keeps it moving (40 seconds per decision), and robots in three strengths can fill the seats at tables without a buy-in.
 - **Yatzy** at the dice table: five dice, the Danish sheet with fifteen fields and the bonus for 63, two to four players, live or one turn now and the next tomorrow, with or without robots.
 - **Meyer** at the dice table: two dice under a cup, say the same as the one before or higher (true or not), believe it or lift the cup. Six lives each, Meyer costs two, two to six players, a clock, robots that lie and doubt.
@@ -171,7 +171,8 @@ public/js/games/      one module per game for the screen
 public/eagleeye/      EagleEye Commander 2.5.0 (its page, rules, graphics, voices), opened in a frame
 public/shooter/       the shooter: world.js (the arena and how one walks in it, used by the server too),
                       rules.js (weapons, game types, numbers), game.js (the game in the browser),
-                      figure.js (avatars in 3D), and three.js r160 in vendor/
+                      weapons.js (the weapons as models), viewmodel.js (the weapon in one's own hands
+                      and how it moves), figure.js (avatars in 3D), and three.js r160 in vendor/
 deploy/               installer, service file, Proxmox helper
 tools/selftest.mjs    the self test
 tools/admin.mjs       what lobby-password runs: list accounts, give somebody a new password

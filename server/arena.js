@@ -180,7 +180,7 @@ export function createArena({ now = () => Date.now(), rand = Math.random, timer 
   function hurtDino(m, d, dmg, by, wi) {
     if (m.state !== 'active' || d.hp <= 0) return;
     d.hp -= dmg;
-    cast(m, { t: 'adh', id: d.id });
+    cast(m, { t: 'adh', id: d.id, by: by ? by.id : 0 });
     if (d.hp > 0) return;
     if (by) by.kills++;
     cast(m, { t: 'akill', to: 0, vd: d.team, by: by ? by.id : 0, w: wi, hs: 0 });

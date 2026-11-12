@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../server/store.js';
 import { createHub } from '../server/hub.js';
+import { createEagleEye } from '../server/eagleeye.js';
 import { ECON, PRANKS, ITEMS, DRINKS, BAR, LOOK, cleanLook, randomLook } from '../public/shared/defs.js';
 import { ROOM, STATIONS, STATION, isFree, findPath, pathLen } from '../public/shared/room.js';
 import { GAMES } from '../public/shared/games/index.js';
@@ -23,8 +24,14 @@ const section = name => console.log('· ' + name);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slq-lobby-test-'));
 let clock = new Date(2026, 10, 12, 12, 0, 0).getTime();
 const rnd = mulberry32(42);
-let store = createStore(dir, { delay: -1 });
-let hub = createHub({ store, version: 'test', now: () => clock, botDelay: 0, rand: rnd });
+let store = createStore(dir, { delay: -1 }), ee, hub;
+function startLobby() {           // the lobby with EagleEye Commander in it, as server.js puts them together
+  let tell = () => {};
+  ee = createEagleEye({ dir: path.join(dir, 'eagleeye'), secret: store.config.secret, now: () => Math.floor(clock / 1000), changed: (m, g) => tell(m, g) });
+  hub = createHub({ store, ee, version: 'test', now: () => clock, botDelay: 0, rand: rnd });
+  tell = hub.eeChanged;
+}
+startLobby();
 
 function client(token, h = hub) {
   const c = { got: [], closed: false, mark: 0 };
@@ -418,6 +425,66 @@ section('kodeord og dagens jetoner');
   A.send({ t: 'enter', g: GID });
 }
 
+section('EagleEye Commander');
+let EE;
+{
+  const idA = A.me().id, idB = B.me().id, a0 = A.me().chips, b0 = B.me().chips;
+  A.send({ t: 'enew', name: '  Operation   Test ' });
+  const open = A.last('eopen');
+  EE = open.code;
+  check('en ny kamp åbner med et login til den ene general', /^[A-Z2-9]{6}$/.test(EE) && /^[A-Z0-9]{6}\.\d+\.[\w-]{32}$/.test(open.token));
+  check('gruppen ser kampen', C.last('ee').m.code === EE && C.last('ee').m.name === 'Operation Test' && C.last('ee').m.players.length === 1 && C.last('ee').m.host === idA);
+  check('værten sætter sig ved kommandobordet', B.last('mv').sit[0] === 'command' && B.got.filter(m => m.t === 'mem' && m.m.busy).pop().m.busy === 'ee');
+  A.send({ t: 'move', x: 2, y: 2 });
+  check('og bliver siddende, mens kampen er åben', A.since('mv').length === 0);
+  B.send({ t: 'ejoin', code: EE });
+  const tokB2 = B.last('eopen').token;
+  check('en ven går med fra klubhuset', C.last('ee').m.players.length === 2 && C.last('ee').m.players[1].u === idB && tokB2 !== open.token);
+  C.send({ t: 'eopen', code: EE });
+  check('den der ikke er med kan ikke åbne kampen', /ikke med/.test(C.err()));
+  // the game page's own calls, with the login it was handed
+  let v = ee.api.state({ token: open.token, rev: -1 }).view;
+  check('spillets side ser kampen som sin general', v.me.name === 'Søren' && v.phase === 'lobby' && v.host === v.me.id && v.players.length === 2);
+  check('et forfalsket login afvises', /kommandobordet/.test(throws(() => ee.api.state({ token: open.token.slice(0, -3) + 'abc', rev: -1 }))));
+  check('spillets egen forside kan ikke lave kampe', /kommandobordet/.test(throws(() => ee.api.create({ game: 'x', name: 'y', pin: '1234' }))) && ee.api.list({}).mine.length === 0);
+  check('kun værten kan starte', /værten/.test(throws(() => ee.api.act({ token: tokB2, act: { a: 'start' } }))));
+  ee.api.act({ token: open.token, act: { a: 'addBot' } });
+  check('en AI-general ses i klubhuset som robot', C.last('ee').m.players.length === 3 && C.last('ee').m.players[2].ai && C.last('ee').m.players[2].u === 0);
+  ee.api.act({ token: open.token, act: { a: 'start' } });
+  check('kampen starter, og klubhuset ser det', C.last('ee').m.phase === 'play' && C.last('ee').m.round === 1);
+  B.send({ t: 'eleave', code: EE });
+  check('en kamp i gang kan man ikke forlade', /i gang/.test(B.err()));
+  C.send({ t: 'edrop', code: EE });
+  check('et almindeligt medlem kan ikke fjerne andres kamp', /værten/.test(C.err()));
+  A.send({ t: 'eclose' });
+  check('værten rejser sig, når siden lukkes', B.got.filter(m => m.t === 'mem' && 'busy' in m.m && m.m.id === idA).pop().m.busy === '' && B.last('mv').sit === null);
+  const A3 = client(tokA);
+  check('«din tur» tæller med på gruppelisten', A3.last('welcome').groups[0].turn >= 1);
+  A = A3; A.send({ t: 'enter', g: GID });
+  check('kampen er med, når man går ind i klubhuset', A.last('room').ee.length === 1 && A.last('room').ee[0].code === EE && A.last('room').ee[0].players[0].ready === false);
+  ee.api.act({ token: open.token, act: { a: 'ready', on: true } });
+  check('klubhuset ser, hvem der har meldt klar', C.last('ee').m.players[0].ready === true && C.last('ee').m.round === 1);
+  ee.api.act({ token: tokB2, act: { a: 'ready', on: true } });
+  check('når alle er klar, udkæmpes runden', C.last('ee').m.round === 2 && C.last('ee').m.players[0].ready === false, JSON.stringify(C.last('ee').m));
+  // the end of the match: the first rounds earn nothing, a real match pays the winner and the others
+  const g = ee._debug.load(EE);
+  g.phase = 'over'; g.round = 6; g.winner = { team: 'P1', names: ['Søren'] }; g.rev++;
+  v = ee.api.state({ token: open.token, rev: -1 }).view;
+  check('en vundet kamp betaler vinderen og de andre', A.me().chips === a0 + ECON.ee.win && B.me().chips === b0 + ECON.ee.play && A.me().stats.ee.w === 1 && B.me().stats.ee.p === 1, A.me().chips + '/' + B.me().chips);
+  check('og nævnes i chatten', /Søren vandt «Operation Test» i EagleEye Commander/.test(C.last('chat').m.s));
+  g.rev++; ee.api.state({ token: open.token, rev: -1 });
+  check('men kun én gang', A.me().chips === a0 + ECON.ee.win);
+  // a second match that never starts: leave and remove
+  B.send({ t: 'enew', name: 'Kort kamp' });
+  const code2 = B.last('eopen').code;
+  A.send({ t: 'ejoin', code: code2 });
+  B.send({ t: 'eleave', code: code2 });
+  check('forlader værten før start, går kampen videre til den næste', C.last('ee').m.code === code2 && C.last('ee').m.host === idA && C.last('ee').m.players.length === 1);
+  A.send({ t: 'eleave', code: code2 });
+  check('og den sidste, der går, lukker kampen', C.last('eex').code === code2 && !ee.get(code2));
+  A.send({ t: 'eclose' }); B.send({ t: 'eclose' });
+}
+
 section('glemt kodeord');
 {
   check('uden nøglen er der ingen adgang', /Ingen adgang/.test(throws(() => hub.api.admin({ key: 'x'.repeat(32), op: 'users' }, '7.7.7.7'))));
@@ -443,17 +510,19 @@ section('gemt på disken');
   const chipsB = B.me().chips;
   store.flush();
   const files = fs.readdirSync(dir).sort().join(',');
-  check('filerne ligger, hvor de skal', files === 'config.json,groups,users.json' && fs.existsSync(path.join(dir, 'groups', GID + '.json')), files);
+  check('filerne ligger, hvor de skal', files === 'config.json,eagleeye,groups,users.json' && fs.existsSync(path.join(dir, 'groups', GID + '.json')), files);
   check('nøglen og kontiene kan kun læses af tjenesten selv', (fs.statSync(path.join(dir, 'config.json')).mode & 0o077) === 0 && (fs.statSync(path.join(dir, 'users.json')).mode & 0o077) === 0);
   // a new server on the same folder
   store = createStore(dir, { delay: -1 });
-  hub = createHub({ store, version: 'test', now: () => clock, botDelay: 0, rand: rnd });
+  startLobby();
   check('installationskoden er den samme efter genstart', store.config.code === CODE);
   const B2 = client(tokB);
   check('login og jetoner overlever en genstart', B2.last('welcome').me.id === idB && B2.last('welcome').me.chips === chipsB && B2.last('welcome').groups[0].turn === 1);
   B2.send({ t: 'enter', g: GID });
   const room = B2.last('room');
   check('gruppe, chat og bord overlever en genstart', room.g.name === 'Torsdagsklubben' && room.chat.length > 5 && room.tables.length === 1 && room.tables[0].turn === 1 && room.tables[0].pot === 20);
+  check('EagleEye-kampen overlever en genstart, og logins til den gælder stadig', room.ee.length === 1 && room.ee[0].code === EE && room.ee[0].phase === 'over'
+    && ee.api.state({ token: ee.token(GID, EE, idB), rev: -1 }).view.me.name === 'Mads');
   B2.send({ t: 'topen', id });
   B2.send({ t: 'tact', id, a: { c: 2 } });
   check('spillet fortsætter, hvor det slap', B2.last('tv').tv.v.n === 2 && B2.last('tv').tv.turn === 0);
@@ -464,6 +533,7 @@ section('gemt på disken');
   A2.send({ t: 'gdel' });
   check('ejeren kan slette gruppen, og alle sendes ud', B2.last('out').g === GID && B2.last('groups').groups.length === 0 && !fs.existsSync(path.join(dir, 'groups', GID + '.json')));
   check('invitationen dør med gruppen', /findes ikke/.test(throws(() => hub.api.invite({ code: INV }))));
+  check('og dens EagleEye-kampe forsvinder', !ee.get(EE) && fs.readdirSync(path.join(dir, 'eagleeye')).length === 0);
 }
 
 // ---------- the real server ----------

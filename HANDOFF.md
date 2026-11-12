@@ -1,6 +1,6 @@
 # SLQ Game Lobby — handoff
 
-Status after the first session (v0.1.0, 12 Nov 2026). Read this first when continuing in a new chat.
+Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is a pull request. Read this first when continuing in a new chat.
 
 - The code lives in **https://github.com/slqdk/SLQ-Game-Lobby** (public, branch `main`). Søren's server pulls from `main` with `lobby-update`, so `main` must always work; larger work goes on a branch and a pull request.
 - It runs in a Proxmox LXC behind Nginx Proxy Manager, which needs **Websockets Support** switched on (see the README).
@@ -21,9 +21,11 @@ His answers to the questions asked:
 
 ## What exists (v0.1.0)
 
-Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, chat with bubbles, emotes, eleven kinds of teasing, the bar with sixteen drinks, the kiosk with 23 things to wear, the wardrobe, the notice board, chips, and 4 på stribe (friend or robot, stake, rematch, give up, claim after 48 hours). Installer for Proxmox with the commands `lobby-update`, `lobby-code` and `lobby-password`. Self test with 225 checks.
+Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, chat with bubbles, emotes, eleven kinds of teasing, the bar with sixteen drinks, the kiosk with 23 things to wear, the wardrobe, the notice board, chips, and 4 på stribe (friend or robot, stake, rematch, give up, claim after 48 hours). Installer for Proxmox with the commands `lobby-update`, `lobby-code` and `lobby-password`. Self test with 251 checks.
 
-The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table), Yatzy and Meyer (dice table), poker (card table), the shooter (arcade cabinet), EagleEye Commander (command table).
+**v0.2.0** adds EagleEye Commander at the command table (see "EagleEye Commander in the lobby" below).
+
+The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table), Yatzy and Meyer (dice table), poker (card table, Texas Hold'em: Søren's choice), the shooter (arcade cabinet).
 
 ## Decisions made without asking (tell Søren, change if he wants)
 
@@ -72,6 +74,21 @@ Drawing (`roomart.js`): x runs across, depth runs down the screen at 0.7, height
 
 Avatars (`avatar.js`) are about 100 units tall with their feet at (0, 0). A look is a small object of indexes into the lists in `defs.js` plus worn things by key; `cleanLook` makes anything from a browser valid.
 
+### EagleEye Commander in the lobby (v0.2.0)
+
+Søren asked for EagleEye Commander to be integrated, after the shooter; it was done first because it is the smaller job.
+
+- `public/eagleeye/` is a **copy of EagleEye Commander 2.5.0** (the `v2.5` branch of its own repository: radar attacks, spying, minefields, the A-bomb; pull request #4 there, not merged when the copy was taken). From now on this copy is where the game lives for the lobby; the stand-alone repository and Søren's stand-alone site were not touched. Changes made to the copy:
+  - the two fonts are served from `public/eagleeye/fonts/` instead of Google's servers;
+  - `js/main.js` has a clubhouse mode (`EMBED`: the page is in a frame): no front page for online play, no invitation code, "Til klubhuset" instead of "Til forsiden", and `#traening` in the address shows the skirmish menu; opened outside a frame the page goes to the lobby;
+  - `index.html` lost the links to the fonts and the web manifest.
+- `server/eagleeye.js` is the game's old server turned into a module: the same engine (`public/eagleeye/shared`), one JSON file per match in `<data>/eagleeye/`, deadlines checked once a minute. A match carries `lobby: { gid, users: { <user id>: <player id> }, paid }`.
+- The game page talks to `/eagleeye/api/state|act|replay` with a login `<code>.<player id>.<signature>` that is valid for one general in one match. The lobby hands it out (`eopen`) to the account that general belongs to, and the page finds it in the tab's session storage (`jf2-cur`), which is how the game always remembered its match. `create`, `join` and `login` on that path answer "open the match from the command table".
+- Lobby messages: `enew {name}`, `ejoin {code}`, `eopen {code}`, `eclose`, `eleave {code}` (before the start), `edrop {code}` (the host before the start or after the end; an admin at any time). The room message carries `ee: [...]`, changes arrive as `ee` and `eex`. While the game is open the avatar sits at the command table (`busy: 'ee'`, the same mechanism the shooter will use).
+- Everything else happens on the game's own pre-start page: map, size, money, deadline, AI generals, start.
+- Chips: when a match that lasted at least three rounds ends, the winners get 150 and the other players 40 (30 for beating only AI generals), once.
+- The page has its own content security policy (it writes styles into its markup) and may only be framed by the lobby itself.
+
 ### Adding a game
 
 1. `public/shared/games/<id>.js`: an object with `id`, `name`, `min`, `max`, `station` (the furniture), `setup`, `act`, `turn`, `result`, `view`, `bot` (see `base.js`; `c4.js` is the example). The state must be plain data. `view(state, seat)` is where hidden cards or dice are kept from the others.
@@ -89,7 +106,7 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 
 - **Milestone 2**: Yatzy, Meyer, Ludo, poker. Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer and poker need `view` to hide things, poker needs betting with the shared chips (the table's `stake`/`pot` is a fixed buy-in today).
 - **Milestone 3**: the shooter. What the attached version is: three.js r160, everything in one file with globals; collision by colliders, surfaces and ceilings (`groundUnder`, `pushOut`, `moveHoriz`, `updatePlayer`, with round towers as the fragile part); an arena with tunnels and a train one can ride; golden stars as the objective (first team to five); dinosaurs that guard; projectile weapons with spread, recoil, falloff and headshots; rounds with a warm-up; players as a cylinder with a ball for a head. Its network is peer to peer over WebRTC with a PHP page for signalling, each player's own browser decides hits, and the lowest id is "host". The plan: keep the arena, train, stars and dinosaurs; move the network to this server (the WebSocket is ready for binary frames; hits and rounds decided by the server); draw players as the lobby avatars in 3D; work on feel (movement, weapons, hit feedback); add bots and modes. Before starting, check whether the robot's 30 ms of thinking on the server's only thread is a problem for a 20-30 Hz game (move it to a worker, or run the shooter as its own process).
-- **Milestone 4**: EagleEye Commander in the clubhouse with the same login and group.
+- ~~Milestone 4: EagleEye Commander in the clubhouse~~ done in v0.2.0. Left to do there: the game still polls its server every few seconds (the lobby's WebSocket could tell it at once), and the clubhouse avatar is not shown inside the game.
 
 ## Not verified, and known gaps
 

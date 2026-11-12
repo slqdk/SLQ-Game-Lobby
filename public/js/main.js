@@ -14,16 +14,17 @@ const save = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStor
 
 const st = {
   token: load('slq-token'), gid: load('slq-group'), invite: '',
-  me: null, groups: [], g: null, mem: new Map(), tables: new Map(),
+  me: null, groups: [], g: null, mem: new Map(), tables: new Map(), ee: new Map(),
   view: 'boot', sock: null, skew: 0, tv: null, everOpen: false, leaving: false, hinted: false,
 };
 const RENDER = { c4: renderC4 };
+const BUSY = { ee: 'EagleEye Commander', shooter: 'skydespillet' };
 const app = $('#app');
 let room = null, demoTimer = 0;
 
 const now = () => Date.now() + st.skew;
 const send = m => st.sock && st.sock.send(m);
-const mine = () => st.me ? st.me.id : 0;
+const mine = () => st.me ? st.me.id : 0, me = mine;
 const here = () => [...st.mem.values()].filter(m => m.on);
 const isAdmin = () => { const m = st.mem.get(mine()); return !!m && (m.role === 'owner' || m.role === 'admin'); };
 const two = n => String(n).padStart(2, '0');
@@ -43,7 +44,7 @@ const cost = n => n ? String(n) : 'Gratis';
 
 function setView(v) {
   st.view = v; app.dataset.view = v;
-  if (v !== 'room') { sheet.close(); $('#friends').hidden = true; app.classList.remove('chat-open'); }
+  if (v !== 'room') { sheet.close(); $('#friends').hidden = true; app.classList.remove('chat-open'); if (!$('#embed').hidden) { $('#embed').hidden = true; $('#embedBox').replaceChildren(); } }
   requestAnimationFrame(() => room && room.resize());
 }
 
@@ -205,6 +206,7 @@ const on = {
     st.g = m.g; st.skew = m.now - Date.now();
     st.mem = new Map(m.mem.map(x => [x.id, x]));
     st.tables = new Map(m.tables.map(t => [t.id, t]));
+    st.ee = new Map((m.ee || []).map(x => [x.code, x]));
     room.setName(m.g.name);
     room.setRoom(m.mem, mine());
     room.setSound(soundOn());
@@ -247,6 +249,18 @@ const on = {
     room.drink(m.k, m.from, m.to, m.buzz);
     if (m.from !== mine() && m.to.includes(mine())) { const a = st.mem.get(m.from); toast((a ? a.name : 'Nogen') + ' har givet dig: ' + DRINKS[m.k].name + '. Skål!', { kind: 'good', pic: glassIcon(m.k, 34) }); }
   },
+
+  // EagleEye Commander: a match of the group changed, is gone, or is handed to this player to open
+  ee(m) {
+    const x = m.m, old = st.ee.get(x.code), mine = x.players.find(p => p.u === me());
+    st.ee.set(x.code, x);
+    tablesChanged();
+    if (mine && old && x.phase === 'play' && x.round > old.round && !embedOpen()) { toast('Slaget i runde ' + old.round + ' af «' + x.name + '» er udkæmpet.', { actions: [['Åbn', () => send({ t: 'eopen', code: x.code })]], ms: 9000 }); play('turn'); }
+    else if (mine && old && old.phase === 'lobby' && x.phase === 'play' && !embedOpen()) toast('«' + x.name + '» er startet. Din general venter på ordrer.', { actions: [['Åbn', () => send({ t: 'eopen', code: x.code })]], ms: 9000 });
+    if (sheet.kind === 'station') reopen();
+  },
+  eex(m) { st.ee.delete(m.code); tablesChanged(); if (sheet.kind === 'station') reopen(); },
+  eopen(m) { sheet.close(); openEmbed('EagleEye Commander', 'eagleeye/index.html', m.token); },
 
   tb(m) {
     const t = m.tb, old = st.tables.get(t.id), wasMine = old && old.phase === 'play' && old.seats[old.turn] && old.seats[old.turn].u === mine();
@@ -296,7 +310,8 @@ function updateMe(delta = 0) {
   if (delta) { const c = $('#btnChips'); c.classList.remove('bump'); void c.offsetWidth; c.classList.add('bump'); if (delta > 0) play('coin'); }
 }
 function tablesChanged() {
-  const turns = [...st.tables.values()].filter(t => t.phase === 'play' && t.seats[t.turn] && t.seats[t.turn].u === mine()).length, b = $('#turnBadge');
+  const eeTurns = [...st.ee.values()].filter(eeMyTurn).length;
+  const turns = [...st.tables.values()].filter(t => t.phase === 'play' && t.seats[t.turn] && t.seats[t.turn].u === mine()).length + eeTurns, b = $('#turnBadge');
   b.hidden = !turns; b.textContent = turns;
   // what is going on at each piece of furniture, shown over it
   const labels = {};
@@ -306,15 +321,19 @@ function tablesChanged() {
     const names = t.seats.map(s => s.n.replace(/ \(.*/, ''));
     labels[g.station] = t.phase === 'open' ? names[0] + ' venter på en modspiller' : names.join(' mod ');
   }
+  const wars = [...st.ee.values()].filter(x => x.phase === 'play');
+  if (wars.length) labels.command = wars.length === 1 ? '«' + wars[0].name + '» · runde ' + wars[0].round : wars.length + ' kampe i gang';
   room.setLabels(labels);
   renderFriends();
 }
+const eeMyTurn = x => x.phase === 'play' && x.players.some(p => p.u === mine() && p.alive && !p.ready);
 
 // ---------- who is here ----------
 function statusOf(m) {
   if (!m.on) return ['sidst set ' + ago(m.seen), ''];
   const t = m.open ? st.tables.get(m.open) : null;
   if (t && GAMES[t.game]) return [(t.seats.some(s => s.u === m.id) ? 'spiller ' : 'ser på ') + GAMES[t.game].name, 'play'];
+  if (m.busy) return ['spiller ' + (BUSY[m.busy] || 'et spil'), 'play'];
   return [m.dnd ? 'vil ikke forstyrres' : 'i klubhuset', ''];
 }
 const busts = new Map();
@@ -552,6 +571,7 @@ function openStation(sn) {
   const build = () => {
     const body = [];
     for (const gid of sn.games) {
+      if (gid === 'eagleeye') { body.push(...eagleSection()); continue; }
       if (!GAMES[gid]) { body.push(h('div', { class: 'trow soon' }, h('div', { class: 't' }, h('b', {}, SOON[gid] || gid), h('span', {}, 'Kommer snart')))); continue; }
       body.push(...newGame(gid));
       const list = [...st.tables.values()].filter(t => t.game === gid).sort((a, b) => rank(a) - rank(b) || b.at - a.at);
@@ -572,6 +592,52 @@ function openTables() {
   reopen = () => sheet.fill(build());
 }
 $('#btnTables').addEventListener('click', openTables);
+
+// ---------- EagleEye Commander at the command table ----------
+function eagleRow(x) {
+  const mineP = x.players.find(p => p.u === mine()), names = x.players.map(p => p.u === mine() ? 'dig' : p.n).join(', '), turn = eeMyTurn(x);
+  const waiting = x.players.filter(p => !p.ai && p.alive && !p.ready && p.u !== mine()).map(p => p.n);
+  let sub, btn = null;
+  if (x.phase === 'lobby') { sub = 'Venter på start · ' + names; btn = mineP ? ['Åbn', 'eopen'] : x.players.length < 6 ? ['Gå med', 'ejoin'] : null; }
+  else if (x.phase === 'play') { sub = 'Runde ' + x.round + (mineP ? (turn ? ' · din tur' : waiting.length ? ' · venter på ' + waiting.join(', ') : ' · slaget er på vej') : ' · ' + names); btn = mineP ? ['Åbn', 'eopen'] : null; }
+  else { sub = 'Slut' + (x.winner && x.winner.length ? ' · ' + x.winner.join(' og ') + ' vandt' : ''); btn = mineP ? ['Se', 'eopen'] : null; }
+  const canDrop = isAdmin() || (x.host === mine() && x.phase !== 'play');
+  return h('div', { class: 'trow' + (turn ? ' turn' : '') }, h('div', { class: 't' }, h('b', {}, x.name), h('span', {}, sub)),
+    canDrop ? h('button', { class: 'btn small alt', onclick: e => confirmBtn(e.currentTarget, 'Fjern?', () => send({ t: 'edrop', code: x.code })) }, 'Fjern') : null,
+    x.phase === 'lobby' && mineP && x.host !== mine() ? h('button', { class: 'btn small alt', onclick: () => send({ t: 'eleave', code: x.code }) }, 'Forlad') : null,
+    btn ? h('button', { class: 'btn small' + (turn || btn[1] === 'ejoin' ? '' : ' alt'), onclick: () => send({ t: btn[1], code: x.code }) }, btn[0]) : null);
+}
+function eagleSection() {
+  const order = x => (eeMyTurn(x) ? 0 : x.players.some(p => p.u === mine()) ? (x.phase === 'over' ? 3 : 1) : x.phase === 'lobby' ? 2 : 4);
+  const list = [...st.ee.values()].sort((a, b) => order(a) - order(b) || b.at - a.at);
+  const name = h('input', { maxLength: 24, value: 'Operation Ørneøje', 'aria-label': 'Kampens navn' });
+  return [h('div', { class: 'sec' }, 'EagleEye Commander'),
+    h('p', { class: 'hint' }, 'Byg basen, høst malmen og send hæren af sted. Når alle har meldt klar, udkæmpes runden – også hen over flere dage. Kort, størrelse og AI-generaler vælger værten, når kampen er lavet.'),
+    h('div', { class: 'row' }, name, h('button', { class: 'btn', style: 'flex:none', onclick: () => send({ t: 'enew', name: name.value }) }, 'Ny kamp')),
+    list.length ? h('div', { class: 'sec' }, 'Gruppens kampe') : null, ...list.map(eagleRow),
+    h('button', { class: 'btn alt', onclick: () => { sheet.close(); openEmbed('EagleEye Commander · træning', 'eagleeye/index.html#traening', ''); } }, 'Øv dig alene mod AI')];
+}
+
+// ---------- a game with a page of its own, in a frame over the clubhouse ----------
+// The login for the match goes into this tab's session storage, where the game's page looks for it.
+const embedOpen = () => !$('#embed').hidden;
+function openEmbed(title, url, token) {
+  try { if (token) sessionStorage.setItem('jf2-cur', token); else sessionStorage.removeItem('jf2-cur'); } catch {}
+  $('#embedTitle').textContent = title;
+  $('#embedBox').replaceChildren(h('iframe', { src: url, title, allow: 'autoplay; fullscreen' }));
+  $('#embed').hidden = false;
+  room.stop();
+}
+function closeEmbed() {
+  if (!embedOpen()) return;
+  $('#embed').hidden = true;
+  $('#embedBox').replaceChildren();
+  try { sessionStorage.removeItem('jf2-cur'); } catch {}
+  send({ t: 'eclose' });
+  room.start();
+}
+$('#embedX').addEventListener('click', closeEmbed);
+window.addEventListener('message', e => { if (e.origin === location.origin && e.data && e.data.slq === 'ee-close') closeEmbed(); });
 
 function openTable(id) { send({ t: 'topen', id }); }
 function showTable() {

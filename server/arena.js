@@ -133,7 +133,7 @@ export function createArena({ now = () => Date.now(), rand = Math.random, timer 
     m.stars = { A: 0, B: 0 }; m.kills = { A: 0, B: 0 }; m.trainStar = false; m.starT = ARENA.starEvery - ARENA.starFirst; m.deliver = null;
     m.pickups = m.world.PICKUPS.map(() => ({ on: true, back: 0 })); m.packs = m.world.HEALTH_PACKS.map(() => ({ on: true, back: 0 }));
     if (m.dinos && m.dinos.length) cast(m, { t: 'adino', del: m.dinos.map(d => d.id) });
-    m.dinos = []; m.dinoGrant = { A: 0, B: 0 }; m.dinoBack = { A: 0, B: 0 }; m.shots = []; m.thiefAt = {};
+    m.dinos = []; m.dinoGrant = { A: 0, B: 0 }; m.dinoBack = { A: 0, B: 0 }; m.shots = []; m.thiefAt = {}; m.starAt = 0;
     for (const e of m.ents.values()) { e.kills = 0; e.deaths = 0; e.owned = 1; e.w = 0; e.played = 0; }
     cast(m, roundMsg(m));
     for (const e of m.ents.values()) spawn(m, e);
@@ -389,7 +389,7 @@ export function createArena({ now = () => Date.now(), rand = Math.random, timer 
       } else if (d.wait > ARENA.deliverWait) { m.deliver = null; m.starT = 0; cast(m, starMsg(m, 'lost', d.team)); }
     } else {
       m.starT += dt;
-      if (!m.trainStar && m.starT >= ARENA.starEvery) { m.trainStar = true; m.starT = 0; cast(m, starMsg(m, 'new')); }
+      if (!m.trainStar && m.starT >= ARENA.starEvery) { m.trainStar = true; m.starT = 0; m.starAt = m.time; cast(m, starMsg(m, 'new')); }
       if (m.trainStar) {
         const c = w.bazCar;
         for (const e of m.ents.values()) {

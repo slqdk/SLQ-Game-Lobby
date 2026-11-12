@@ -1,13 +1,14 @@
 // SLQ Game Lobby — where the shooter's robots can walk. The arena is covered with a grid of standing places, and
 // two places are joined when a walker really gets from one to the other: every step is tried with the arena's
-// own movement rules (world.js), so stairs, doors, ramps, cellars and drops come out by themselves and a path
+// own movement rules (world.js), so stairs, doors, ramps and cellars come out by themselves and a path
 // found here can be walked. Built once, when the first match with robots starts (about a tenth of a second).
 import { STEP } from '../public/shooter/world.js';
 
 const CELL = 0.5;                    // metres between two standing places
 const DIRS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
 const BUCKET = 4, MARGIN = 1.3;      // the arena is cut in squares of this size while building, to try fewer walls
-const MAX_DROP = 13;                 // a walker may step off anything in the arena
+const MAX_DROP = 0.6;                // a robot steps down a stair, never off an edge: whether a jump down lands where
+                                     // it should is not something this simple walk can tell
 
 export function buildNav(world, seeds) {
   const W = 85, D = 110, ox = -W / 2, oz = -D / 2;

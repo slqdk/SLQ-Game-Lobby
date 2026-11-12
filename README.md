@@ -12,7 +12,8 @@ What is in it:
 - **The bar**: sit on a stool and buy for yourself, for a friend, or a round for everybody. The glass stays in the avatar's hand, and a few too many show.
 - **4 på stribe** against a friend (live, or one move now and the next tomorrow), with or without a stake, or against the house robot in three strengths.
 - **EagleEye Commander** at the command table: the round-based strategy game, with the group's matches listed in the clubhouse and no codes or PINs (the lobby account is the general).
-- The furniture for what comes next already stands in the room: Ludo, Yatzy, Meyer, poker and the shooter.
+- **The shooter** in the arcade: a first-person game in 3D for up to eight, with the clubhouse avatars as the players. Three game types (Stjernejagt with the train, the golden stars and the dinos; Holdkamp; Alle mod alle), robots in three strengths that fill the empty places, and one can walk into a match that is already running. Mouse and keyboard; not for phones yet.
+- The furniture for what comes next already stands in the room: Ludo, Yatzy, Meyer and poker.
 
 No dependencies: Node 20 or newer and a browser. The user interface is in Danish.
 
@@ -120,6 +121,12 @@ Back up by copying the folder, or the whole container. None of it belongs in git
 
 The whole card is one list, `DRINKS` in `public/shared/defs.js`: name, price, kind (`beer`, `shot`, `mix`, `soft`), how merry it makes one (`alc`, below zero sobers up) and how it is drawn (`glass`: `pint`, `bottle`, `shot`, `tall`, `wine`, `mug`; `col`, optional `col2`, `foam`, `steam`). Prices for teasing and the shop are in the same file (`PRANKS`, `ITEMS`), the chip rules in `ECON`.
 
+## The shooter
+
+Walk to the arcade cabinet, pick a game type and how many robots, and start; friends join from the same cabinet or from "Spil" in the top bar. The game opens over the clubhouse and needs WebGL, a mouse and a keyboard. Esc frees the mouse and shows the menu: the keys, sound, graphics (four steps; it steps down by itself when the picture stutters), changing sides and the way back to the clubhouse.
+
+The server decides everything that counts (health, kills, pickups, stars, rounds) and runs the robots and the dinos; each browser moves its own player and says where it is twenty times a second. Weapons, game types, times and the robots' names are in `public/shooter/rules.js`; how good the robots are is `SKILL` in `server/arena-bots.js`; the rewards are `ECON.shooter` in `public/shared/defs.js`. The arena itself is `public/shooter/world.js`: after any change there, run `npm test`, which walks every tower staircase up and down and compares the server's arena with the browser's.
+
 ## How it is built
 
 ```
@@ -128,6 +135,9 @@ server/ws.js          the WebSocket protocol (RFC 6455), written out: no package
 server/hub.js         the lobby itself: accounts, groups, the room, chat, chips, teasing, bar, tables
 server/store.js       JSON files, written a moment after something changes and on shutdown
 server/eagleeye.js    EagleEye Commander's matches: the game's own rules, with lobby accounts as generals
+server/arena.js       the shooter's matches: who is where, health, kills, pickups, stars, dinos, rounds
+server/arena-nav.js   where the shooter's robots can walk (worked out by trying every step in the arena)
+server/arena-bots.js  the robots' minds: where to go, whom to aim at, when to shoot
 public/shared/        rules both sides use: defs.js (prices, looks, limits), room.js (the room, where
                       one can walk, path finding), games/ (one module per game: rules and robot)
 public/js/main.js     screens, menus, and what each message from the server means
@@ -136,11 +146,14 @@ public/js/roomart.js  how the room and the furniture look
 public/js/avatar.js   how avatars, hats, glasses of beer and thrown tomatoes look
 public/js/games/      one module per game for the screen
 public/eagleeye/      EagleEye Commander 2.5.0 (its page, rules, graphics, voices), opened in a frame
+public/shooter/       the shooter: world.js (the arena and how one walks in it, used by the server too),
+                      rules.js (weapons, game types, numbers), game.js (the game in the browser),
+                      figure.js (avatars in 3D), and three.js r160 in vendor/
 deploy/               installer, service file, Proxmox helper
 tools/selftest.mjs    the self test
 tools/admin.mjs       what lobby-password runs: list accounts, give somebody a new password
 ```
 
-All graphics are drawn by code; there are no picture files. Sounds are made with WebAudio, except the recorded radio voices of EagleEye Commander (`public/eagleeye/audio/voices.mp3`). The fonts are Fredoka, and Lilita One and Barlow Semi Condensed in EagleEye Commander (all SIL Open Font License, see the `fonts` folders); they are served from here, so no page asks another server for anything.
+All graphics are drawn by code; there are no picture files. The shooter draws with three.js r160 (MIT licence, in `public/shooter/vendor/`). Sounds are made with WebAudio, except the recorded radio voices of EagleEye Commander (`public/eagleeye/audio/voices.mp3`). The fonts are Fredoka, and Lilita One and Barlow Semi Condensed in EagleEye Commander (all SIL Open Font License, see the `fonts` folders); they are served from here, so no page asks another server for anything.
 
 `HANDOFF.md` has the decisions, the message protocol, how to add a game, and what is not built yet.

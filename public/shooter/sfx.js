@@ -61,5 +61,14 @@ export function makeSfx(ear) {
       if (!trainSrc) { trainSrc = ctx.createOscillator(); trainSrc.type = 'sawtooth'; trainSrc.frequency.value = 46; const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 130; trainGain = ctx.createGain(); trainGain.gain.value = 0; trainSrc.connect(f); f.connect(trainGain); trainGain.connect(master); trainSrc.start(); }
       trainGain.gain.value = v * 0.2;
     },
+    // ---- added for the clubhouse ----
+    headshot: function () { tone(2900, 0.05, 0.25, 'triangle'); tone(3700, 0.09, 0.2, 'triangle', 0, 0.045); },
+    kill: function () { tone(880, 0.07, 0.24, 'square'); tone(1320, 0.13, 0.24, 'square', 0, 0.07); },
+    pickup: function () { tone(520, 0.06, 0.2, 'triangle', 780); tone(780, 0.09, 0.2, 'triangle', 0, 0.06); },
+    heal: function () { tone(440, 0.1, 0.2, 'sine', 660); tone(660, 0.15, 0.2, 'sine', 0, 0.1); },
+    empty: function () { tone(1500, 0.02, 0.12, 'square'); },
+    lose: function () { tone(392, 0.2, 0.28, 'square'); tone(330, 0.2, 0.28, 'square', 0, 0.2); tone(262, 0.45, 0.3, 'square', 0, 0.4); },
+    isMuted: function () { return muted; },
+    stop: function () { if (ctx) { try { ctx.close(); } catch (e) { } } ctx = null; master = null; trainSrc = null; trainGain = null; },
   };
 }

@@ -18,7 +18,7 @@ export function newBrain(level, rand) {
     level, goal: null, path: null, pi: 0, aheadT: 0, ahead: -1, thinkT: rand() * 0.2, planT: 0,
     target: null, vis: false, lostT: 0, reactT: 0, lastSeen: null,
     err: [0, 0], errT: 0, strafe: rand() < 0.5 ? 1 : -1, strafeT: 0, moveDir: null, pauseT: 0, idleT: 0,
-    stuckT: 0, lastD: 1e9, thief: false,
+    stuckT: 0, lastD: 1e9, thief: false, sx: 0, sz: 0, sT: 0,
   };
 }
 export function resetBrain(b) {
@@ -39,6 +39,10 @@ export function thinkBot(ctx, e, dt) {
   if (fighting) fightMove(ctx, e, dt); else follow(ctx, e, dt, true);
   aim(ctx, e, dt);
   special(ctx, e, dt);
+  // standing on one spot for seconds without a fight or a reason to wait: think again
+  const g = b.goal, waits = g && (g.kind === 'star' || g.kind === 'steal' || g.kind === 'deliver');
+  if (fighting || waits || Math.hypot(e.x - b.sx, e.z - b.sz) > 0.6) { b.sx = e.x; b.sz = e.z; b.sT = 0; }
+  else if ((b.sT += dt) > 3) { b.goal = null; b.path = null; b.sT = 0; b.planT = 0; }
 }
 
 // ---------- seeing ----------
@@ -108,9 +112,9 @@ function plan(ctx, e) {
       if (d < bd) { bd = d; want = { kind: 'weapon', i, x: p.x, y: p.y || 0, z: p.z, r: 0.7 }; }
     }
   }
-  if (!want && !b.goal && m.mode === 'stars' && m.state === 'active') {
+  if (!want && (!b.goal || b.goal.kind === 'hunt' || b.goal.kind === 'roam') && m.mode === 'stars' && m.state === 'active') {
     // 3. the star on the train: the two of the team that are nearest go for it
-    if (m.trainStar && gun) {
+    if (m.trainStar && gun && m.time - m.starAt > [0, 20, 12, 6][b.level]) {      // they are a little slow to notice: people get a head start
       const c = w.bazCar; let closer = 0;
       for (const v of m.ents.values()) if (v !== e && v.alive && v.team === e.team && dist2(v, c.cx, c.cz) < dist2(e, c.cx, c.cz)) closer++;
       if (closer < 2) want = trackSpot(ctx, e);
@@ -126,12 +130,15 @@ function plan(ctx, e) {
   // 5. otherwise: towards the enemy (where one was seen last, or where the nearest one is), now and then somewhere else
   if (!want && !b.goal) {
     if (b.lastSeen && !b.target) { want = { kind: 'hunt', x: b.lastSeen[0], y: b.lastSeen[1], z: b.lastSeen[2], r: 2.5 }; b.lastSeen = null; }
-    else if (ctx.rand() < 0.25) { const p = w.PICKUPS[Math.floor(ctx.rand() * w.PICKUPS.length)]; want = { kind: 'roam', x: p.x + 2, y: 0, z: p.z + 2, r: 3 }; }
     else {
       let bd = 1e9, bv = null;
-      for (const v of m.ents.values()) if (v.alive && ctx.enemy(e, v)) { const d = dist2(e, v.x, v.z); if (d < bd) { bd = d; bv = v; } }
+      if (ctx.rand() >= 0.25) for (const v of m.ents.values()) if (v.alive && ctx.enemy(e, v)) { const d = dist2(e, v.x, v.z); if (d < bd) { bd = d; bv = v; } }
       if (bv) want = { kind: 'hunt', x: bv.x, y: bv.y, z: bv.z, r: 2.5 };
-      else want = { kind: 'roam', x: (ctx.rand() - 0.5) * 50, y: 0, z: (ctx.rand() - 0.5) * 60, r: 3 };
+      else {                                                // a stroll to somewhere on the ground
+        const nav = ctx.nav; let n = 0;
+        for (let k = 0; k < 8; k++) { n = Math.floor(ctx.rand() * nav.size); if (Math.abs(nav.y[n]) < 0.1) break; }
+        want = { kind: 'roam', x: nav.x[n], y: nav.y[n], z: nav.z[n], r: 2 };
+      }
     }
     b.planT = 3 + ctx.rand() * 2;
   }
@@ -171,11 +178,13 @@ function follow(ctx, e, dt, run) {
   // tick off the places that are reached
   while (b.pi < p.length) {
     const n = p[b.pi], dx = nav.x[n] - e.x, dz = nav.z[n] - e.z;
-    if (dx * dx + dz * dz < 0.16 && Math.abs(nav.y[n] - e.y) < 1.2) { b.pi++; b.ahead = -1; b.lastD = 1e9; b.stuckT = 0; } else break;
+    if (dx * dx + dz * dz < 0.16 && Math.abs(nav.y[n] - e.y) < 0.45) { b.pi++; b.ahead = -1; b.lastD = 1e9; b.stuckT = 0; } else break;
   }
   if (b.pi >= p.length) {
+    // at the end of the path: the last bit straight at the goal when the way is free, else this is as near as it gets
     const g = b.goal, dx = g.x - e.x, dz = g.z - e.z, d = Math.hypot(dx, dz);
-    if (d > 0.25 && d < 4 && Math.abs(g.y - e.y) < 1.2) { inp.mx = dx / d; inp.mz = dz / d; } else b.path = null;
+    if (d > 0.25 && d < 4 && Math.abs(g.y - e.y) < 1.2 && nav.straight(e.x, e.y, e.z, g.x, g.z, g.y)) { inp.mx = dx / d; inp.mz = dz / d; }
+    else { b.path = null; if (d > (g.r || 1) && (g.kind === 'hunt' || g.kind === 'roam' || g.kind === 'weapon' || g.kind === 'health')) b.goal = null; }
     return;
   }
   if (b.aheadT <= 0 || b.ahead < b.pi) {

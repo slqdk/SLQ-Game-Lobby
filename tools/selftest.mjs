@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import crypto from 'node:crypto';
+import poker, { handValue, handName, equity, START as PSTART, THINK, SHOW } from '../public/shared/games/poker.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../server/store.js';
@@ -659,6 +660,150 @@ section('skydespillet: en kamp i arkaden');
   B.conn.close();
   check('når forbindelsen ryger, er spilleren ude af kampen', arena.size() === 0);
   B = client(tokB); B.send({ t: 'enter', g: GID });
+}
+
+section('poker: reglerne');
+{
+  const C = t => t.split(' ').map(x => '23456789TJQKA'.indexOf(x[0]) + 'shdc'.indexOf(x[1]) * 13);
+  const named = [['As Ks Qs Js Ts 2h 3d', 'Royal straight flush'], ['9s 8s 7s 6s 5s Ah Ad', 'Straight flush'], ['9s 9h 9d 9c Ks 2h 3d', 'Fire ens'], ['9s 9h 9d Kc Ks 2h 3d', 'Fuldt hus'], ['As 9s 7s 4s 2s Kh Kd', 'Flush'],
+    ['5s 4h 3d 2c Ah Kd Qd', 'Straight'], ['9s 9h 9d Kc Qs 2h 3d', 'Tre ens'], ['9s 9h Kd Kc Qs 2h 3d', 'To par'], ['9s 9h Kd Jc Qs 2h 3d', 'Et par'], ['9s 7h Kd Jc Qs 2h 3d', 'Højt kort'], ['9s 9h 9d Kc Ks Kh 3d', 'Fuldt hus']];
+  check('hver slags hånd bliver kaldt det rigtige', named.every(([t, n]) => handName(handValue(C(t))) === n));
+  const order = ['9s 7h Kd Jc Qs 2h 3d', '9s 9h Kd Jc Qs 2h 3d', '9s 9h Kd Kc Qs 2h 3d', '9s 9h 9d Kc Qs 2h 3d', '5s 4h 3d 2c Ah Kd Qd', 'Ts 9h 8d 7c 6h 2d 2s', 'As 9s 7s 4s 2s Kh Kd', '9s 9h 9d Kc Ks 2h 3d', 'Ks Kh Kd 9c 9s 2h 3d', '9s 9h 9d 9c Ks 2h 3d', 'As 2s 3s 4s 5s 9h 9d', '9s 8s 7s 6s 5s Ah Ad', 'As Ks Qs Js Ts 2h 3d'];
+  check('hænderne står i den rigtige rækkefølge', order.every((t, i) => i === 0 || handValue(C(t)) > handValue(C(order[i - 1]))));
+  check('det højeste sidekort afgør, og ens hænder er lige gode', handValue(C('As Kh 9d 5c 3s 2h 7d')) > handValue(C('As Qh 9d 5c 3s 2h 7d')) && handValue(C('As Kh Qd Jc Ts 2h 3d')) === handValue(C('Ah Kd Qc Js Th 4h 5d')));
+  { const st = { hole: [C('As Ah')], board: [] }; const e = equity(st, 0, 1, 600, rnd); check('to esser vinder omkring 85 % mod én tilfældig hånd', e > 0.78 && e < 0.92, e.toFixed(3)); }
+
+  // two players: the dealer has the small blind and speaks first before the flop, last after it
+  let s = poker.setup(2, { first: 0 }, rnd);
+  check('to spillere: giveren har lille blind og taler først', s.dealer === 0 && s.bet[0] === 5 && s.bet[1] === 10 && s.turn === 0 && s.stacks[0] === PSTART - 5);
+  poker.act(s, 0, { call: true }, rnd);
+  check('store blind må tale, selv om alle har betalt', s.street === 0 && s.turn === 1);
+  poker.act(s, 1, { call: true }, rnd);
+  check('efter floppet taler den, der ikke giver, først', s.street === 1 && s.board.length === 3 && s.turn === 1 && s.toCall === 0);
+  const v0 = poker.view(s, 0), v1 = poker.view(s, 1), vs = poker.view(s, -1);
+  check('man ser sine egne kort, ikke de andres, og aldrig bunken', v0.hole[0][0] >= 0 && v0.hole[1][0] === -1 && v1.hole[0][0] === -1 && vs.hole[0][0] === -1 && vs.hole[1][0] === -1 && !('deck' in JSON.parse(JSON.stringify(v0))));
+  check('kun den, der har turen, får at vide, hvad der kan gøres', !!v1.can && !v0.can && v1.can.call === 0 && v1.can.min === 10 && v1.can.max === PSTART - 10);
+  const refused = a => { try { poker.act(s, s.turn, a, rnd); return false; } catch { return true; } };
+  check('en for lille og en for stor forhøjelse afvises', refused({ raise: 5 }) && refused({ raise: PSTART }) && (() => { try { poker.act(s, 0, { call: true }, rnd); return false; } catch { return true; } })());
+  poker.act(s, 1, { raise: 40 }, rnd);
+  check('efter et bud på 40 skal en forhøjelse mindst være til 80', poker.view(s, 0).can.min === 80 && poker.view(s, 0).can.call === 40);
+  poker.act(s, 0, { fold: true }, rnd);
+  check('når alle andre folder, tager den sidste potten uden at vise kort', s.phase === 'show' && s.stacks[1] === PSTART + 10 && s.stacks[0] === PSTART - 10 && Object.keys(s.last.shown).length === 0);
+  poker.act(s, -1, { next: true }, rnd);
+  check('næste hånd: giveren flytter', s.phase === 'bet' && s.dealer === 1 && s.hands === 2);
+
+  // side pots, with the cards laid out by hand: seat 0 has 100 and the best hand, seat 1 has 300, seat 2 has 1000
+  s = poker.setup(3, { first: 0 }, rnd);
+  s.stacks = [100 - s.total[0], 300 - s.total[1], 1000 - s.total[2]];
+  s.hole = [C('As Ah'), C('Ks Kh'), C('Qs Qh')]; s.deck = C('2c 3c 4d 9h 8d 7c 2s 3d');           // the board: 3d 2s 7c, 8d, 9h
+  while (s.phase === 'bet') { const i = s.turn, max = s.bet[i] + s.stacks[i]; poker.act(s, i, max > s.toCall && !s.acted[i] ? { raise: max } : { call: true }, rnd); }
+  check('sidepuljer: den med færrest jetoner kan kun vinde det, alle har kunnet matche', s.stacks[0] === 300 && s.stacks[1] === 400 && s.stacks[2] === 700 && s.last.pots[0].amount === 300 && s.last.pots[1].amount === 400, JSON.stringify(s.stacks));
+  check('alle, der er med til sidst, viser deres kort', Object.keys(s.last.shown).length === 3 && handName(s.last.vals[0]) === 'Et par');
+  // a big blind who cannot cover the blind: what the small blind paid beyond that comes back
+  s = poker.setup(2, { first: 0 }, rnd);
+  s.stacks[1] = 0; s.bet[1] = 4; s.total[1] = 4; s.allin[1] = true;                                  // as if the big blind had only 4
+  poker.act(s, 0, { fold: true }, rnd);
+  check('en blind større end modstanderens all-in kommer tilbage', s.stacks[0] === PSTART - 4 && s.stacks[1] === 8);
+
+  // many tournaments of players who do anything allowed (and try what is not): no chip appears or disappears
+  let ok = true, why = '';
+  for (let k = 0; k < 150 && ok; k++) {
+    const n = 2 + k % 5, g = poker.setup(n, { first: k }, rnd); let expect = n * PSTART, steps = 0;
+    while (!poker.result(g) && steps++ < 50000 && ok) {
+      if (g.phase === 'show') poker.act(g, -1, { next: true }, rnd);
+      else if (k % 3 === 0 && rnd() < 0.01 && g.out.filter(o => !o).length > 2) { const who = Math.floor(rnd() * n); if (!g.out[who]) { expect -= g.stacks[who]; poker.drop(g, who, rnd); } }
+      else {
+        const i = g.turn, can = poker.view(g, i).can, q = rnd();
+        if (q < 0.05) { try { poker.act(g, (i + 1) % n, { call: true }, rnd); ok = false; why = 'uden for tur'; } catch { /* refused, as it should be */ } }
+        if (q < 0.15) poker.act(g, i, { fold: true }, rnd); else if (q < 0.65 || !can.max) poker.act(g, i, { call: true }, rnd); else poker.act(g, i, { raise: can.min + Math.floor(rnd() * (can.max - can.min + 1)) }, rnd);
+      }
+      const total = g.stacks.reduce((a, b) => a + b, 0) + (g.phase === 'bet' ? g.total.reduce((a, b) => a + b, 0) : 0);
+      if (total !== expect || g.stacks.some(x => x < 0)) { ok = false; why = 'jetoner ' + total + ' i stedet for ' + expect; }
+    }
+    if (ok && (!poker.result(g) || g.stacks[g.winner] !== expect)) { ok = false; why = 'ingen vinder med det hele'; }
+  }
+  check('150 turneringer med tilfældige træk og spillere, der går: ingen jetoner opstår eller forsvinder', ok, why);
+  // robots against each other: every tournament ends, and the better robots win more
+  const wins = [0, 0, 0, 0];
+  for (let k = 0; k < 45; k++) {
+    const lv = [0, 1, 2, 3, 4, 5].map(i => [1, 2, 3][(i + k) % 3]), g = poker.setup(6, { first: k }, rnd); let steps = 0;
+    while (!poker.result(g) && steps++ < 20000) { if (g.phase === 'show') poker.act(g, -1, { next: true }, rnd); else poker.act(g, g.turn, poker.bot(g, g.turn, lv[g.turn], rnd), rnd); }
+    if (poker.result(g)) wins[lv[g.winner]]++;
+  }
+  check('robotterne spiller turneringer til ende, og de svære vinder flere end de lette', wins[1] + wins[2] + wins[3] === 45 && wins[3] > wins[1], wins.join(' '));
+}
+
+section('poker: et bord i klubhuset');
+{
+  for (const c of [A, B, C]) c.send({ t: 'tclose' });
+  const tv = c => c.last('tv').tv, state = id => store.groups.get(GID).tables[id].state, tbl = id => store.groups.get(GID).tables[id];
+  mark(A, B, C);
+  A.send({ t: 'tnew', game: 'poker', stake: 0, bot: 2 });
+  const id = tv(A).id;
+  check('et pokerbord med en robot venter på flere', tv(A).phase === 'open' && tv(A).seats.length === 2 && tv(A).seats[1].bot === 2);
+  A.send({ t: 'tbot', id, level: 3 }); A.send({ t: 'tbot', id, level: 1 });
+  check('flere robotter ved samme bord har hver sit navn', tv(A).seats.length === 4 && new Set(tv(A).seats.map(q => q.n)).size === 4);
+  B.send({ t: 'tstart', id });
+  check('kun den, der lavede bordet, kan starte', /lavet bordet/.test(B.err()) && tv(A).phase === 'open');
+  A.send({ t: 'tstart', id });
+  check('turneringen går i gang, og robotterne trækker selv', tv(A).phase === 'play' && tv(A).v.hands === 1 && (tv(A).turn === 0 || tv(A).v.phase === 'show'));
+  check('man ser sine egne kort og de andres bagsider', tv(A).v.hole[0][0] >= 0 && tv(A).v.hole.slice(1).every(h => h === null || h[0] === -1) && !('deck' in tv(A).v));
+  B.send({ t: 'topen', id });
+  check('en tilskuer ser ingen kort', tv(B).me === -1 && tv(B).v.hole.every(h => h === null || h[0] === -1));
+  B.send({ t: 'tjoin', id });
+  check('man kan ikke sætte sig, når turneringen er i gang', /allerede i gang/.test(B.err()));
+  B.send({ t: 'tclose' });
+  // the clock: nobody home
+  const nextTurn = () => { for (let k = 0; k < 400 && tbl(id) && tbl(id).phase === 'play' && state(id).turn !== 0; k++) { clock += 1000; hub.tick(); } };
+  nextTurn();
+  check('uret er sat, når det er ens tur', tv(A).turn === 0 && tv(A).clock > THINK - 2 && tv(A).clock <= THINK);
+  const h0 = state(id).hands, need0 = state(id).toCall > state(id).bet[0];
+  clock += (THINK - 1) * 1000; hub.tick();
+  check('før tiden er gået, sker der ikke noget', state(id).turn === 0 && state(id).hands === h0);
+  clock += 2000; hub.tick();
+  check('når tiden er gået, foldes der (eller checkes) for en', state(id).away[0] === 1 && (need0 ? state(id).folded[0] : state(id).said[0] === 'check' || state(id).turn !== 0 || state(id).hands > h0));
+  nextTurn();
+  A.send({ t: 'tact', id, a: { call: true } });
+  check('et træk fra en selv nulstiller fraværet', state(id).away[0] === 0);
+  // from one hand to the next
+  for (let k = 0; k < 600 && tbl(id).phase === 'play' && state(id).phase !== 'show'; k++) { if (state(id).turn === 0) A.send({ t: 'tact', id, a: { fold: true } }); else { clock += 1000; hub.tick(); } }
+  const hBefore = state(id).hands;
+  check('efter en hånd vises resultatet et øjeblik', state(id).phase === 'show' && tbl(id).wake.seat === -1);
+  clock += (SHOW + 1) * 1000; hub.tick();
+  check('og så gives den næste hånd af sig selv', state(id).hands === hBefore + 1 || tbl(id).phase === 'over');
+  A.send({ t: 'tclaim', id });
+  check('man kan ikke tage sejren på tid i poker', /uret/.test(A.err()));
+  mark(C); A.send({ t: 'tleave', id });
+  check('når det sidste menneske går, lukker robotbordet', !tbl(id) && C.last('tbx').id === id);
+
+  // three people and a stake
+  const chips = c => store.users.get(c.me().id).chips, before = [chips(A), chips(B), chips(C)];
+  A.send({ t: 'tnew', game: 'poker', stake: 10 });
+  const id2 = tv(A).id;
+  B.send({ t: 'tjoin', id: id2 }); C.send({ t: 'tjoin', id: id2 });
+  A.send({ t: 'tbot', id: id2, level: 1 });
+  check('robotter spiller ikke om jetoner', /jetoner/.test(A.err()) && tv(A).seats.length === 3);
+  A.send({ t: 'tstart', id: id2 });
+  check('indskuddene ligger i puljen', tv(A).pot === 30 && chips(A) === before[0] - 10 && chips(B) === before[1] - 10 && tv(A).phase === 'play');
+  const who = [A, B, C];
+  // B leaves in the middle: the two others play on
+  const seatB = tv(B).me; B.send({ t: 'tleave', id: id2 });
+  check('en, der går midt i turneringen, er ude, og de andre spiller videre', tbl(id2).phase === 'play' && state(id2).out[seatB] && tbl(id2).seats[seatB].left === 1);
+  mark(A, B, C);
+  for (let k = 0; k < 3000 && tbl(id2).phase === 'play'; k++) {
+    const st = state(id2);
+    if (st.phase === 'show') { clock += (SHOW + 1) * 1000; hub.tick(); continue; }
+    const i = st.turn, max = st.bet[i] + st.stacks[i];
+    // quietly at first (a tournament over in a couple of moves earns no reward), then everything in
+    who[i].send({ t: 'tact', id: id2, a: tbl(id2).moves > 12 && !st.acted[i] && max > st.toCall ? { raise: max } : { call: true } });
+  }
+  const res = tbl(id2).res, wSeat = res && res.win[0], winner = res && who[wSeat], loser = res && who.find((c, i) => i !== wSeat && i !== seatB);
+  check('turneringen slutter med én vinder, som får puljen og belønningen', !!res && tbl(id2).phase === 'over' && chips(winner) === before[who.indexOf(winner)] - 10 + 30 + ECON.win && res.pay[wSeat] === 30 + ECON.win);
+  check('taberne får trøstepræmien, og det tæller i tallene', chips(loser) === before[who.indexOf(loser)] - 10 + ECON.loss && winner.me().stats.poker.w === 1 && loser.me().stats.poker.p === 1);
+  check('resultatet står i samtalen', /vandt over .* og .* i Poker og fik puljen på 30 jetoner/.test(C.last('chat').m.s), C.last('chat').m.s);
+  winner.send({ t: 'tagain', id: id2 });
+  check('en ny turnering kræver, at ingen er gået', /gået fra bordet/.test(winner.err()));
+  for (const c of [A, C]) c.send({ t: 'tleave', id: id2 });
 }
 
 section('glemt kodeord');

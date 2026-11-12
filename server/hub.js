@@ -302,7 +302,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     id: t.id, game: t.game, phase: t.phase, stake: t.stake, pot: t.pot, host: t.host, n: t.n,
     seats: t.seats.map(s => ({ u: s.u, n: s.n, bot: s.bot || 0, left: s.left ? 1 : 0 })),
     turn: t.phase === 'play' ? GAMES[t.game].turn(t.state) : -1, turnAt: t.turnAt, at: t.endAt || t.created,
-    res: t.res || null, again: Object.keys(t.again || {}).map(Number),
+    res: t.res || null, again: Object.keys(t.again || {}).map(Number), clock: t.wake && t.phase === 'play' ? Math.max(0, Math.round((t.wake.at - now()) / 100) / 10) : 0,
   });
   const tableView = (t, uid) => {
     const seat = t.seats.findIndex(s => s.u === uid);
@@ -337,9 +337,21 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     pushMe(u);
   }
 
+  // A robot for a free seat: games for more than two have a list of names, so that they can be told apart.
+  function botSeat(game, t, level) {
+    const used = new Set(t.seats.map(s => s.n)), name = game.botList ? game.botList.find(n => !used.has(n)) : null;
+    return { u: 0, n: name || game.botNames[level], bot: level };
+  }
+  // Games with a clock: when nobody moves in time, the lobby makes the move the game asks for (see tick()).
+  function setWake(t) {
+    const game = GAMES[t.game], c = t.phase === 'play' && game.clock ? game.clock(t.state) : null;
+    t.wake = c ? { at: now() + c.secs * 1000, seat: c.seat, a: c.a } : null;
+  }
+
   function start(g, t) {
     t.state = GAMES[t.game].setup(t.seats.length, { first: t.first % t.seats.length }, rand);
     t.phase = 'play'; t.turnAt = now(); t.res = null; t.again = {}; t.moves = 0; t.endAt = 0; t.n++;
+    setWake(t);
     botSoon(g, t);
   }
 
@@ -348,7 +360,18 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     catch (e) { if (e instanceof GameError) fail(e.message); throw e; }
     t.turnAt = now(); t.moves++;
     const res = GAMES[t.game].result(t.state);
-    if (res) finish(g, t, res); else { pushTable(g, t); botSoon(g, t); }
+    if (res) finish(g, t, res); else { setWake(t); pushTable(g, t); botSoon(g, t); }
+  }
+  // Giving up. In a game for two the other one wins; where the game can go on without one (poker), it does.
+  function giveUp(g, t, seat) {
+    const game = GAMES[t.game];
+    if (!game.drop) return finish(g, t, { win: others(t, seat), draw: false, why: 'resign', by: seat });
+    t.seats[seat].left = 1;
+    if (!t.seats.some(s => s.u && !s.left)) { refund(t); return dropTable(g, t); }            // only robots left: no need to play on
+    game.drop(t.state, seat, rand);
+    t.turnAt = now();
+    const res = game.result(t.state);
+    if (res) finish(g, t, res); else { setWake(t); pushTable(g, t); botSoon(g, t); }
   }
 
   // The game is over: pay out the pot, add the rewards, count the result, tell the room.
@@ -368,10 +391,10 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       pushMe(u);
       return gain;
     });
-    t.phase = 'over'; t.pot = 0; t.endAt = now(); t.again = {};
+    t.phase = 'over'; t.pot = 0; t.endAt = now(); t.again = {}; t.wake = null;
     t.res = { win: res.win, draw: !!res.draw, why: res.why || '', by: res.by ?? -1, pay };
     if (!robot) {
-      const names = l => l.map(i => t.seats[i].n).join(' og '), los = others(t, -1).filter(i => !res.win.includes(i));
+      const names = l => { const n = l.map(i => t.seats[i].n); return n.length > 2 ? n.slice(0, -1).join(', ') + ' og ' + n[n.length - 1] : n.join(' og '); }, los = others(t, -1).filter(i => !res.win.includes(i));
       const pot = share ? ' og fik puljen på ' + (share + rest) + ' jetoner' : '';
       addChat(g, null, res.draw ? names(winners) + ' spillede uafgjort i ' + game.name + '.'
         : res.why === 'resign' ? names(los) + ' gav op mod ' + names(res.win) + ' i ' + game.name + '.'
@@ -403,7 +426,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (t.host === s.u) t.host = t.seats.find(q => q.u).u;
       return pushTable(g, t);
     }
-    if (t.phase === 'play') { s.left = 1; return finish(g, t, { win: others(t, seat), draw: false, why: 'resign', by: seat }); }
+    if (t.phase === 'play') { s.left = 1; return giveUp(g, t, seat); }
     s.left = 1; refund(t);
     if (t.seats.every(q => !q.u || q.left)) dropTable(g, t); else pushTable(g, t);
   }
@@ -731,7 +754,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
         created: now(), endAt: 0, n: 0, moves: 0, res: null, again: {} };
       g.tables[t.id] = t;
       sitDown(t, u);
-      if (level) { t.seats.push({ u: 0, n: game.botNames[level], bot: level }); if (t.seats.length >= game.min) start(g, t); }
+      if (level) { t.seats.push(botSeat(game, t, level)); if (t.seats.length >= game.max) start(g, t); }
       openTable(g, p, t);
       pushTable(g, t);
       const guest = rooms.get(g.id).get(+m.invite);
@@ -769,7 +792,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (t.host !== conn.user.id || t.phase !== 'open') fail('Det kan kun den, der har lavet bordet, før spillet er i gang.');
       if (t.stake) fail('Robotten spiller ikke om jetoner. Lav et bord uden indsats.');
       if (t.seats.length >= game.max) fail('Bordet er fuldt.');
-      t.seats.push({ u: 0, n: game.botNames[level], bot: level });
+      t.seats.push(botSeat(game, t, level));
       if (t.seats.length === game.max) start(g, t);
       pushTable(g, t);
     },
@@ -787,7 +810,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       const g = groupOf(conn), t = tableOf(g, m.id), seat = t.seats.findIndex(s => s.u === conn.user.id);
       if (seat < 0) fail('Du sidder ikke ved det bord.');
       if (t.phase !== 'play') fail('Spillet er ikke i gang.');
-      if (m.a && m.a.resign) return finish(g, t, { win: others(t, seat), draw: false, why: 'resign', by: seat });
+      if (m.a && m.a.resign) return giveUp(g, t, seat);
       play(g, t, seat, m.a);
     },
 
@@ -797,6 +820,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       const g = groupOf(conn), t = tableOf(g, m.id), seat = t.seats.findIndex(s => s.u === conn.user.id);
       if (seat < 0 || t.phase !== 'play') fail('Spillet er ikke i gang.');
       const turn = GAMES[t.game].turn(t.state);
+      if (GAMES[t.game].clock) fail('Her passer uret selv på tiden.');
       if (turn === seat || turn < 0 || t.seats[turn].bot) fail('Det er ikke den anden, der skal rykke.');
       if (now() - t.turnAt < ECON.claimHours * HOUR) fail('Du kan tage sejren, når den anden har haft ' + ECON.claimHours + ' timer til sit træk.');
       finish(g, t, { win: [seat], draw: false, why: 'time', by: turn });
@@ -807,7 +831,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       need(conn);
       const g = groupOf(conn), u = conn.user, t = tableOf(g, m.id);
       if (t.phase !== 'over' || !t.seats.some(s => s.u === u.id)) fail('Det bord kan ikke spilles igen.');
-      if (t.seats.some(s => s.left)) fail('Den anden er gået fra bordet.');
+      if (t.seats.some(s => s.left)) fail(t.seats.length > 2 ? 'En af spillerne er gået fra bordet.' : 'Den anden er gået fra bordet.');
       if (t.again[u.id]) return;
       if (u.chips < t.stake) fail('Du har ikke jetoner nok til indsatsen.');
       u.chips -= t.stake; t.pot += t.stake; t.again[u.id] = 1;
@@ -888,8 +912,19 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     for (const [ip, m] of made) if (t0 - m.at >= HOUR) made.delete(ip);
   }
 
+  // Once a second: the clocks of the games that have one.
+  function tick() {
+    const t0 = now();
+    for (const g of store.groups.values()) for (const t of Object.values(g.tables)) {
+      if (t.phase !== 'play' || !t.wake || t0 < t.wake.at) continue;
+      const w = t.wake;
+      t.wake = null;
+      try { play(g, t, w.seat, w.a); } catch (e) { if (!(e instanceof LobbyError)) console.error('ur:', e); setWake(t); }
+    }
+  }
+
   // After a restart: robots whose move it was carry on.
   for (const g of store.groups.values()) for (const t of Object.values(g.tables)) botSoon(g, t);
 
-  return { api, connect, message, disconnect, tidy, eeChanged, arChanged, arEnded, arLeft, online: () => conns.size, adminKey: () => sign('admin:' + today()) };
+  return { api, connect, message, disconnect, tidy, tick, eeChanged, arChanged, arEnded, arLeft, online: () => conns.size, adminKey: () => sign('admin:' + today()) };
 }

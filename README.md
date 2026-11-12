@@ -13,7 +13,8 @@ What is in it:
 - **4 på stribe** against a friend (live, or one move now and the next tomorrow), with or without a stake, or against the house robot in three strengths.
 - **EagleEye Commander** at the command table: the round-based strategy game, with the group's matches listed in the clubhouse and no codes or PINs (the lobby account is the general).
 - **The shooter** in the arcade: a first-person game in 3D for up to eight, with the clubhouse avatars as the players. Three game types (Stjernejagt with the train, the golden stars and the dinos; Holdkamp; Alle mod alle), robots in three strengths that fill the empty places, and one can walk into a match that is already running. Mouse and keyboard; not for phones yet.
-- The furniture for what comes next already stands in the room: Ludo, Yatzy, Meyer and poker.
+- **Poker** at the card table: Texas Hold'em without a limit as a small tournament for two to six. Everybody starts with 1,000 poker chips, the blinds rise every eighth hand, and the last one with chips takes the buy-ins. A clock keeps it moving (40 seconds per decision), and robots in three strengths can fill the seats at tables without a buy-in.
+- The furniture for what comes next already stands in the room: Ludo, Yatzy and Meyer.
 
 No dependencies: Node 20 or newer and a browser. The user interface is in Danish.
 

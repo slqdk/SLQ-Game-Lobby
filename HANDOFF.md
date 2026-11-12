@@ -21,7 +21,7 @@ His answers to the questions asked:
 
 ## What exists (v0.1.0)
 
-Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, chat with bubbles, emotes, eleven kinds of teasing, the bar with sixteen drinks, the kiosk with 23 things to wear, the wardrobe, the notice board, chips, and 4 på stribe (friend or robot, stake, rematch, give up, claim after 48 hours). Installer for Proxmox with the commands `lobby-update`, `lobby-code` and `lobby-password`. Self test with 226 checks.
+Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, chat with bubbles, emotes, eleven kinds of teasing, the bar with sixteen drinks, the kiosk with 23 things to wear, the wardrobe, the notice board, chips, and 4 på stribe (friend or robot, stake, rematch, give up, claim after 48 hours). Installer for Proxmox with the commands `lobby-update`, `lobby-code` and `lobby-password`. Self test with 225 checks.
 
 The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table), Yatzy and Meyer (dice table), poker (card table), the shooter (arcade cabinet), EagleEye Commander (command table).
 

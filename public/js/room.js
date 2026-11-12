@@ -62,7 +62,7 @@ export function createRoom(canvas, hooks) {
   function actor(m) {
     const p = m.p && m.p.length ? m.p : [[ROOM.spawn[0], ROOM.spawn[1]]];
     const a = { id: m.id, name: m.name, look: m.look, dnd: m.dnd, path: p, len: pathLen(p), dist: 0, x: p[0][0], y: p[0][1], sit: m.sit || null, seated: false,
-      moving: false, walk: 0, phase: 0, dir: 0, dirT: 0, hop: 0, emote: '', emoteAt: 0, fxs: {}, drink: null, buzz: m.buzz || 0, buzzAt: T, bubble: null, net: m.busy === 'slot' ? m.net || 0 : null,
+      moving: false, walk: 0, phase: 0, dir: 0, dirT: 0, hop: 0, emote: '', emoteAt: 0, fxs: {}, drink: null, buzz: m.buzz || 0, buzzAt: T, bubble: null, net: m.busy === 'slot' || m.busy === 'bj' ? m.net || 0 : null,
       talkUntil: 0, seed: (m.id * 2.399) % 6.28, born: T };
     if (a.sit && p.length < 2) a.seated = true;
     for (const [k, left] of m.fx || []) if (PRANKS[k]) a.fxs[k] = T - Math.max(0, PRANKS[k].dur - left / 1000);
@@ -378,11 +378,13 @@ export function createRoom(canvas, hooks) {
       const a = actors.get(m.id);
       if (!a) return;
       if (m.look) a.look = m.look; if (m.name) a.name = m.name; if ('dnd' in m) a.dnd = m.dnd;
-      if ('busy' in m) a.net = m.busy === 'slot' ? (m.net ?? a.net ?? 0) : null;
+      if ('busy' in m) a.net = m.busy === 'slot' || m.busy === 'bj' ? (m.net ?? a.net ?? 0) : null;
     },
     // the casino: the jackpot and today's board; and one spin by somebody (the result shows when the reels have stopped)
     setCasino(o) { Object.assign(casino, o); },
     spin(id, station, bet, win, net, ms) { casino.spin[station] = T + ms / 1000; spins.push({ at: T + ms / 1000, id, bet, win, net }); },
+    // what a round at the blackjack table gave somebody, shown when the dealer has drawn
+    result(id, bet, win, net, ms) { spins.push({ at: T + ms / 1000, id, bet, win, net }); },
 
     move(id, path, sit) {
       const a = actors.get(id);

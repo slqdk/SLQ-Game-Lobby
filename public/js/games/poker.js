@@ -17,6 +17,7 @@ const PLACES = {
 // (the class is "pcard": "card" is the panel of the welcome screen)
 const card = (c, cls = '') => c < 0 ? h('div', { class: 'pcard back ' + cls })
   : h('div', { class: 'pcard ' + (c >= 13 && c < 39 ? 'red ' : '') + cls, 'aria-label': RANK_NAMES[c % 13] + SUITS[(c / 13) | 0] }, h('b', {}, RANK_NAMES[c % 13]), h('i', {}, SUITS[(c / 13) | 0]));
+export const cardEl = card;          // the blackjack table uses the same cards
 const list = n => n.length > 2 ? n.slice(0, -1).join(', ') + ' og ' + n[n.length - 1] : n.join(' og ');
 
 export function renderPoker(tv, ctx) {

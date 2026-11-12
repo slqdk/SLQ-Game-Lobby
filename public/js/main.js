@@ -11,6 +11,8 @@ import { renderYatzy } from './games/yatzy.js';
 import { renderMeyer } from './games/meyer.js';
 import { renderLudo } from './games/ludo.js';
 import { slotView } from './slots.js';
+import { renderBlackjack, resetBlackjack } from './blackjack.js';
+import { dealerMs } from '../shared/blackjack.js';
 import { MACHINES, MACHINE_IDS } from '../shared/slots.js';
 import { ECON, LIMITS, EMOTES, PRANKS, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
 import { ROOM, pathLen, findPath } from '../shared/room.js';
@@ -341,6 +343,7 @@ function tablesChanged() {
     const names = t.seats.map(s => s.n.replace(/ \(.*/, ''));
     labels[g.station] = g.max > 2 ? g.name + ': ' + (t.phase === 'open' ? names[0] + ' venter på spillere' : names.length + ' ved bordet') : t.phase === 'open' ? names[0] + ' venter på en modspiller' : names.join(' mod ');
   }
+  if (st.bj && st.bj.n) labels.blackjack = 'Blackjack: ' + st.bj.n + ' ved bordet';
   const wars = [...st.ee.values()].filter(x => x.phase === 'play');
   if (wars.length) labels.command = wars.length === 1 ? '«' + wars[0].name + '» · runde ' + wars[0].round : wars.length + ' kampe i gang';
   room.setLabels(labels);
@@ -353,7 +356,9 @@ function statusOf(m) {
   if (!m.on) return ['sidst set ' + ago(m.seen), ''];
   const t = m.open ? st.tables.get(m.open) : null;
   if (t && GAMES[t.game]) return [(t.seats.some(s => s.u === m.id) ? 'spiller ' : 'ser på ') + GAMES[t.game].name, 'play'];
-  if (m.busy === 'slot') return ['ved ' + (MACHINES[m.slot] ? MACHINES[m.slot].name : 'en slotmaskine') + (m.net ? ' (' + (m.net > 0 ? '+' : '') + m.net + ')' : ''), 'play'];
+  const net = m.net ? ' (' + (m.net > 0 ? '+' : '') + m.net + ')' : '';
+  if (m.busy === 'slot') return ['ved ' + (MACHINES[m.slot] ? MACHINES[m.slot].name : 'en slotmaskine') + net, 'play'];
+  if (m.busy === 'bj') return ['ved blackjackbordet' + net, 'play'];
   if (m.busy) return ['spiller ' + (BUSY[m.busy] || 'et spil'), 'play'];
   return [m.dnd ? 'vil ikke forstyrres' : 'i klubhuset', ''];
 }
@@ -420,6 +425,7 @@ function onStation(sn) {
   else if (sn.kind === 'scores') { goTo(sn); openScores(); }
   else if (sn.kind === 'slot') send({ t: 'sopen', m: sn.machine });
   else if (sn.kind === 'casino') { goTo(sn); openCasino(); }
+  else if (sn.kind === 'blackjack') openBlackjack();
   else if (sn.kind === 'door') { goTo(sn); openMenu(); }
   else if (sn.kind === 'sit') send({ t: 'sit', st: sn.id });
   else if (sn.kind === 'sound') { goTo(sn); setSound(!soundOn()); room.setSound(soundOn()); toast(soundOn() ? 'Lyden er slået til.' : 'Lyden er slået fra.'); }
@@ -572,7 +578,8 @@ function openScores() {
     ...board('Vundne runder i skydespillet', m => (m.stats && m.stats.sh && m.stats.sh.w) || 0),
     ...board('Sejre i EagleEye Commander', m => (m.stats && m.stats.ee && m.stats.ee.w) || 0),
     ...board('Største gevinst på en slotmaskine', m => (m.stats && m.stats.slots && m.stats.slots.best) || 0),
-    ...board('Mest vundet i kasinoet (netto)', m => (m.stats && m.stats.slots ? m.stats.slots.won - m.stats.slots.bet : 0)),
+    ...board('Største gevinst på en hånd blackjack', m => (m.stats && m.stats.bj && m.stats.bj.best) || 0),
+    ...board('Mest vundet i kasinoet (netto)', m => casinoEver(m).won - casinoEver(m).bet),
     ...board('Flest omgange givet i baren', stat('rounds')),
     ...board('Største drillepind', stat('teased')),
     ...board('Mest drillet', stat('gotTeased')),
@@ -620,8 +627,9 @@ function openTables() {
   const build = () => {
     const list = [...st.tables.values()].filter(t => GAMES[t.game]).sort((a, b) => rank(a) - rank(b) || b.at - a.at);
     const shoot = [...st.arenas.values()].map(arenaRow);
+    if (st.bj && st.bj.n) shoot.push(h('div', { class: 'trow' }, h('div', { class: 't' }, h('b', {}, 'Blackjack'), h('span', {}, st.bj.n + ' ved bordet i kasinoet')), h('button', { class: 'btn small alt', onclick: openBlackjack }, 'Gå derhen')));
     return [list.length || shoot.length ? [...shoot, ...list.map(tableRow)] : h('p', { class: 'empty' }, 'Der er ingen spil i gang lige nu.'), ...newGame('c4'),
-      h('p', { class: 'hint' }, 'De andre spil står ved deres egne borde i klubhuset: Ludo ved brætspilsbordet, poker ved kortbordet, Yatzy og Meyer ved terningebordet, skydespillet i arkaden og EagleEye Commander ved kommandobordet.')].flat();
+      h('p', { class: 'hint' }, 'De andre spil står ved deres egne borde i klubhuset: Ludo ved brætspilsbordet, poker ved kortbordet, Yatzy og Meyer ved terningebordet, skydespillet i arkaden, EagleEye Commander ved kommandobordet, og slotmaskinerne og blackjack i kasinofløjen.')].flat();
   };
   sheet.open({ title: 'Spil', kind: 'tables', body: build() });
   reopen = () => sheet.fill(build());
@@ -821,23 +829,32 @@ function casinoChanged() {
   room.setCasino({ pot: st.pot || 0, lines });
   if (sheet.kind === 'casino') openCasino();
 }
+// What somebody has staked and won in the casino in all: the machines and the blackjack table together.
+function casinoEver(m) {
+  const s = (m.stats && m.stats.slots) || {}, b = (m.stats && m.stats.bj) || {}, sub = [];
+  if (s.n) sub.push(num(s.n) + ' spin');
+  if (b.n) sub.push(num(b.n) + (b.n === 1 ? ' hånd' : ' hænder') + ' blackjack');
+  const best = Math.max(s.best || 0, b.best || 0);
+  if (best) sub.push('største gevinst ' + num(best));
+  return { n: (s.n || 0) + (b.n || 0), bet: (s.bet || 0) + (b.bet || 0), won: (s.won || 0) + (b.won || 0), sub: sub.join(' · ') };
+}
 // The board on the wall: the jackpot, and what everybody has staked and won, today and in all.
 function openCasino() {
   const all = [...st.mem.values()], net = v => h('b', { class: v > 0 ? 'up' : v < 0 ? 'down' : '' }, signed(v));
   const today = all.filter(m => m.today && (m.today[0] || m.today[1])).sort((a, b) => (b.today[1] - b.today[0]) - (a.today[1] - a.today[0]));
-  const ever = all.filter(m => m.stats && m.stats.slots && m.stats.slots.n).sort((a, b) => (b.stats.slots.won - b.stats.slots.bet) - (a.stats.slots.won - a.stats.slots.bet));
+  const ever = all.map(m => [m, casinoEver(m)]).filter(x => x[1].n).sort((a, b) => (b[1].won - b[1].bet) - (a[1].won - a[1].bet));
   const row = (m, sub, a, b) => h('div', { class: 'cs-row' }, bustOf(m, 30), h('span', { class: 'n' }, m.name, h('small', {}, sub)), h('span', {}, num(a)), h('span', {}, num(b)), net(b - a));
   const head = () => h('div', { class: 'cs-row head' }, h('span'), h('span'), h('span', {}, 'Satset'), h('span', {}, 'Vundet'), h('span', {}, 'Netto'));
-  const where = m => m.on && m.busy === 'slot' && MACHINES[m.slot] ? 'ved ' + MACHINES[m.slot].name + ' nu' : '';
+  const where = m => !m.on ? '' : m.busy === 'slot' && MACHINES[m.slot] ? 'ved ' + MACHINES[m.slot].name + ' nu' : m.busy === 'bj' ? 'ved blackjackbordet nu' : '';
   const body = [
     h('div', { class: 'cs-pot' }, h('span', {}, 'Jackpot på Sparegrisen'), h('b', {}, num(st.pot || 0))),
     h('div', { class: 'sec' }, 'I dag'),
-    today.length ? h('div', {}, head(), today.map(m => row(m, where(m), m.today[0], m.today[1]))) : h('p', { class: 'empty' }, 'Ingen har spillet på maskinerne i dag.'),
+    today.length ? h('div', {}, head(), today.map(m => row(m, where(m), m.today[0], m.today[1]))) : h('p', { class: 'empty' }, 'Ingen har spillet i kasinoet i dag.'),
     h('div', { class: 'sec' }, 'I alt'),
-    ever.length ? h('div', {}, head(), ever.map(m => row(m, num(m.stats.slots.n) + ' spin · største gevinst ' + num(m.stats.slots.best), m.stats.slots.bet, m.stats.slots.won))) : h('p', { class: 'empty' }, 'Ingen har prøvet maskinerne endnu.'),
-    h('div', { class: 'sec' }, 'Maskinerne'),
-    h('div', { class: 'row' }, MACHINE_IDS.map(id => h('button', { class: 'btn alt', onclick: () => send({ t: 'sopen', m: id }) }, MACHINES[id].name))),
-    h('p', { class: 'hint' }, 'Alle i klubhuset ser hvert spin, mens det sker: tallet, der stiger op fra den, der spiller, er gevinsten eller tabet, og tallet over navnet er, hvad de står til.'),
+    ever.length ? h('div', {}, head(), ever.map(([m, e]) => row(m, e.sub, e.bet, e.won))) : h('p', { class: 'empty' }, 'Ingen har prøvet kasinoet endnu.'),
+    h('div', { class: 'sec' }, 'Spil'),
+    h('div', { class: 'row' }, MACHINE_IDS.map(id => h('button', { class: 'btn alt', onclick: () => send({ t: 'sopen', m: id }) }, MACHINES[id].name)), h('button', { class: 'btn alt', onclick: openBlackjack }, 'Blackjack')),
+    h('p', { class: 'hint' }, 'Alle i klubhuset ser hvert spin og hver runde blackjack, mens det sker: tallet, der stiger op fra den, der spiller, er gevinsten eller tabet, og tallet over navnet er, hvad de står til.'),
   ];
   if (sheet.kind === 'casino' && sheet.isOpen) sheet.fill(body); else sheet.open({ title: 'Kasinoet', kind: 'casino', body });
 }
@@ -868,7 +885,44 @@ on.spin = m => {
 const errBefore = on.err;
 on.err = m => { if (m.re === 'spin' && st.slot) st.slot.refused(); errBefore(m); };
 const roomBefore = on.room;
-on.room = m => { st.pot = m.pot || 0; st.slot = null; st.hold = null; roomBefore(m); casinoChanged(); };
+on.room = m => { st.pot = m.pot || 0; st.slot = null; st.hold = null; st.bj = m.bj || null; if (sheet.kind === 'bj') sheet.close(); roomBefore(m); casinoChanged(); };
+
+// ---------- blackjack ----------
+// The table in the casino wing: everybody plays against the house. The sheet shows the table for as long as it is
+// open, also to somebody who only watches; closing it is leaving the table.
+function openBlackjack() {
+  if (sheet.kind === 'bj') return;
+  st.bjv = null; resetBlackjack();
+  sheet.open({ title: 'Blackjack', kind: 'bj', wide: true, body: h('p', { class: 'empty' }, 'Henter bordet …'), closed: () => { st.bjv = null; send({ t: 'bjclose' }); } });
+  send({ t: 'bjopen' });
+}
+function drawBlackjack() {
+  if (sheet.kind !== 'bj' || !st.bjv) return;
+  const left = Math.max(0, st.bjv.clock - (performance.now() - st.bjv.at) / 1000);
+  sheet.fill(renderBlackjack(st.bjv.v, { me: mine(), mem: st.mem, chips: () => st.me.chips, clock: left, send, leave: () => sheet.close() }));
+}
+const bjTurn = v => v.phase === 'play' && v.turn >= 0 && v.seats[v.turn] && v.seats[v.turn].u === mine() && !v.seats[v.turn].gone;
+on.bj = m => {
+  if (sheet.kind !== 'bj') return;
+  const before = st.bjv && bjTurn(st.bjv.v);
+  st.bjv = { v: m.v, clock: m.clock, at: performance.now() };
+  drawBlackjack();
+  if (bjTurn(m.v) && !before) play('turn');
+};
+// how many sit at the table: the sign over it in the room
+on.bjs = m => { st.bj = m.s; tablesChanged(); if (sheet.kind === 'tables') reopen(); };
+// A round is over: what it gave each player rises from their heads when the dealer has drawn, and the board on the
+// wall follows. One's own chip counter waits for the dealer too.
+on.bjres = m => {
+  const ms = dealerMs(m.cards);
+  for (const r of m.r) {
+    room.result(r.u, r.bet, r.win, r.net, ms);
+    if (r.u === mine() && st.hold == null) { st.hold = $('#chipCount').textContent; later(ms, () => { st.hold = null; updateMe(r.win - r.bet > 0 ? 1 : -1); if (r.win < r.bet) play('lose'); }); }
+  }
+  later(ms, () => { for (const r of m.r) { const x = st.mem.get(r.u); if (x) { x.net = r.net; x.today = r.today; } } casinoChanged(); renderFriends(); });
+};
+const meBefore2 = on.me;
+on.me = m => { meBefore2(m); if (st.bjv && st.bjv.v.phase !== 'show') drawBlackjack(); };
 
 // ---------- notifications ----------
 // The server only sends a notification to somebody who is not looking: the page tells it whether it is in front

@@ -11,6 +11,7 @@ import { makeArsenal } from './weapons.js';
 import { makeViewModel } from './viewmodel.js';
 import { makeFigures } from './figure.js';
 import { mergeStatic } from './merge.js';
+import { dressWorld } from './scenery.js';
 import { LOOK } from '../shared/defs.js';
 import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, FLAG, LEVELS, other, aimDir, spreadDir, zoneAt, dinoAt, newShot, flyShot } from './rules.js';
 
@@ -56,7 +57,9 @@ export function startGame({ root, info, send, sound = true, leave }) {
   sun.shadow.bias = -0.0004;
   scene.add(sun, new THREE.AmbientLight(0xffffff, 0.18));
 
-  const world = buildWorld(THREE, scene, makeTextures(THREE));
+  const texLib = makeTextures(THREE), world = buildWorld(THREE, scene, texLib);
+  // the arena is walls and floors; the scenery makes it a place: leaves, grass, roofs, lamps, flags (scenery.js)
+  const scenery = dressWorld(THREE, scene, world, texLib, { anisotropy: renderer.capabilities.getMaxAnisotropy() });
   // everything that stands still is joined into a few big pieces (the wagons of the train move, so they are left)
   const merged = mergeStatic(THREE, scene, new Set(world.trainCars.map(c => c.grp)));
   // The weapons: one arsenal makes the models, for my own hands (the view model, drawn on top of the arena),
@@ -89,6 +92,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
   if (!sound && !sfx.isMuted()) sfx.toggleMute(); else if (sound && sfx.isMuted()) sfx.toggleMute();
   const keys = {};
   let running = false, forceRun = false, frozen = false, stopped = false, mouseDown = false, jumpBuf = 0, recoilLeft = 0, bobT = 0, dip = 0, shake = 0, kick = 0, swayX = 0, swayY = 0, stepAcc = 0, useHeld = 0;
+  let trainSmoke = 0;
   let offset = info.ms - performance.now(), bestRtt = 1e9, ping = 0, pingT = 0, pings = 0, sendT = 0, shotId = 1, frames = 0, frameNo = 0, fpsT = 0, fps = 60, slowT = 0;
   const serverNow = () => performance.now() + offset;
 
@@ -211,7 +215,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     box.append(go, row);
     menu.append(box);
   }
-  function setQuality(q) { quality = q; try { localStorage.setItem('slq-shooter-q', String(q)); } catch { /* no storage */ } resize(); }
+  function setQuality(q) { quality = q; try { localStorage.setItem('slq-shooter-q', String(q)); } catch { /* no storage */ } scenery.setDetail(q); resize(); }
   function lock() { sfx.unlock(); try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch { /* the browser said no: the menu stays */ } }
   function setRunning(on) {
     running = on;
@@ -608,7 +612,10 @@ export function startGame({ root, info, send, sound = true, leave }) {
     // --- things ---
     updateShots(dt);
     fx.updateParticles(dt); fx.tickMuzzle(dt);
-    fx.tick(dt, nowT / 1000);
+    fx.tick(dt, nowT / 1000); scenery.tick(dt, nowT / 1000);
+    // smoke from the train's funnel and from the chimneys
+    if ((trainSmoke += dt) > 0.11) { trainSmoke = 0; const c = world.bazCar, p = world.carWorld(c, world.TRAIN.CL / 2 - 1.8, 0); fx.smoke(V.set(p.x, world.TRAIN.DECK + 1.0, p.z), 0.2, 1.5, 1.6); }
+    for (const s of scenery.smokers) { s.t = (s.t || 0) + dt; if (s.t >= s.every) { s.t = 0; fx.smoke(V.set(s.x + (Math.random() - 0.5) * 0.08, s.y, s.z + (Math.random() - 0.5) * 0.08), s.size, s.ttl, s.rise); } }
     for (const t of ['A', 'B']) for (const s of towerStars[t]) s.rotation.y += dt * 1.3;
     const hover = Math.sin(nowT * 0.004) * 0.15;
     if (trainStar) { const c = world.bazCar; trainStarMesh.visible = true; trainStarMesh.position.set(c.cx, world.TRAIN.DECK + 1.1 + hover, c.cz); trainStarMesh.rotation.y += dt * 2.0; }
@@ -693,6 +700,6 @@ export function startGame({ root, info, send, sound = true, leave }) {
     on(m) { const f = on[m.t]; if (f) f(m); },
     stop,
     // for the test scripts: play without the mouse being caught
-    _debug: { me, my, ents, dinos, world, keys, shots, THREE, camera, scene, renderer, merged, fire, vm, arsenal, fx, figures, weaponHud, run(v) { forceRun = v; setRunning(v || document.pointerLockElement === canvas); }, freeze(v) { frozen = v; }, state: () => ({ state, left, stars, tkills, trainStar, wait, fps, ping, offset }) },
+    _debug: { me, my, ents, dinos, world, keys, shots, THREE, camera, scene, renderer, merged, fire, vm, arsenal, fx, figures, weaponHud, scenery, run(v) { forceRun = v; setRunning(v || document.pointerLockElement === canvas); }, freeze(v) { frozen = v; }, state: () => ({ state, left, stars, tkills, trainStar, wait, fps, ping, offset }) },
   };
 }

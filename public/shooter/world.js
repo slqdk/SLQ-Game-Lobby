@@ -11,7 +11,7 @@ import { mulberry32 } from '../shared/util.js';
 export const EYE = 1.7, RAD = 0.35, STEP = 0.55;
 export const WALK = 6.0, SPRINT = 9.5, JUMP = 7.2, GRAV = -22.0;
 export const ARENA_W = 85, ARENA_D = 110;           // X ∈ [-42.5,42.5], Z ∈ [-55,55]
-const WALL_H = 4.0, WALL_T = 0.4, WIN_SILL = 1.1, DOOR_W = 3.0, COVER_H = 1.5;
+const WALL_H = 4.0, WALL_T = 0.4, WIN_SILL = 1.1, DOOR_W = 3.0, DOOR_H = 3.2, COVER_H = 1.5;
 
 // A stand-in for three.js where nothing is drawn: whatever is asked of it, it answers with itself.
 export function nullThree() {
@@ -39,6 +39,9 @@ export function buildWorld(THREE, scene, texLib) {
   const colliders = [];   // {minX,maxX,minZ,maxZ, top}
   const surfaces = [];    // flad: {minX,maxX,minZ,maxZ, h}  |  rampe: {..., lo,hi,dir}
   const ceilings = [];    // {minX,maxX,minZ,maxZ, bot} — hovedstøds-grænse (tunneller)
+  // (clubhouse) What scenery.js dresses up in the browser: the hedges, the houses and their roofs, the towers, the
+  // tunnel. Where something is noted here, its plain box is not drawn (`hide`); the walls and floors are the same.
+  const decor = { hedges: [], houses: [], towers: [], tunnel: { floors: [], walls: [], runs: [] }, stairs: [], holes: null, subtract: null };
 
   function rectOf(cx, cz, w, d) { return { minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2 }; }
   function mat(color, rough, tex, rx, ry) {
@@ -75,17 +78,9 @@ export function buildWorld(THREE, scene, texLib) {
     surfaces.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, h: h });
   }
   // rampe: gåbar skråflade + visuel skråplade, INGEN lodret kollision
+  // (clubhouse) one walks on the slope; what one sees is a flight of steps laid over it (scenery.js)
   function addRamp(cx, cz, w, d, lo, hi, dir) {
-    const len = (dir === '+x' || dir === '-x') ? w : d;
-    const ang = Math.atan2(hi - lo, len);
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(w, 0.18, d), mat(COL.ramp, 0.95, 'wood', Math.max(w, d) / 2, 1));
-    slab.position.set(cx, (lo + hi) / 2, cz);
-    if (dir === '+x') slab.rotation.z = ang;
-    else if (dir === '-x') slab.rotation.z = -ang;
-    else if (dir === '+z') slab.rotation.x = -ang;
-    else slab.rotation.x = ang;
-    scene.add(slab);
-    slab.castShadow = true; slab.receiveShadow = true;
+    decor.stairs.push({ cx: cx, cz: cz, w: w, d: d, lo: lo, hi: hi, dir: dir });
     surfaces.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, lo: lo, hi: hi, dir: dir });
   }
 
@@ -126,31 +121,15 @@ export function buildWorld(THREE, scene, texLib) {
       if (s.to - s.from <= DOOR_W + 0.4) { return; } // for kort -> lad stå åben
       wallSeg(s.along, s.fixed, s.from, mid - DOOR_W / 2, 0, WALL_H, COL.wall, tex);
       wallSeg(s.along, s.fixed, mid + DOOR_W / 2, s.to, 0, WALL_H, COL.wall, tex);
+      // (clubhouse) the wall goes on over the door, now that there is a roof to carry: high enough that a jump
+      // through the doorway never touches it
+      if (s.along === 'x') addBox(mid, s.fixed, DOOR_W, WALL_T, DOOR_H, WALL_H, COL.wall, { tex: tex, walkable: false });
+      else addBox(s.fixed, mid, WALL_T, DOOR_W, DOOR_H, WALL_H, COL.wall, { tex: tex, walkable: false });
       trimBox(s.along, s.fixed, mid - DOOR_W / 2 - 0.1, 0.2, WALL_T + 0.1, 0, WALL_H * 0.97); // dørkarm v.
       trimBox(s.along, s.fixed, mid + DOOR_W / 2 + 0.1, 0.2, WALL_T + 0.1, 0, WALL_H * 0.97); // dørkarm h.
       return;
     }
     wallSeg(s.along, s.fixed, s.from, s.to, 0, WALL_H, COL.wall, tex); // full
-  }
-  // saddeltag (kun udseende — ingen kollision/gåflade); ryg langs den lange akse
-  function addGableRoof(cx, cz, w, d) {
-    const ov = 0.35, th = 0.12;
-    const alongX = w >= d;
-    const span = (alongX ? d : w) / 2 + ov;
-    const rise = Math.min(2.2, span * 0.75);
-    const len = (alongX ? w : d) + ov * 2;
-    const slope = Math.hypot(span, rise);
-    const ang = Math.atan2(rise, span);
-    for (let s = -1; s <= 1; s += 2) {
-      const panel = new THREE.Mesh(
-        new THREE.BoxGeometry(alongX ? len : slope, th, alongX ? slope : len),
-        mat(0xffffff, 0.9, 'tile', len / 2, slope / 2)
-      );
-      panel.castShadow = true; panel.receiveShadow = true;
-      if (alongX) { panel.position.set(cx, WALL_H + rise / 2, cz + s * span / 2); panel.rotation.x = s * ang; }
-      else { panel.position.set(cx + s * span / 2, WALL_H + rise / 2, cz); panel.rotation.z = -s * ang; }
-      scene.add(panel);
-    }
   }
   function addBuilding(cx, cz, w, d, o) {
     o = o || {};
@@ -160,7 +139,27 @@ export function buildWorld(THREE, scene, texLib) {
     buildSide({ along: 'x', fixed: cz + hd, from: cx - hw, to: cx + hw }, o.south || 'full', tex);
     buildSide({ along: 'z', fixed: cx - hw, from: cz - hd, to: cz + hd }, o.west || 'full', tex);
     buildSide({ along: 'z', fixed: cx + hw, from: cz - hd, to: cz + hd }, o.east || 'full', tex);
-    if (o.gable) addGableRoof(cx, cz, w, d);
+    // (clubhouse) Every house has a roof (Søren: "Sørg for at husene alle sammen har tag på"). What one sees of it
+    // (tiles, slate or thatch, the gables, the ceiling inside) is made in scenery.js. What counts is here: the two
+    // slopes are surfaces, so a bullet or a rocket stops on the roof, and the loft under them is solid in three
+    // steps, so that nothing flies in under the eaves and the robots do not see through the roof from a tower.
+    // Nobody gets up there: nothing near a house is high enough to jump from.
+    {
+      const alongX = w >= d, ov = 0.45, span = (alongX ? d : w) / 2 + ov, rise = Math.min(2.4, span * (o.pitch || 0.5)), eave = WALL_H - 0.02, half = (alongX ? w : d) / 2 + ov;
+      if (alongX) {
+        surfaces.push({ minX: cx - half, maxX: cx + half, minZ: cz - span, maxZ: cz, lo: eave, hi: eave + rise, dir: '+z' });
+        surfaces.push({ minX: cx - half, maxX: cx + half, minZ: cz, maxZ: cz + span, lo: eave, hi: eave + rise, dir: '-z' });
+      } else {
+        surfaces.push({ minX: cx - span, maxX: cx, minZ: cz - half, maxZ: cz + half, lo: eave, hi: eave + rise, dir: '+x' });
+        surfaces.push({ minX: cx, maxX: cx + span, minZ: cz - half, maxZ: cz + half, lo: eave, hi: eave + rise, dir: '-x' });
+      }
+      const LOFT = [[0, 0.2, 1], [0.2, 0.4 * rise, 0.58], [0.4 * rise, 0.72 * rise, 0.26]];      // from, to (over the walls), how much of the width
+      for (let i = 0; i < LOFT.length; i++) {
+        const q = LOFT[i], ha = i ? (alongX ? w : d) / 2 : (alongX ? hw : hd), hs = i ? span * q[2] : (alongX ? hd : hw);
+        colliders.push(alongX ? { minX: cx - ha, maxX: cx + ha, minZ: cz - hs, maxZ: cz + hs, base: WALL_H + q[0], top: WALL_H + q[1] } : { minX: cx - hs, maxX: cx + hs, minZ: cz - ha, maxZ: cz + ha, base: WALL_H + q[0], top: WALL_H + q[1] });
+      }
+      decor.houses.push({ rect: rectOf(cx, cz, w, d), cx: cx, cz: cz, w: w, d: d, o: o, tex: tex, alongX: alongX, ov: ov, span: span, rise: rise, eave: eave, half: half, wallH: WALL_H, wallT: WALL_T, doorW: DOOR_W, doorH: DOOR_H, sill: WIN_SILL, head: 2.3 });
+    }
     if (o.roof) addRoof(cx, cz, w, d, WALL_H);
     if (o.roofRamp) {
       // udvendig rampe op til tagkant på valgt side
@@ -190,18 +189,20 @@ export function buildWorld(THREE, scene, texLib) {
     for (let i = 0; i < holes.length; i++) { const nx = []; for (let j = 0; j < rects.length; j++) { const ps = splitRectByHole(rects[j], holes[i]); for (let k = 0; k < ps.length; k++) nx.push(ps[k]); } rects = nx; }
     return rects;
   }
-  function addFloorRect(r, color, y, tex) {
+  function addFloorRect(r, color, y, tex, hide) {
     const w = r.maxX - r.minX, d = r.maxZ - r.minZ;
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat(color, 1.0, tex, w / 2, d / 2));
-    m.rotation.x = -Math.PI / 2; m.position.set((r.minX + r.maxX) / 2, y, (r.minZ + r.maxZ) / 2);
-    m.receiveShadow = true; scene.add(m);
+    if (!hide) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat(color, 1.0, tex, w / 2, d / 2));
+      m.rotation.x = -Math.PI / 2; m.position.set((r.minX + r.maxX) / 2, y, (r.minZ + r.maxZ) / 2);
+      m.receiveShadow = true; scene.add(m);
+    }
     surfaces.push({ minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ, h: y });
   }
   function pitWallSeg(along, fixed, from, to, depth) {
     const len = to - from; if (len <= 0.05) return;
     const mid = (from + to) / 2;
-    if (along === 'x') addBox(mid, fixed, len, WALL_T, -depth, 0, COL.wallLow, { tex: 'concrete' });
-    else addBox(fixed, mid, WALL_T, len, -depth, 0, COL.wallLow, { tex: 'concrete' });
+    if (along === 'x') addBox(mid, fixed, len, WALL_T, -depth, 0, COL.wallLow, { tex: 'brickTan' });
+    else addBox(fixed, mid, WALL_T, len, -depth, 0, COL.wallLow, { tex: 'brickTan' });
   }
   function pitSegs(from, to, gaps) {
     let segs = [[from, to]];
@@ -256,16 +257,24 @@ export function buildWorld(THREE, scene, texLib) {
 
   /* ---- hemmelig tunnel: kælder <-> kælder, under gadeplan, med to hjørner ---- */
   const TUN_D = 3.8, TUN_CEIL = -0.4;
+  // (clubhouse) the tunnel's floor, walls and ceiling are where they were; what one sees of them (brick, a vault,
+  // lamps and the light they throw) is made in scenery.js from these notes
   function tunnelPiece(minX, maxX, minZ, maxZ) {
-    addFloorRect({ minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ }, COL.floorLow, -TUN_D, 'concrete');
-    addBox((minX + maxX) / 2, (minZ + maxZ) / 2, maxX - minX, maxZ - minZ, TUN_CEIL, -0.1, COL.wallLow, { solid: false, walkable: false, tex: 'concrete' });
+    addFloorRect({ minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ }, COL.floorLow, -TUN_D, 'concrete', true);
     ceilings.push({ minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, bot: TUN_CEIL });
+    decor.tunnel.floors.push({ minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ });
   }
   function tunnelWall(along, fixed, from, to) {
     if (to - from <= 0.15) return;
-    if (along === 'x') addBox((from + to) / 2, fixed, to - from, 0.3, -TUN_D, TUN_CEIL, COL.wallLow, { walkable: false, tex: 'concrete' });
-    else addBox(fixed, (from + to) / 2, 0.3, to - from, -TUN_D, TUN_CEIL, COL.wallLow, { walkable: false, tex: 'concrete' });
+    if (along === 'x') addBox((from + to) / 2, fixed, to - from, 0.3, -TUN_D, TUN_CEIL, COL.wallLow, { walkable: false, hide: true });
+    else addBox(fixed, (from + to) / 2, 0.3, to - from, -TUN_D, TUN_CEIL, COL.wallLow, { walkable: false, hide: true });
+    decor.tunnel.walls.push({ along: along, fixed: fixed, from: from, to: to });
   }
+  decor.tunnel.floorY = -TUN_D; decor.tunnel.ceilY = TUN_CEIL;
+  // the straight stretches, where the ceiling is a vault: along which axis, where across, from, to, half the width between the walls
+  decor.tunnel.runs = [{ axis: 'z', at: 8, from: -42.9, to: -6.2, half: 1.2 }, { axis: 'x', at: -4.5, from: -8.3, to: 6.3, half: 1.2 }, { axis: 'z', at: -10, from: 3.2, to: 42.9, half: 1.2 }];
+  // where daylight falls in: the two cellars and the two shafts
+  decor.tunnel.mouths = [[8, -43.4], [-10, 43.4], [-11.9, 0], [11.9, -3.85]];
   tunnelPiece(6.5, 9.5, -43, -3);      // ben 1: syd fra rød kælder
   tunnelPiece(-11.5, 6.5, -6, -3);     // ben 2: vest (hjørne 1)
   tunnelPiece(-11.5, -8.5, -3, 43);    // ben 3: nord til blå kælder (hjørne 2)
@@ -293,24 +302,20 @@ export function buildWorld(THREE, scene, texLib) {
   // basisgulv = arena minus huller
   subtractRects(rectOf(0, 0, ARENA_W, ARENA_D), HOLES).forEach(function (r) { addFloorRect(r, COL.floor, 0, 'asphalt'); });
   // farvezoner: rød spawn, neutral (gul) midterzone, blå spawn
-  function zonePatch(cx, cz, w, d, color) {
-    subtractRects(rectOf(cx, cz, w, d), HOLES).forEach(function (r) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(r.maxX - r.minX, r.maxZ - r.minZ),
-        new THREE.MeshStandardMaterial({ color: color, roughness: 1.0, transparent: true, opacity: 0.5 }));
-      m.rotation.x = -Math.PI / 2; m.position.set((r.minX + r.maxX) / 2, 0.03, (r.minZ + r.maxZ) / 2);
-      m.receiveShadow = true; scene.add(m);
-    });
-  }
-  zonePatch(0, -43, ARENA_W - 2, 24, COL.red);      // rød holdzone
-  zonePatch(0, 43, ARENA_W - 2, 24, COL.blue);       // blå holdzone
-  zonePatch(0, 0, ARENA_W - 2, 62, COL.mid);         // neutral (gul) zone
+  // (clubhouse) the red yard (z < -31), the meadow in the middle and the blue yard (z > 31) are laid over the
+  // asphalt by scenery.js: paving in the team's colour and grass
+  decor.holes = HOLES; decor.subtract = subtractRects;
 
   // ydervægge — lav, klippet HÆK (grøn) i stedet for beton, så det ligner en have-kant
   const OUTER_WALL_H = 2.5;
-  addBox(0, -ARENA_D / 2, ARENA_W, WALL_T, 0, OUTER_WALL_H, 0xffffff, { tex: 'hedge', trx: ARENA_W / 4, try: 1.2 });
-  addBox(0, ARENA_D / 2, ARENA_W, WALL_T, 0, OUTER_WALL_H, 0xffffff, { tex: 'hedge', trx: ARENA_W / 4, try: 1.2 });
-  addBox(-ARENA_W / 2, 0, WALL_T, ARENA_D, 0, OUTER_WALL_H, 0xffffff, { tex: 'hedge', trx: ARENA_D / 4, try: 1.2 });
-  addBox(ARENA_W / 2, 0, WALL_T, ARENA_D, 0, OUTER_WALL_H, 0xffffff, { tex: 'hedge', trx: ARENA_D / 4, try: 1.2 });
+  function hedgeBox(cx, cz, w, d, top, edge) {
+    addBox(cx, cz, w, d, 0, top, 0xffffff, { hide: true });
+    decor.hedges.push({ x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2, top: top, edge: edge || '' });
+  }
+  hedgeBox(0, -ARENA_D / 2, ARENA_W, WALL_T, OUTER_WALL_H, 'N');
+  hedgeBox(0, ARENA_D / 2, ARENA_W, WALL_T, OUTER_WALL_H, 'S');
+  hedgeBox(-ARENA_W / 2, 0, WALL_T, ARENA_D, OUTER_WALL_H, 'W');
+  hedgeBox(ARENA_W / 2, 0, WALL_T, ARENA_D, OUTER_WALL_H, 'E');
 
   if (!HEADLESS) {
   /* ======================= MILJØ / BAGGRUND (kun pynt, ingen kollision) =====
@@ -363,45 +368,24 @@ export function buildWorld(THREE, scene, texLib) {
       new THREE.MeshBasicMaterial({ map: cityTex, side: THREE.BackSide, transparent: true, fog: false, depthWrite: false }));
     cyl.position.y = 20; cyl.renderOrder = -1; scene.add(cyl);
   })();
-  // -- træer + hække udenfor murene (delte geometrier/materialer, ingen skygge) --
-  (function () {
-    const barkMat = mat(0x5b4326, 0.9), leaf = [mat(0x3f6b2e, 0.9), mat(0x4f7d33, 0.9), mat(0x35602a, 0.9)], hedgeMat = mat(0x395a24, 0.9);
-    const trunkGeo = new THREE.CylinderGeometry(0.34, 0.5, 3.0, 7), foliaGeo = new THREE.IcosahedronGeometry(2.2, 0);
-    const hedgeGX = new THREE.BoxGeometry(3.1, 1.3, 1.4), hedgeGZ = new THREE.BoxGeometry(1.4, 1.3, 3.1);
-    function tree(x, z) {
-      const s = 0.8 + rnd() * 0.6, t = new THREE.Group();
-      const tr = new THREE.Mesh(trunkGeo, barkMat); tr.position.y = 1.5 * s; tr.scale.setScalar(s); t.add(tr);
-      const f = new THREE.Mesh(foliaGeo, leaf[(rnd() * 3) | 0]); f.position.y = 4.2 * s; f.scale.setScalar(s * (0.85 + rnd() * 0.5)); f.rotation.y = rnd() * 3; t.add(f);
-      const f2 = new THREE.Mesh(foliaGeo, leaf[(rnd() * 3) | 0]); f2.position.set(0.7 * s, 5.2 * s, 0.3 * s); f2.scale.setScalar(s * 0.6); t.add(f2);
-      t.position.set(x, 0, z); t.traverse(function (o) { o.castShadow = false; o.receiveShadow = false; }); scene.add(t);
-    }
-    function hedge(x, z, alongX) {
-      const h = new THREE.Mesh(alongX ? hedgeGX : hedgeGZ, hedgeMat);
-      h.position.set(x, 0.65, z); scene.add(h);
-    }
-    const HX = ARENA_W / 2 + 5, HZ = ARENA_D / 2 + 5, TX = ARENA_W / 2 + 10, TZ = ARENA_D / 2 + 10, J = function () { return (rnd() - 0.5) * 3; };
-    for (let x = -HX; x <= HX; x += 3.1) { hedge(x, -HZ, true); hedge(x, HZ, true); }
-    for (let z = -HZ + 3.1; z < HZ; z += 3.1) { hedge(-HX, z, false); hedge(HX, z, false); }
-    for (let x = -TX; x <= TX; x += 8) { tree(x + J(), -TZ + J()); tree(x + J(), TZ + J()); }
-    for (let z = -TZ + 8; z < TZ; z += 8) { tree(-TX + J(), z + J()); tree(TX + J(), z + J()); }
-  })();
+  // (clubhouse) the trees and bushes outside the arena are grown in scenery.js
   }
 
   /* ---- RØD holdzone: 2 kampbygninger (døre udad = mod -Z, væk fra midten) ---- */
   // Sammen med indgangshuset (8,-46) = 3 bygninger + tårnet (-30,-46). Spredt ud over
   // bredden, fri af tårn-fodaftryk (x[-36,-24]) og kælder-indgangshuset (x[4,12]).
-  addBuilding(-5, -42, 10, 10, { north: 'door', east: 'window', west: 'window', south: 'full', tex: 'brickRed' });
-  addBuilding(28, -41, 12, 10, { north: 'door', west: 'window', east: 'full', south: 'window', tex: 'brickTan', gable: true });
+  addBuilding(-5, -42, 10, 10, { north: 'door', east: 'window', west: 'window', south: 'full', tex: 'brickRed', top: 'slate' });
+  addBuilding(28, -41, 12, 10, { north: 'door', west: 'window', east: 'full', south: 'window', tex: 'brickTan', top: 'tile' });
 
   /* ---- BLÅ holdzone: 2 kampbygninger (døre udad = mod +Z) ---- */
   // Sammen med indgangshuset (-10,46) = 3 bygninger + tårnet (30,46). Bevidst IKKE
   // spejlet af rød: fri af tårn-fodaftryk (x[24,36]) og kælder-indgangshuset (x[-14,-6]).
-  addBuilding(-34, 42, 12, 10, { south: 'door', east: 'window', west: 'full', north: 'window', tex: 'brickRed' });
-  addBuilding(13, 42, 10, 10, { south: 'door', east: 'window', west: 'window', north: 'full', tex: 'brickTan' });
+  addBuilding(-34, 42, 12, 10, { south: 'door', east: 'window', west: 'full', north: 'window', tex: 'brickRed', top: 'tile' });
+  addBuilding(13, 42, 10, 10, { south: 'door', east: 'window', west: 'window', north: 'full', tex: 'brickTan', top: 'slate' });
 
   // INDGANGSHUSE — dør mod bagvæggen (væk fra banen), kælder på tunnelnettet
-  addBuilding(8, -46, 8, 8, { north: 'door', south: 'window', east: 'window', west: 'window', tex: 'brickRed' });
-  addBuilding(-10, 46, 8, 8, { south: 'door', north: 'window', east: 'window', west: 'window', tex: 'brickTan' });
+  addBuilding(8, -46, 8, 8, { north: 'door', south: 'window', east: 'window', west: 'window', tex: 'brickRed', top: 'thatch', pitch: 0.62 });
+  addBuilding(-10, 46, 8, 8, { south: 'door', north: 'window', east: 'window', west: 'window', tex: 'brickTan', top: 'thatch', pitch: 0.62 });
 
   /* ===== RUNDT UDKIGSTÅRN ===== 12 m i diameter (R=6), mur til 11 m for fuld
    * dækning, dæk i 8 m, spindeltrappe (én omgang, 20 trin). Skydeskår i muren i
@@ -561,6 +545,7 @@ export function buildWorld(THREE, scene, texLib) {
         }
       }
     }
+    decor.towers.push({ cx: cx, cz: cz, doorDeg: doorDeg, tex: tex, short: !!opt.short, R: R, sill: SILL, band: BAND, deck: DECKTOP, top: WALLTOP, wellCtr: wellCtr, well: WELL });
     // ---- indvendigt lys ----
     const l1 = new THREE.PointLight(0xffe2b8, 26, 16); l1.position.set(cx, 5.0, cz); scene.add(l1);
     const l2 = new THREE.PointLight(0xffe2b8, 14, 11); l2.position.set(cx, 2.0, cz); scene.add(l2);
@@ -620,25 +605,14 @@ export function buildWorld(THREE, scene, texLib) {
    * højde. Deler stadig neutralzonen som lav dækning. De to boarding-stubbe (±25.5)
    * forbliver BETON i fuld højde — de er spring-vejen op til toget. */
   const XWALL_H = 4.5, TREELINE_H = XWALL_H / 2;
-  const tlFoliaGeo = new THREE.IcosahedronGeometry(1.3, 0);
-  const tlLeaf = [mat(0x3f6b2e, 0.9), mat(0x4f7d33, 0.9), mat(0x35602a, 0.9)];
-  function treeline(cx, cz, w, d, topY) {
-    addBox(cx, cz, w, d, 0, topY, 0xffffff, { tex: 'hedge', trx: Math.max(w, d) / 4, try: topY / 2 });
-    const along = w >= d, L = (along ? w : d) - 1.0, n = Math.max(1, Math.round(L / 1.6));
-    for (let i = 0; i < n; i++) {
-      const t = (i + 0.5) / n - 0.5;
-      const x = cx + (along ? t * L : (rnd() - 0.5) * 0.7), z = cz + (along ? (rnd() - 0.5) * 0.7 : t * L);
-      const f = new THREE.Mesh(tlFoliaGeo, tlLeaf[(rnd() * tlLeaf.length) | 0]);
-      f.position.set(x, topY + 0.5 + rnd() * 0.35, z); f.scale.setScalar(0.7 + rnd() * 0.35);
-      f.castShadow = false; scene.add(f);
-    }
-  }
+  function treeline(cx, cz, w, d, topY) { hedgeBox(cx, cz, w, d, topY); }      // (clubhouse) the leaves are grown in scenery.js
   treeline(0, -15, 3, 18, TREELINE_H);
   treeline(0, 15, 3, 18, TREELINE_H);
   treeline(0, 0, 16, 3, TREELINE_H);                                   // midt (mellem tårnene)
   // boarding-stubbe (beton, fuld højde — uændret)
-  addBox(25.5, 0, 4.0, 3, 0, XWALL_H, COL.wall, { tex: 'concrete' });   // højre: tårn(16) -> tog(30)
-  addBox(-25.5, 0, 4.0, 3, 0, XWALL_H, COL.wall, { tex: 'concrete' });  // venstre (spejlet)
+  addBox(25.5, 0, 4.0, 3, 0, XWALL_H, COL.wall, { tex: 'brickRed' });   // højre: tårn(16) -> tog(30)
+  addBox(-25.5, 0, 4.0, 3, 0, XWALL_H, COL.wall, { tex: 'brickTan' });  // venstre (spejlet)
+  decor.piers = [{ cx: 25.5, cz: 0, w: 4.0, d: 3, top: XWALL_H }, { cx: -25.5, cz: 0, w: 4.0, d: 3, top: XWALL_H }];      // (clubhouse) capped and overgrown in scenery.js
 
   /* ============================ TOG / TRAIN ================================
    * Rulleret rundstrækning (afrundet rektangel) om neutralzonen. Vognene er
@@ -695,13 +669,30 @@ export function buildWorld(THREE, scene, texLib) {
   // ---- vogn-mesh (KUN pynt — kollision bruger CL×CW-fodaftryk med dæk-top = DECK).
   //      Små hjul tuckede ind, lav chassis, buffere; forreste vogn = lille lokomotiv.
   //      Kørsel = +lokal Z (= front). Boarding sker via en separat platform (ikke rampe).
-  const wheelMat = mat(0x17181a, 0.5), steelMat = mat(0x3a3f45, 0.5), darkMat = mat(0x2a2c30, 0.6);
-  function buildCarMesh(kind, col) {
-    const CL = TRAIN.CL, CW = TRAIN.CW, D = TRAIN.DECK, g = new THREE.Group(), wr = 0.34;
-    for (let a = -1; a <= 1; a++) for (let s = -1; s <= 1; s += 2) {     // 3 aksler x 2 sider, små hjul
-      const wh = new THREE.Mesh(new THREE.CylinderGeometry(wr, wr, 0.18, 14), wheelMat);
-      wh.rotation.z = Math.PI / 2; wh.position.set(s * (CW / 2 - 0.12), wr, a * CL * 0.32); g.add(wh);
+  const steelMat = mat(0x3a3f45, 0.5), darkMat = mat(0x2a2c30, 0.6), WHEEL_R = 0.34;
+  // (clubhouse) a wheel one can see turning: a dark tyre, and on both faces light and dark wedges for spokes
+  let wheelGeo = null, wheelMat = null;
+  if (!HEADLESS) {
+    const P = [], N = [], C = [], put = function (geo, colOf) {
+      const g = geo.index ? geo.toNonIndexed() : geo, p = g.attributes.position, n = g.attributes.normal;
+      for (let i = 0; i < p.count; i++) { const c = colOf(Math.floor(i / 3)); P.push(p.getX(i), p.getY(i), p.getZ(i)); N.push(n.getX(i), n.getY(i), n.getZ(i)); C.push(c[0], c[1], c[2]); }
+    };
+    put(new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.18, 18, 1, true), function () { return [0.03, 0.03, 0.035]; });
+    for (let s = -1; s <= 1; s += 2) {
+      put(new THREE.CircleGeometry(WHEEL_R, 12).rotateX(-s * Math.PI / 2).translate(0, s * 0.09, 0), function (t) { return t % 2 ? [0.3, 0.32, 0.34] : [0.07, 0.075, 0.08]; });
+      put(new THREE.CircleGeometry(WHEEL_R * 0.3, 10).rotateX(-s * Math.PI / 2).translate(0, s * 0.094, 0), function () { return [0.42, 0.44, 0.46]; });
     }
+    wheelGeo = new THREE.BufferGeometry();
+    wheelGeo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); wheelGeo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); wheelGeo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+    wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.2 });
+  }
+  function buildCarMesh(kind, col) {
+    const CL = TRAIN.CL, CW = TRAIN.CW, D = TRAIN.DECK, g = new THREE.Group(), wr = WHEEL_R, wheels = [];
+    for (let a = -1; a <= 1; a++) for (let s = -1; s <= 1; s += 2) {     // 3 aksler x 2 sider, små hjul
+      const wh = new THREE.Mesh(wheelGeo, wheelMat);
+      wh.rotation.z = Math.PI / 2; wh.position.set(s * (CW / 2 - 0.12), wr, a * CL * 0.32); g.add(wh); wheels.push(wh);
+    }
+    g.userData.wheels = wheels;
     const chassis = new THREE.Mesh(new THREE.BoxGeometry(CW - 0.2, 0.3, CL - 0.2), darkMat);
     chassis.position.y = wr + 0.2; g.add(chassis);
     for (let e = -1; e <= 1; e += 2) for (let s = -1; s <= 1; s += 2) {  // buffere
@@ -720,8 +711,12 @@ export function buildWorld(THREE, scene, texLib) {
       cab.position.set(0, D + 0.45, CL / 2 - 0.9); cab.castShadow = true; g.add(cab);
       const win = new THREE.Mesh(new THREE.BoxGeometry(CW - 0.36, 0.32, 1.42), mat(0x10131a, 0.3));
       win.position.set(0, D + 0.58, CL / 2 - 0.9); g.add(win);
-      const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.6, 10), mat(0x161616, 0.6));
+      const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.6, 12), mat(0x161616, 0.6));
       funnel.position.set(0, D + 0.5, CL / 2 - 1.8); funnel.castShadow = true; g.add(funnel);
+      // (clubhouse) a flared top on the funnel (it smokes: game.js), a dome on the cab and a lamp in front
+      const flare = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.22, 0.16, 12), mat(0x161616, 0.6)); flare.position.set(0, D + 0.86, CL / 2 - 1.8); g.add(flare);
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x8a6a2a, 0.35)); dome.scale.set(1, 0.6, 1); dome.position.set(0, D + 0.9, CL / 2 - 0.9); g.add(dome);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff0b8 })); lamp.position.set(0, D + 0.5, CL / 2 - 0.17); g.add(lamp);
       const mnt = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.18, 0.8), steelMat);
       mnt.position.set(0, D + 0.09, -0.6); g.add(mnt);                   // bazooka-mount
     }
@@ -731,7 +726,7 @@ export function buildWorld(THREE, scene, texLib) {
   const trainCars = CARDEFS.map(function (d, i) {
     const g = buildCarMesh(d.kind, d.col);
     scene.add(g);
-    return { grp: g, kind: d.kind, off: i * (TRAIN.CL + TRAIN.GAP), cx: 0, cz: 0, dx: 1, dz: 0 };
+    return { grp: g, kind: d.kind, off: i * (TRAIN.CL + TRAIN.GAP), cx: 0, cz: 0, dx: 1, dz: 0, wheels: HEADLESS ? [] : g.userData.wheels };
   });
   let trainHead = 0;
   const bazCar = trainCars[0];
@@ -860,6 +855,7 @@ export function buildWorld(THREE, scene, texLib) {
       const c = trainCars[i], p = loopAt(trainHead - c.off);
       c.cx = p.x; c.cz = p.z; c.dx = p.dx; c.dz = p.dz;
       c.grp.position.set(p.x, 0, p.z); c.grp.rotation.y = Math.atan2(p.dx, p.dz);
+      for (let k = 0; k < c.wheels.length; k++) c.wheels[k].rotation.x = trainHead / WHEEL_R;      // the wheels roll
     }
   }
   setTrain(0);
@@ -929,7 +925,7 @@ export function buildWorld(THREE, scene, texLib) {
   }
 
   return {
-    colliders: colliders, surfaces: surfaces, ceilings: ceilings, COL: COL,
+    colliders: colliders, surfaces: surfaces, ceilings: ceilings, COL: COL, decor: decor,
     TRAIN: TRAIN, LOOP_L: LOOP_L, loopAt: loopAt, trainCars: trainCars, bazCar: bazCar, setTrain: setTrain, trainHead: function () { return trainHead; },
     carLocal: carLocal, carWorld: carWorld, trainGround: trainGround, trainPush: trainPush,
     PICKUPS: PICKUPS, HEALTH_PACKS: HEALTH_PACKS,

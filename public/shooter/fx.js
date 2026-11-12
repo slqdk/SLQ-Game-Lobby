@@ -86,26 +86,54 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
     const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.16 * s, bevelEnabled: true, bevelSize: 0.03 * s, bevelThickness: 0.03 * s, bevelSegments: 1 }); geo.center();
     return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xffcf33, emissive: 0xd98a10, emissiveIntensity: 0.5, roughness: 0.3, metalness: 0.7 }));
   }
-  const dinoGunMat = mat(0x33351f, 0.6);
+  // A dino: round shapes, a long tail, the team's collar, and the bad pistol in its hand. Its shapes are joined
+  // into four pieces by colour (made once, shared by all dinos); the first is the body, with a material of its
+  // own per dino (the game makes it flash when it is hit).
+  let dinoGeo = null;
+  function dinoShapes() {
+    const ball = new THREE.SphereGeometry(1, 14, 10), tail = new THREE.ConeGeometry(1, 1, 10), limb = new THREE.CapsuleGeometry(1, 1, 3, 8), spike = new THREE.ConeGeometry(1, 1, 4);
+    const sets = { body: [], belly: [], dark: [], white: [] };
+    const put = function (set, geo, sx, sy, sz, x, y, z, rx) { sets[set].push([geo, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx || 0, 0, 0)), new THREE.Vector3(sx, sy, sz))]); };
+    put('body', ball, 0.3, 0.36, 0.46, 0, 0.74, 0, -0.2);                           // body
+    put('belly', ball, 0.24, 0.3, 0.36, 0, 0.68, 0.1, -0.2);
+    put('body', limb, 0.13, 0.2, 0.13, 0, 1.04, 0.3, 0.55);                         // neck
+    put('body', ball, 0.2, 0.19, 0.24, 0, 1.26, 0.5);                               // head
+    put('body', ball, 0.15, 0.12, 0.2, 0, 1.2, 0.72);                               // snout
+    put('belly', ball, 0.13, 0.07, 0.17, 0, 1.13, 0.7);                             // jaw
+    for (const sx of [-1, 1]) { put('white', ball, 0.06, 0.07, 0.05, sx * 0.13, 1.35, 0.6); put('dark', ball, 0.035, 0.045, 0.03, sx * 0.145, 1.355, 0.635); put('dark', ball, 0.012, 0.012, 0.012, sx * 0.05, 1.22, 0.9); }
+    put('body', tail, 0.2, 0.85, 0.2, 0, 0.66, -0.72, -Math.PI / 2 - 0.12);
+    for (let i = 0; i < 5; i++) put('belly', spike, 0.045, 0.11, 0.07, 0, 1.1 - i * 0.07 + (i > 1 ? -0.03 * i : 0), 0.12 - i * 0.2, -0.35);      // spikes down the back
+    for (const s of [-1, 1]) {
+      put('body', limb, 0.1, 0.2, 0.12, s * 0.17, 0.3, -0.02);                      // leg
+      put('body', ball, 0.11, 0.06, 0.17, s * 0.17, 0.06, 0.07);                    // foot
+      put('body', limb, 0.045, 0.12, 0.045, s * 0.24, 0.8, 0.34, -1.1);             // arm
+    }
+    const join = function (list) {
+      const P = [], N = [], v = new THREE.Vector3(), nm = new THREE.Matrix3();
+      for (const part of list) {
+        const g = part[0].index ? part[0].toNonIndexed() : part[0], p = g.attributes.position, n = g.attributes.normal;
+        nm.getNormalMatrix(part[1]);
+        for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).applyMatrix4(part[1]); P.push(v.x, v.y, v.z); v.fromBufferAttribute(n, i).applyMatrix3(nm).normalize(); N.push(v.x, v.y, v.z); }
+        if (g !== part[0]) g.dispose();
+      }
+      const out = new THREE.BufferGeometry();
+      out.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+      return out;
+    };
+    const out = { body: join(sets.body), belly: join(sets.belly), dark: join(sets.dark), white: join(sets.white), collar: new THREE.TorusGeometry(1, 0.22, 6, 16) };
+    ball.dispose(); tail.dispose(); limb.dispose(); spike.dispose();
+    return out;
+  }
+  const dinoDark = new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 0.3 }), dinoWhite = new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.5 });
   function buildDino(team) {
-    const g = new THREE.Group(), acc = TEAM_COL[team] || 0x999999;
-    const bodyCol = team === 'A' ? 0xc23a44 : 0x3a58c2, bellyCol = team === 'A' ? 0xe07680 : 0x7690e0;
-    const bodyMat = new THREE.MeshStandardMaterial({ color: bodyCol, roughness: 0.8 });   // pr-dino (så blink er individuelt)
-    const bellyMat = new THREE.MeshStandardMaterial({ color: bellyCol, roughness: 0.8 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.85), bodyMat); body.position.set(0, 0.75, 0); body.rotation.x = -0.15; body.castShadow = true; g.add(body);
-    const belly = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.3, 0.6), bellyMat); belly.position.set(0, 0.62, 0.06); g.add(belly);
-    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.4, 0.26), bodyMat); neck.position.set(0, 1.05, 0.3); neck.rotation.x = 0.5; g.add(neck);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.32, 0.44), bodyMat); head.position.set(0, 1.25, 0.52); head.castShadow = true; g.add(head);
-    const snout = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.2, 0.24), bodyMat); snout.position.set(0, 1.2, 0.8); g.add(snout);
-    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x14171c });
-    for (const sx of [-1, 1]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), eyeMat); eye.position.set(sx * 0.1, 1.34, 0.66); g.add(eye); }
-    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.19, 0.75, 6), bodyMat); tail.rotation.x = Math.PI / 2; tail.position.set(0, 0.72, -0.64); g.add(tail);
-    for (const s of [-1, 1]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.5, 0.22), bodyMat); leg.position.set(s * 0.16, 0.28, 0); g.add(leg); }
-    const collar = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.17, 0.48), new THREE.MeshStandardMaterial({ color: acc, emissive: acc, emissiveIntensity: 0.4 })); collar.position.set(0, 0.99, 0.24); g.add(collar);
-    const gb = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.3), dinoGunMat); gb.position.set(0.22, 0.78, 0.4); g.add(gb);
-    const brl = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.28, 8), dinoGunMat); brl.rotation.x = Math.PI / 2; brl.position.set(0.22, 0.8, 0.65); g.add(brl);
-    for (const s of [-1, 1]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.28, 0.1), bodyMat); arm.position.set(s * 0.22, 0.8, 0.3); arm.rotation.x = -1.0; g.add(arm); }
-    g.scale.setScalar(1.45);   // større dino
+    const g = new THREE.Group(), acc = TEAM_COL[team] || 0x999999, G = dinoGeo || (dinoGeo = dinoShapes());
+    const bodyMat = new THREE.MeshStandardMaterial({ color: team === 'A' ? 0xc23a44 : 0x3a58c2, roughness: 0.75 }), bellyMat = new THREE.MeshStandardMaterial({ color: team === 'A' ? 0xe98d94 : 0x8da3ea, roughness: 0.8 });
+    const body = new THREE.Mesh(G.body, bodyMat); body.castShadow = true; g.add(body);
+    g.add(new THREE.Mesh(G.belly, bellyMat), new THREE.Mesh(G.dark, dinoDark), new THREE.Mesh(G.white, dinoWhite));
+    const collar = new THREE.Mesh(G.collar, new THREE.MeshStandardMaterial({ color: acc, emissive: acc, emissiveIntensity: 0.4, roughness: 0.5 }));
+    collar.scale.set(0.2, 0.2, 0.16); collar.position.set(0, 0.98, 0.25); collar.rotation.x = Math.PI / 2 + 0.55; g.add(collar);
+    if (arsenal) { const w = arsenal.build('badgun'); w.group.scale.setScalar(1.7); w.group.rotation.y = Math.PI; w.group.position.set(0.24, 0.7, 0.5); g.add(w.group); }
+    g.scale.setScalar(1.45);
     return g;
   }
 

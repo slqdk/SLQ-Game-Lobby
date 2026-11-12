@@ -421,7 +421,8 @@ function dndSwitch() {
   return b;
 }
 function openSelf() {
-  sheet.open({ title: st.me.name, kind: 'self', body: [h('div', { class: 'sec' }, 'Fagter'), emoteTiles(), dndSwitch(),
+  sheet.open({ title: st.me.name, kind: 'self', body: [h('div', { class: 'sec' }, 'Fagter'), emoteTiles(),
+    room.sitting(mine()) === 'bar' ? h('button', { class: 'btn', onclick: openBar }, 'Bestil i baren') : null, dndSwitch(),
     h('div', { class: 'row' }, h('button', { class: 'btn alt', onclick: openWardrobe }, 'Garderoben'), h('button', { class: 'btn alt', onclick: openShop }, 'Kiosken'))] });
 }
 $('#btnEmote').addEventListener('click', () => sheet.open({ title: 'Fagter', kind: 'emote', body: emoteTiles() }));

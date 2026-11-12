@@ -341,6 +341,7 @@ export function createRoom(canvas, hooks) {
     setLabels(l) { labels = l; },
     hint(seconds = 7) { hintUntil = T + seconds; },
     here: id => actors.has(id),
+    sitting: id => { const a = actors.get(id); return a && a.sit ? a.sit[0] : ''; },      // the furniture somebody sits at (or walks to)
     count: () => actors.size,
 
     // the whole room at once (on entering), and one member coming, changing or going

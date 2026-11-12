@@ -138,11 +138,14 @@ export function createRoom(canvas, hooks) {
     return lines;
   }
 
-  function drawTag(a) {
-    const [x, y, z] = place(a), top = Y(y, z + topOf(a)) - s * 0.08;
-    const size = clamp(s * 0.25, 11, 15), cx = X(x);
+  function drawTag(a, placed) {
+    const [x, y, z] = place(a), size = clamp(s * 0.25, 11, 15), cx = X(x);
+    let top = Y(y, z + topOf(a)) - s * 0.08;
     c.font = '600 ' + size + 'px ' + FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
     const name = a.name + (a.dnd ? ' ·zz' : ''), w = c.measureText(name).width + size * 1.1, h = size * 1.55;
+    // two people close together: the second name goes above the first instead of on top of it
+    for (let n = 0; n < 4 && placed.some(q => Math.abs(q[0] - cx) < (q[2] + w) / 2 - 2 && Math.abs(q[1] - top) < h); n++) top -= h + 2;
+    placed.push([cx, top, w]);
     c.beginPath(); c.roundRect(cx - w / 2, top - h, w, h, h / 2); c.fillStyle = a.id === me ? 'rgba(255,179,71,.94)' : 'rgba(28,23,40,.72)'; c.fill();
     c.fillStyle = a.id === me ? '#2b1a08' : '#fff'; c.fillText(name, cx, top - h / 2 + 0.5);
     if (a.bubble) {
@@ -199,7 +202,8 @@ export function createRoom(canvas, hooks) {
       else c.drawImage(it.p.stool ? stools[it.p.stool] : it.p.cv, X(it.p.x), oy + it.p.y * s, it.p.w * s, it.p.h * s);
     }
     drawFx(dt);
-    for (const it of list) if (it.a) drawTag(it.a);
+    const placed = [];
+    for (const it of list) if (it.a) drawTag(it.a, placed);
     const showAll = T < hintUntil;
     for (const st of STATIONS) {
       if (!st.name) continue;

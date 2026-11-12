@@ -52,7 +52,7 @@ function demo() {
   const mk = (id, name, p, extra = {}) => ({ id, name, on: true, look: randomLook(-id * 131 + 7), p, ...extra });
   room.setName('');
   room.setRoom([
-    mk(-1, 'Ane', [[9.87, 2]], { sit: ['bar', 1], drink: ['fadol', 70000] }), mk(-2, 'Bo', [[11.93, 2]], { sit: ['bar', 3], drink: ['filur', 60000] }),
+    mk(-1, 'Ane', [[10.25, 2]], { sit: ['bar', 1], drink: ['fadol', 70000] }), mk(-2, 'Bo', [[12.85, 2]], { sit: ['bar', 3], drink: ['filur', 60000] }),
     mk(-3, 'Cille', [[3.25, 6.4]], { sit: ['games', 0] }), mk(-4, 'Dan', [[7.35, 6.4]], { sit: ['games', 1] }),
     mk(-5, 'Eva', [[4.4, 10.6]]), mk(-6, 'Finn', [[20.25, 12.25]], { sit: ['sofa', 1] }), mk(-7, 'Gry', [[14.6, 8.4]]),
   ], 0);

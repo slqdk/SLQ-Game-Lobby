@@ -242,7 +242,7 @@ label small { color: var(--mute); font-weight: 500; }
   #btnChat { display: none; }
   #friends { position: fixed; top: calc(56px + env(safe-area-inset-top, 0)); left: 8px; right: 8px; width: auto; max-height: 62vh; z-index: 7; }
   #sheetWrap { place-items: end center; padding: 0; }
-  #sheet { width: 100%; border-radius: 22px 22px 0 0; border-bottom: 0; max-height: 90vh; max-height: 90dvh; }
+  #sheet { width: 100%; border-radius: 22px 22px 0 0; border-bottom: 0; max-height: 82vh; max-height: 82dvh; }      /* leaves the top free for toasts */
   #sheetBody { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0)); }
   .wardrobe { grid-template-columns: 1fr; }
   .wardrobe .fig { position: static; }

@@ -16,6 +16,7 @@ What is in it:
 - **Poker** at the card table: Texas Hold'em without a limit as a small tournament for two to six. Everybody starts with 1,000 poker chips, the blinds rise every eighth hand, and the last one with chips takes the buy-ins. A clock keeps it moving (40 seconds per decision), and robots in three strengths can fill the seats at tables without a buy-in.
 - **Yatzy** at the dice table: five dice, the Danish sheet with fifteen fields and the bonus for 63, two to four players, live or one turn now and the next tomorrow, with or without robots.
 - **Meyer** at the dice table: two dice under a cup, say the same as the one before or higher (true or not), believe it or lift the cup. Six lives each, Meyer costs two, two to six players, a clock, robots that lie and doubt.
+- **The casino wing**: the clubhouse is eight steps wider, with three slot machines where one stakes one's chips. Kirsebærhaven (three reels, one line, small stakes), Robotværkstedet (five reels, ten lines, a joker and free spins) and Sparegrisen (three reels, and a jackpot that belongs to the group and grows with every stake). Everybody in the clubhouse sees every spin as it happens: the result rises from the player, a tally over the name shows what they are up or down, and the board on the wall keeps today's score. A blackjack table stands ready for the next game.
 - **Notifications** on phone and computer when it is your turn, when somebody asks you to a table, or when a new round has begun in EagleEye Commander, and the clubhouse is not in front of you. Switched on per device in the ☰ menu.
 - **Ludo** at the board-game table: two to four players, a six to get out, globes and stars, two together stand safely, an exact throw into the goal. The pieces hop along the board, robots in three levels, and like Yatzy it can be played over days.
 
@@ -133,6 +134,10 @@ Everything is JSON in the data folder (`/var/lib/slq-game-lobby` when installed)
 - `eagleeye/<code>.json`: one file per EagleEye Commander match
 
 Back up by copying the folder, or the whole container. None of it belongs in git (`.gitignore` keeps `data/` out). Deleting `config.json` logs everybody out and makes a new installation code.
+
+## Changing the slot machines
+
+The three machines are in `public/shared/slots.js`: their reels (one letter per symbol), what three of a kind pay, the stakes one can choose, and for Sparegrisen the share of each stake that goes into the jackpot (`share`) and what the jackpot starts at (`seed`). `returnOf(id)` works out exactly what a machine pays back in the long run; `npm test` fails if one of them leaves the span of 95 to 96.5 %, so a change to the reels or the pay table shows at once.
 
 ## Changing the bar
 

@@ -1,7 +1,7 @@
 // How the clubhouse looks: wall, floor and every piece of furniture, drawn with shapes (no pictures).
 // The room is seen obliquely from the front: x runs left to right, depth (y) runs down the screen at KY of its
 // length, height (z) runs straight up. All drawing here is in room units; the caller scales the canvas.
-import { ROOM, STATIONS, STATION } from '../shared/room.js';
+import { ROOM, STATIONS, STATION, CASINO_X } from '../shared/room.js';
 import { INK, mix, darker, lighter, drawGlass } from './avatar.js';
 
 export const KY = 0.7, WALL = 3.4, FRONT = 0.4;
@@ -44,6 +44,16 @@ export function paintBackground(c, groupName) {
   c.fillStyle = '#93664a'; c.fillRect(0, WALL - 1.12, W, 0.13);
   c.fillStyle = '#5e3b28'; c.fillRect(0, WALL - 0.13, W, 0.13);
   c.fillStyle = '#2b3d54'; c.fillRect(0, 0, W, 0.2);
+  // the casino wing has a wallpaper of its own, behind a gilded post
+  { const x0 = CASINO_X, w = W - x0, top = 0.2, bot = WALL - 1.12;
+    c.fillStyle = '#5c2140'; c.fillRect(x0, top, w, bot - top);
+    c.save(); c.beginPath(); c.rect(x0, top, w, bot - top); c.clip();
+    c.strokeStyle = 'rgba(255,214,120,.14)'; c.lineWidth = 0.028; c.beginPath();
+    for (let k = -6; k < w + 6; k += 0.55) { c.moveTo(x0 + k, top); c.lineTo(x0 + k + (bot - top), bot); c.moveTo(x0 + k + (bot - top), top); c.lineTo(x0 + k, bot); }
+    c.stroke(); c.restore();
+    rrect(c, x0 - 0.13, 0.2, 0.26, WALL - 0.2, 0.04); paint(c, '#c9983f', 0.035);
+    for (const y of [0.2, WALL - 0.26]) { rrect(c, x0 - 0.2, y, 0.4, 0.26, 0.04); paint(c, '#e2b655', 0.035); }
+  }
   // floor boards
   for (let r = 0; r * 0.5 < D; r++) {
     const y0 = V(r * 0.5), h = 0.5 * KY;
@@ -60,6 +70,13 @@ export function paintBackground(c, groupName) {
   c.fillStyle = sh; c.fillRect(0, WALL, W, 0.8);
   c.fillStyle = '#5a3a28'; c.fillRect(0, V(D), W, FRONT); c.fillStyle = '#3d2618'; c.fillRect(0, V(D) + 0.12, W, FRONT);
 
+  // the carpet of the casino wing
+  { const x0 = CASINO_X + 0.35, w = W - CASINO_X - 0.7, y0 = V(0.6), h = (D - 1.05) * KY;
+    rrect(c, x0, y0, w, h, 0.3); paint(c, '#7a2440');
+    rrect(c, x0 + 0.24, y0 + 0.2, w - 0.48, h - 0.4, 0.2); c.lineWidth = 0.07; c.strokeStyle = '#e2b655'; c.stroke();
+    c.fillStyle = 'rgba(226,182,85,.3)';
+    for (let j = 0; j < 9; j++) for (let i = 0; i < 9; i++) { const x = x0 + 0.85 + i * 0.75 + (j % 2) * 0.375, y = y0 + 0.62 + j * 0.86; if (x > x0 + w - 0.7 || y > y0 + h - 0.5) continue; poly(c, [[x, y - 0.09], [x + 0.13, y], [x, y + 0.09], [x - 0.13, y]]); c.fill(); }
+  }
   // rugs
   rrect(c, 2.7, V(4.3), 5.2, 4.0 * KY, 0.25); paint(c, '#b8433c');
   rrect(c, 2.95, V(4.3) + 0.2, 4.7, 4.0 * KY - 0.4, 0.15); c.lineWidth = 0.07; c.strokeStyle = '#f0c987'; c.stroke();
@@ -141,6 +158,16 @@ export function paintBackground(c, groupName) {
     rrect(c, x + w / 2 - 0.36, V(0, h + 0.42), 0.72, 0.3, 0.05); paint(c, '#2f9e63', 0.035);
     text(c, 'UD', x + w / 2, V(0, h + 0.26), 0.2, '#eafff2', 700);
   }
+  // the casino: a neon sign over the machines, the plate that shows the jackpot, and the board (their numbers are drawn live)
+  { const a = STATION.slot1.box, b = STATION.slot3.box, cx = (a[0] + b[0] + b[2]) / 2;
+    c.save(); c.shadowColor = '#ffb347'; c.shadowBlur = 22;
+    text(c, 'KASINO', cx, V(0, 3.0), 0.5, '#fff1c4', 700, '#ff9d3d');
+    rrect(c, cx - 1.35, V(0, 3.3), 2.7, 0.58, 0.2); c.lineWidth = 0.04; c.strokeStyle = '#ff7eb6'; c.shadowColor = '#ff5fa2'; c.stroke();
+    c.restore();
+    const [x, z, w, h] = STATION.casino.wall;
+    rrect(c, x - 0.09, V(0, z + h) - 0.09, w + 0.18, h + 0.18, 0.09); paint(c, '#c9983f');
+    rrect(c, x, V(0, z + h), w, h, 0.05); paint(c, '#1b1426', 0.035);
+  }
   // a clock face over the music box (the hands are drawn live) and a poster by the door
   { const [x, , w] = STATION.jukebox.box; ell(c, x + w / 2, V(0, 2.62), 0.36, 0.36); paint(c, '#fbf6ea'); ell(c, x + w / 2, V(0, 2.62), 0.3, 0.3); c.lineWidth = 0.02; c.strokeStyle = '#b9b0a0'; c.stroke();
     for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; line(c, x + w / 2 + Math.cos(a) * 0.25, V(0, 2.62) + Math.sin(a) * 0.25, x + w / 2 + Math.cos(a) * 0.29, V(0, 2.62) + Math.sin(a) * 0.29, INK, i % 3 ? 0.015 : 0.03); } }
@@ -156,7 +183,8 @@ export function paintBackground(c, groupName) {
 // ---------- furniture (each piece is drawn once and kept as a picture) ----------
 // How far a piece reaches above its footprint, so its picture is big enough: [height, extra at the sides].
 const REACH = { wardrobe: [3.3, 0.2], kiosk: [3.1, 0.35], bar: [1.9, 0.2], arcade: [2.9, 0.15], jukebox: [2.3, 0.15], games: [2.0, 0.2], dice: [1.5, 0.2], cards: [1.4, 0.2],
-  command: [1.7, 0.2], sofa: [1.7, 0.2], plant1: [2.3, 0.6], plant2: [2.3, 0.6], lamp: [3.4, 1.1] };
+  command: [1.7, 0.2], sofa: [1.7, 0.2], plant1: [2.3, 0.6], plant2: [2.3, 0.6], plant3: [2.3, 0.6], lamp: [3.4, 1.1],
+  slot1: [2.8, 0.34], slot2: [2.8, 0.34], slot3: [2.8, 0.34], blackjack: [1.5, 0.2] };
 
 // The part of the picture a piece of furniture covers: [left, top, right, bottom] in room units.
 export function boundsOf(s) {
@@ -340,6 +368,28 @@ const PIECES = {
 
   plant1(c, s) { plant(c, s, 0); },
   plant2(c, s) { plant(c, s, 1); },
+  plant3(c, s) { plant(c, s, 0); },
+
+  slot1(c, s) { cabinet(c, s); },
+  slot2(c, s) { cabinet(c, s); },
+  slot3(c, s) { cabinet(c, s); },
+
+  blackjack(c, s) {
+    const [cx, cy, rx, ry] = s.round, h = s.h, ty = V(cy, h), ky = ry * KY;
+    roundTable(c, cx, cy, rx, ry, h, '#6b3f28', '#4a2a1c');
+    ell(c, cx, ty, rx - 0.17, ky - 0.12); paint(c, '#1f7a5a', 0.035);
+    c.beginPath(); c.ellipse(cx, ty - 0.1, rx - 0.75, ky - 0.36, 0, 0.12 * Math.PI, 0.88 * Math.PI); c.lineWidth = 0.025; c.strokeStyle = 'rgba(255,224,150,.7)'; c.stroke();
+    // the dealer's side: a tray of chips and the shoe the cards come from
+    rrect(c, cx - 0.62, ty - ky + 0.2, 1.24, 0.17, 0.04); paint(c, '#2b2a36', 0.03);
+    ['#e2403a', '#3d8fe0', '#f2c33f', '#58b85f', '#fbf6ea', '#2b2a36'].forEach((col, i) => { rrect(c, cx - 0.56 + i * 0.195, ty - ky + 0.225, 0.15, 0.12, 0.02); paint(c, col, 0.018); });
+    poly(c, [[cx + 0.86, ty - ky + 0.42], [cx + 1.22, ty - ky + 0.5], [cx + 1.22, ty - ky + 0.3], [cx + 0.86, ty - ky + 0.22]]); paint(c, '#b25a3c', 0.03);
+    // a place for each of the five seats
+    for (const [ox, oy, rot] of [[-1.3, 0.02, 0.5], [-0.68, 0.3, 0.22], [0, 0.4, 0], [0.68, 0.3, -0.22], [1.3, 0.02, -0.5]]) {
+      c.save(); c.translate(cx + ox, ty + oy); c.rotate(rot); rrect(c, -0.11, -0.12, 0.22, 0.24, 0.03); c.lineWidth = 0.02; c.strokeStyle = 'rgba(255,255,255,.55)'; c.stroke(); c.restore();
+    }
+    // two cards lying face up in front of the dealer
+    for (const [ox, rot, col] of [[-0.14, -0.1, '#d2323a'], [0.12, 0.08, '#1d1a22']]) { c.save(); c.translate(cx + ox, ty - 0.08); c.rotate(rot); rrect(c, -0.11, -0.13, 0.22, 0.26, 0.03); paint(c, '#fbf6ea', 0.022); ell(c, 0, 0, 0.04, 0.045); c.fillStyle = col; c.fill(); c.restore(); }
+  },
 
   lamp(c, s) {
     const [cx, cy] = s.round, by = V(cy);
@@ -350,6 +400,28 @@ const PIECES = {
     poly(c, [[cx - 0.26, by - 2.55], [cx + 0.26, by - 2.55], [cx + 0.44, by - 1.95], [cx - 0.44, by - 1.95]]); paint(c, '#ffe9a8');
   },
 };
+
+// A slot machine: the cabinet with its sign, the window for the reels (which are drawn live), the shelf with the
+// button, the tray, and the arm at the side.
+const SLOT_ART = {
+  slot1: { body: '#d8474f', dark: '#a83241', trim: '#ffd45e', label: 'KIRSEBÆR', dots: ['#e2403a', '#f2c33f', '#8a58d6', '#ffd45e', '#58b85f'] },
+  slot2: { body: '#3f8fa8', dark: '#2a6a80', trim: '#dfe7ec', label: 'ROBOT', dots: ['#c9d0d8', '#f2c33f', '#ff7e6b', '#7fe0c3', '#8fc9ff'] },
+  slot3: { body: '#e889a8', dark: '#c0607f', trim: '#ffd45e', label: 'GRISEN', dots: ['#ff9fc0', '#f2c33f', '#58b85f', '#c9d0d8', '#ffd45e'] },
+};
+function cabinet(c, s) {
+  const [x, y, w, d] = s.box, h = s.h, f = V(y + d, h), a = SLOT_ART[s.id];
+  box(c, x, y, w, d, h, a.body, a.dark);
+  rrect(c, x + 0.06, f + 0.07, w - 0.12, 0.4, 0.12); paint(c, a.trim, 0.035);
+  text(c, a.label, x + w / 2, f + 0.28, a.label.length > 6 ? 0.165 : 0.2, '#5a2f3c', 700);
+  rrect(c, x + 0.1, f + 0.56, w - 0.2, 0.66, 0.07); paint(c, '#171220', 0.04);
+  poly(c, [[x + 0.03, f + 1.32], [x + w - 0.03, f + 1.32], [x + w + 0.06, f + 1.58], [x - 0.06, f + 1.58]]); paint(c, lighter(a.dark, 0.12));
+  ell(c, x + w / 2, f + 1.45, 0.17, 0.075); paint(c, '#f2c33f', 0.03);
+  rrect(c, x + 0.22, f + 1.74, w - 0.44, 0.2, 0.05); paint(c, '#171220', 0.035);
+  rrect(c, x + 0.14, f + 2.04, w - 0.28, 0.27, 0.07); paint(c, darker(a.dark, 0.25), 0.035);
+  line(c, x + w + 0.01, f + 1.3, x + w + 0.19, f + 0.78, INK, 0.1); line(c, x + w + 0.01, f + 1.3, x + w + 0.19, f + 0.78, '#c9d0d8', 0.055);
+  ell(c, x + w + 0.2, f + 0.72, 0.105, 0.105); paint(c, '#e2403a', 0.03);
+  for (const o of [0.1, w - 0.1]) { ell(c, x + o, f + 0.52, 0.035, 0.035); c.fillStyle = a.trim; c.fill(); }
+}
 
 function plant(c, s, kind) {
   const [cx, cy] = s.round, by = V(cy);
@@ -374,7 +446,7 @@ export function paintStool(c, x, y, high) {
 export const seatHeight = s => s.on ? 0.42 : s.high ? 0.7 : 0.44;
 
 // ---------- the things that move (drawn every frame) ----------
-export function paintLive(c, t, soundOn) {
+export function paintLive(c, t, soundOn, casino) {
   // dance floor tiles
   const [dx, dy, dr] = STATION.dance.floor, n = 4, tw = dr * 2 / n;
   const cols = ['#ff5fa2', '#4fc3e8', '#ffd45e', '#7fe08a', '#b07cff'];
@@ -383,7 +455,33 @@ export function paintLive(c, t, soundOn) {
     c.fillStyle = mix('#2a2238', cols[k], 0.35 + 0.5 * pulse);
     rrect(c, dx - dr + i * tw + 0.04, V(dy - dr + j * tw) + 0.03, tw - 0.08, tw * KY - 0.06, 0.05); c.fill();
   }
-  // the arcade screen
+  // the casino: the jackpot over the pig machine, and the board with who is up and down today
+  if (casino) {
+    const [px, , pw] = STATION.slot3.box, cx = px + pw / 2, glow = 0.75 + 0.25 * Math.sin(t * 3);
+    rrect(c, cx - 0.72, V(0, 2.5), 1.44, 0.56, 0.1); c.fillStyle = '#2a1830'; c.fill(); c.lineWidth = 0.04; c.strokeStyle = mix('#8a5a1f', '#ffd45e', glow); c.stroke();
+    text(c, 'JACKPOT', cx, V(0, 2.5) + 0.15, 0.13, '#ffb347', 700);
+    text(c, String(casino.pot || 0).replace(/\B(?=(\d{3})+$)/g, '.'), cx, V(0, 2.5) + 0.37, 0.24, '#ffe9a8', 700);
+    for (let i = 0; i < 7; i++) { ell(c, cx - 0.6 + i * 0.2, V(0, 2.5) - 0.045, 0.035, 0.035); c.fillStyle = (Math.floor(t * 3) + i) % 2 ? '#ffd45e' : '#7a5a1f'; c.fill(); }
+    const [x, z, w, h] = STATION.casino.wall, top = V(0, z + h);
+    text(c, 'I DAG', x + w / 2, top + 0.2, 0.17, '#ffb347', 700);
+    const rows = (casino.lines || []).slice(0, 4);
+    if (!rows.length) text(c, 'Ingen har spillet', x + w / 2, top + h / 2 + 0.1, 0.13, '#8d84a0', 600);
+    rows.forEach(([name, net], i) => {
+      const y = top + 0.5 + i * 0.3, short = name.length > 9 ? name.slice(0, 8) + '…' : name, col = net > 0 ? '#7fe08a' : net < 0 ? '#ff8f80' : '#e9e3f5';
+      c.textAlign = 'left'; text(c, short, x + 0.12, y, 0.15, '#e9e3f5', 600); c.textAlign = 'right'; text(c, (net > 0 ? '+' : '') + net, x + w - 0.12, y, 0.16, col, 700); c.textAlign = 'center';
+    });
+  }
+  // the clock
+  { const [x, , w] = STATION.jukebox.box, cx = x + w / 2, cy = V(0, 2.62), d = new Date(), hh = d.getHours() % 12 + d.getMinutes() / 60, mm = d.getMinutes() + d.getSeconds() / 60;
+    const ha = hh / 12 * TAU - Math.PI / 2, ma = mm / 60 * TAU - Math.PI / 2;
+    line(c, cx, cy, cx + Math.cos(ha) * 0.15, cy + Math.sin(ha) * 0.15, INK, 0.04); line(c, cx, cy, cx + Math.cos(ma) * 0.23, cy + Math.sin(ma) * 0.23, INK, 0.028);
+    ell(c, cx, cy, 0.03, 0.03); c.fillStyle = '#e2403a'; c.fill(); }
+}
+
+// What moves on a piece of furniture itself (drawn right after its picture, so it is not hidden behind it).
+export const OVER = new Set(['arcade', 'jukebox', 'slot1', 'slot2', 'slot3']);
+export function paintOver(c, id, t, soundOn, casino) {
+  if (id === 'arcade') {
   { const [x, y, w, d] = STATION.arcade.box, f = V(y + d, STATION.arcade.h), sx = x + 0.2, sy = f + 0.66, sw = w - 0.4, sh = 0.66;
     c.save(); rrect(c, sx, sy, sw, sh, 0.04); c.clip();
     c.fillStyle = '#16233f'; c.fillRect(sx, sy, sw, sh); c.fillStyle = '#2f7d4f'; c.fillRect(sx, sy + sh * 0.66, sw, sh);
@@ -392,15 +490,31 @@ export function paintLive(c, t, soundOn) {
     c.strokeStyle = '#eafff2'; c.lineWidth = 0.02; c.beginPath(); c.moveTo(cxh - 0.08, cyh); c.lineTo(cxh + 0.08, cyh); c.moveTo(cxh, cyh - 0.08); c.lineTo(cxh, cyh + 0.08); c.stroke();
     c.fillStyle = 'rgba(255,255,255,.05)'; for (let yy = 0; yy < sh; yy += 0.06) c.fillRect(sx, sy + yy, sw, 0.02);
     c.restore(); }
-  // the music box: its arch of light, and notes when the sound is on
+    return;
+  }
+  if (id === 'jukebox') {
   { const [x, y, w, d] = STATION.jukebox.box, f = V(y + d, STATION.jukebox.h), cx = x + w / 2;
     for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(cx, f + 0.56, w / 2 - 0.05 - i * 0.05, Math.PI, 0); c.lineWidth = 0.04; c.strokeStyle = 'hsl(' + ((t * 40 + i * 50) % 360) + ' 90% 65%)'; c.stroke(); }
     if (soundOn) for (let i = 0; i < 2; i++) { const u = (t * 0.4 + i * 0.5) % 1; c.globalAlpha = Math.sin(u * Math.PI); text(c, i ? '♪' : '♫', cx - 0.3 + i * 0.6 + Math.sin(u * 5 + i) * 0.12, f - 0.1 - u * 0.6, 0.3, '#ffe9a8', 700); c.globalAlpha = 1; } }
-  // the clock
-  { const [x, , w] = STATION.jukebox.box, cx = x + w / 2, cy = V(0, 2.62), d = new Date(), hh = d.getHours() % 12 + d.getMinutes() / 60, mm = d.getMinutes() + d.getSeconds() / 60;
-    const ha = hh / 12 * TAU - Math.PI / 2, ma = mm / 60 * TAU - Math.PI / 2;
-    line(c, cx, cy, cx + Math.cos(ha) * 0.15, cy + Math.sin(ha) * 0.15, INK, 0.04); line(c, cx, cy, cx + Math.cos(ma) * 0.23, cy + Math.sin(ma) * 0.23, INK, 0.028);
-    ell(c, cx, cy, 0.03, 0.03); c.fillStyle = '#e2403a'; c.fill(); }
+    return;
+  }
+  // a slot machine: three reels in the window. They turn slowly by themselves and fast while somebody plays.
+  const st = STATION[id], a = SLOT_ART[id], [x, y, w, d] = st.box, f = V(y + d, st.h), busy = casino && casino.spin && casino.spin[id] > t;
+  const wx = x + 0.16, wy = f + 0.62, cw = (w - 0.32 - 0.08) / 3, chh = 0.54;
+  for (let i = 0; i < 3; i++) {
+    const cx = wx + i * (cw + 0.04);
+    rrect(c, cx, wy, cw, chh, 0.04); c.fillStyle = '#fbf6ea'; c.fill();
+    c.save(); rrect(c, cx, wy, cw, chh, 0.04); c.clip();
+    const speed = busy ? 9 + i * 2 : 0.22, pos = t * speed + i * 1.7 + st.box[0], k = Math.floor(pos), u = pos - k;
+    for (let r = -1; r <= 1; r++) {
+      const col = a.dots[(((k + r) % a.dots.length) + a.dots.length) % a.dots.length], yy = wy + chh / 2 + (r + (busy ? u : 0)) * chh * 0.62;
+      ell(c, cx + cw / 2, yy, cw * 0.3, cw * 0.3); c.fillStyle = col; c.fill(); c.lineWidth = 0.022; c.strokeStyle = INK; c.stroke();
+    }
+    if (busy) { c.fillStyle = 'rgba(255,255,255,.35)'; c.fillRect(cx, wy, cw, chh); }
+    c.restore();
+  }
+  line(c, wx - 0.02, wy + chh / 2, wx + w - 0.3, wy + chh / 2, 'rgba(226,64,58,.75)', 0.02);
+  if (busy) { c.save(); c.globalAlpha = 0.5 + 0.5 * Math.sin(t * 20); for (const o of [0.1, w - 0.1]) { ell(c, x + o, f + 0.52, 0.05, 0.05); c.fillStyle = '#fff6c9'; c.fill(); } c.restore(); }
 }
 
 // The bartender: the house robot, standing behind the counter and polishing a glass.

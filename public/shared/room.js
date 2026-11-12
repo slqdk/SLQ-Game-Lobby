@@ -1,8 +1,10 @@
 // The clubhouse as both sides know it: its size, the furniture, where one can walk, and how to get from A to B.
-// Units are "steps": the room is 24 wide (x, left to right) and 13 deep (y, from the back wall towards the viewer).
+// Units are "steps": the room is 32 wide (x, left to right) and 13 deep (y, from the back wall towards the viewer).
+// The last eight steps to the right are the casino wing (from CASINO_X on).
 // The server finds every path and sends it along; the browser uses the same code to start walking at once.
 
-export const ROOM = { w: 24, d: 13, cell: 0.5, speed: 4.4, spawn: [22.0, 2.1], pad: 0.32 };
+export const ROOM = { w: 32, d: 13, cell: 0.5, speed: 4.4, spawn: [22.0, 2.1], pad: 0.32 };
+export const CASINO_X = 24;
 
 // kind      what using it does (the browser decides how)
 // box       [x, y, w, d] footprint that blocks walking          round  [cx, cy, rx, ry] the same for round things
@@ -32,6 +34,15 @@ export const STATIONS = [
   { id: 'plant1', kind: 'decor', round: [0.95, 12.05, 0.42, 0.42], h: 1.6 },
   { id: 'plant2', kind: 'decor', round: [23.25, 1.0, 0.38, 0.38], h: 1.6 },
   { id: 'lamp', kind: 'decor', round: [23.3, 10.9, 0.28, 0.28], h: 2.6 },
+  // the casino wing: three slot machines (`machine` names the one in shared/slots.js), the board that shows what is
+  // won and lost, and the blackjack table
+  { id: 'slot1', kind: 'slot', machine: 'cherry', name: 'Kirsebærhaven', box: [24.9, 0.2, 1.3, 0.9], h: 2.45, use: [25.55, 1.95] },
+  { id: 'slot2', kind: 'slot', machine: 'robot', name: 'Robotværkstedet', box: [26.7, 0.2, 1.3, 0.9], h: 2.45, use: [27.35, 1.95], lift: 0.5 },      // lift: its label sits higher, clear of its neighbours'
+  { id: 'slot3', kind: 'slot', machine: 'pig', name: 'Sparegrisen', box: [28.5, 0.2, 1.3, 0.9], h: 2.45, use: [29.15, 1.95] },
+  { id: 'casino', kind: 'casino', name: 'Kasinotavlen', wall: [30.05, 1.15, 1.8, 1.65], use: [30.95, 1.3] },
+  { id: 'blackjack', kind: 'game', name: 'Blackjackbordet', games: ['blackjack'], round: [28.2, 7.2, 2.1, 1.15], h: 0.9, use: [28.2, 9.35],
+    seats: [[26.2, 8.2], [27.15, 8.85], [28.2, 9.05], [29.25, 8.85], [30.2, 8.2]] },
+  { id: 'plant3', kind: 'decor', round: [31.2, 12.0, 0.42, 0.42], h: 1.6 },
 ];
 export const STATION = Object.fromEntries(STATIONS.map(s => [s.id, s]));
 

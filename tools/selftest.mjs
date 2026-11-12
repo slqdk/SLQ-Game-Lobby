@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../server/store.js';
 import { createPush, encrypt as pushEncrypt } from '../server/push.js';
+import { MACHINES, settle, returnOf, windowOf, LINES } from '../public/shared/slots.js';
 import { createHub } from '../server/hub.js';
 import { createEagleEye } from '../server/eagleeye.js';
 import { createArena } from '../server/arena.js';
@@ -1003,6 +1004,98 @@ section('ludo');
   clock += 49 * 3600e3; other.send({ t: 'tclaim', id: id2 });
   check('efter 48 timer spilles der videre uden den, der ikke slår', tbl(id2).phase === 'play' && tbl(id2).state.gone[slow] && tbl(id2).state.turn !== slow && tbl(id2).seats[slow].left === 1, other.err());
   for (const c of [A, B, C]) c.send({ t: 'tleave', id: id2 });
+}
+
+section('kasinoet: slotmaskinerne');
+{
+  const RET = Object.fromEntries(Object.keys(MACHINES).map(id => [id, returnOf(id)]));
+  const pct = id => (RET[id].total * 100).toFixed(2);
+  check('hver maskine betaler mellem 95 og 96,5 % tilbage, regnet nøjagtigt ud fra hjulene', Object.keys(MACHINES).every(id => RET[id].total > 0.95 && RET[id].total < 0.965), Object.keys(MACHINES).map(id => id + ' ' + pct(id)).join(', '));
+  check('kirsebærhaven giver gevinst på mere end hvert tredje spin, grisen på knap hvert fjerde', RET.cherry.hit > 0.34 && RET.cherry.hit < 0.4 && RET.pig.hit > 0.2 && RET.pig.hit < 0.26);
+  check('robotværkstedet: fire femtedele kommer fra linjerne, resten fra gratis spins cirka hver hundrede spin', RET.robot.base > 0.75 && RET.robot.base < 0.82 && RET.robot.free > 0.13 && RET.robot.free < 0.2 && 1 / RET.robot.trigger > 80 && 1 / RET.robot.trigger < 120);
+  check('grisen: 4 % af indsatsen går i puljen, og tre grise kommer cirka hver 3.400. spin', RET.pig.pot === 0.04 && Math.round(1 / RET.pig.jack) === 3430);
+  const at = (id, ...syms) => syms.map((sy, i) => { const k = MACHINES[id].reels[i].indexOf(sy); if (k < 0) throw new Error(sy + ' findes ikke på hjul ' + i); return k; });
+  const other = (id, i, not) => MACHINES[id].reels[i].findIndex(sy => !not.includes(sy));
+  check('tre syvere giver 100 gange indsatsen', settle('cherry', 5, at('cherry', 'seven', 'seven', 'seven')).win === 500);
+  check('kirsebær betaler fra venstre: to giver 3 gange, ét giver indsatsen tilbage', settle('cherry', 5, [MACHINES.cherry.reels[0].indexOf('cherry'), MACHINES.cherry.reels[1].indexOf('cherry'), other('cherry', 2, ['cherry'])]).win === 15
+    && settle('cherry', 5, [MACHINES.cherry.reels[0].indexOf('cherry'), other('cherry', 1, ['cherry']), other('cherry', 2, ['cherry'])]).win === 5
+    && settle('cherry', 5, [other('cherry', 0, ['cherry']), MACHINES.cherry.reels[1].indexOf('cherry'), MACHINES.cherry.reels[2].indexOf('cherry')]).win === 0);
+  const R = MACHINES.robot, mid = (...syms) => syms.map((sy, i) => R.reels[i].indexOf(sy));
+  const five = settle('robot', 10, mid('robot', 'wild', 'wild', 'wild', 'robot'));
+  check('jokeren står for det, der mangler: robot, tre jokere, robot er fem robotter', five.lines.some(l => l.line === 0 && l.sym === 'robot' && l.n === 5 && l.pay === 750) && five.win >= 750);
+  check('en linje tæller fra venstre og kræver mindst tre', !settle('robot', 10, mid('nut', 'nut', 'gear', 'nut', 'nut')).lines.some(l => l.line === 0)
+    && settle('robot', 20, mid('gear', 'gear', 'gear', 'nut', 'nut')).lines.find(l => l.line === 0).pay === 20);
+  const wr = settle('robot', 10, mid('wrench', 'wrench', 'wrench', 'nut', 'nut')), wrFree = settle('robot', 10, mid('wrench', 'wrench', 'wrench', 'nut', 'nut'), true);
+  check('tre skruenøgler giver ti gratis spins (men ikke flere midt i de gratis)', wr.frees === 10 && wrFree.frees === 0);
+  check('i et gratis spin tæller gevinsten dobbelt', settle('robot', 10, mid('gear', 'gear', 'gear', 'nut', 'nut'), true).lines.find(l => l.line === 0).pay === 20);
+  check('de ti linjer er forskellige, og hvert hjul viser tre felter', new Set(LINES.map(l => l.join())).size === 10 && windowOf(R, 0, 0).length === 3 && windowOf(R, 0, 0)[1] === R.reels[0][0] && windowOf(R, 0, 0)[0] === R.reels[0][R.reels[0].length - 1]);
+  const P = MACHINES.pig, pg = (...syms) => syms.map((sy, i) => P.reels[i].indexOf(sy));
+  const jackStops = pg('pig', 'pig', 'pig');
+  check('tre grise er jackpotten, to giver 10 gange og én 2 gange indsatsen', settle('pig', 50, jackStops).jack && settle('pig', 50, jackStops).win === 0
+    && settle('pig', 10, [jackStops[0], jackStops[1], other('pig', 2, ['pig'])]).win === 100 && settle('pig', 10, [other('pig', 0, ['pig']), other('pig', 1, ['pig', P.reels[0][other('pig', 0, ['pig'])]]), jackStops[2]]).win === 20
+    && settle('pig', 10, pg('bar', 'bar', 'bar')).win === 1500);
+
+  // ---- in the clubhouse ----
+  for (const c of [A, B, C]) c.send({ t: 'tclose' });
+  const idA = A.me().id, uA = store.users.get(idA), g = store.groups.get(GID), chips0 = uA.chips, memB = () => B.got.filter(m => m.t === 'mem' && m.m.id === idA).pop().m;
+  A.send({ t: 'spin', m: 'cherry', bet: 5 });
+  check('man skal stå ved maskinen for at spille', /Gå hen til maskinen/.test(A.err()));
+  mark(B); A.send({ t: 'sopen', m: 'cherry' });
+  check('man går hen til maskinen, og de andre ser, hvor man står', A.last('slot').m === 'cherry' && A.last('slot').pot === 1000 && memB().busy === 'slot' && memB().slot === 'cherry' && memB().net === 0 && B.since('mv').length === 1 && B.since('mv')[0].p.pop()[0] > 24.9);
+  A.send({ t: 'spin', m: 'cherry', bet: 7 }); const e1 = A.err();
+  uA.chips = 3; clock += 500; A.send({ t: 'spin', m: 'cherry', bet: 5 });
+  check('en indsats, maskinen ikke tager, eller flere jetoner end man har, afvises', /Den indsats/.test(e1) && /ikke jetoner nok/.test(A.err()) && uA.chips === 3);
+  // many spins: every chip is accounted for, and the others are told about each one
+  uA.chips = 100000;
+  let ok = true, staked = 0, won = 0, hits = 0, net = 0;
+  mark(B);
+  for (let i = 0; i < 400; i++) {
+    const before = uA.chips; clock += 500; A.send({ t: 'spin', m: 'cherry', bet: 5 });
+    const r = A.last('spun'), exp = settle('cherry', 5, r.stops);
+    staked += 5; won += r.win; net += r.win - 5; if (r.win) hits++;
+    if (uA.chips !== before - 5 + r.win || r.win !== exp.win || r.chips !== uA.chips || r.net !== net || A.me().chips !== uA.chips) ok = false;
+  }
+  const seen = B.since('spin');
+  check('hvert spin trækker indsatsen og lægger gevinsten til, hverken mere eller mindre', ok && uA.chips === 100000 - staked + won, staked + ' / ' + won);
+  check('de andre i klubhuset får hvert eneste spin at vide, med indsats, gevinst og hvad spilleren står til', seen.length === 400 && seen.every(m => m.u === idA && m.m === 'cherry' && m.bet === 5) && seen.reduce((a, m) => a + m.win, 0) === won && seen[399].net === net && seen[399].today[0] >= staked);
+  check('gevinsterne kommer omtrent så tit, som hjulene siger', hits > 110 && hits < 190, String(hits));
+  check('tallene tæller med: spin, indsats, gevinst og største gevinst', uA.stats.slots.n === 400 && uA.stats.slots.bet === staked && uA.stats.slots.won === won && uA.stats.slots.best >= 5 && memB().stats.slots.n === 400);
+  A.send({ t: 'move', x: 5, y: 5 });
+  check('ved maskinen bliver man stående, til man lukker den', A.since('mv').length === 0);
+  // the five-reel machine until free spins come
+  A.send({ t: 'sopen', m: 'robot' });
+  check('man kan gå fra den ene maskine til den anden og beholde, hvad man står til', memB().slot === 'robot' && memB().net === net);
+  let frees = 0, tries = 0;
+  while (!frees && tries++ < 3000) { clock += 500; A.send({ t: 'spin', m: 'robot', bet: 20 }); frees = A.last('spun').frees; }
+  const afterTrigger = uA.chips, first = A.last('spun');
+  check('skruenøglerne giver gratis spins, som huskes på kontoen', frees >= 10 && first.free === frees && uA.slots.robot.free === frees && uA.slots.robot.bet === 20, 'efter ' + tries + ' spin');
+  let freeWon = 0, freeOk = true;
+  for (let i = 0; i < frees; i++) { clock += 500; A.send({ t: 'spin', m: 'robot', bet: 100 }); const r = A.last('spun'); freeWon += r.win; if (!r.was || r.bet !== 20 || r.free !== frees - 1 - i) freeOk = false; }
+  check('gratis spins koster ingenting, bruger den indsats de blev vundet med, og tæller ned', freeOk && uA.chips === afterTrigger + freeWon && !uA.slots.robot);
+  clock += 500; A.send({ t: 'spin', m: 'robot', bet: 20 });
+  check('bagefter koster et spin igen', A.last('spun').was === 0 && A.last('spun').bet === 20);
+  // the pig until the jackpot falls
+  A.send({ t: 'sopen', m: 'pig' });
+  let jack = 0, n = 0, potOk = true, pot = g.jack ?? 1000, potBefore = 0;
+  mark(C);
+  while (!jack && n++ < 60000) {
+    clock += 500; const before = uA.chips, bet = n % 2 ? 50 : 10; potBefore = pot; A.send({ t: 'spin', m: 'pig', bet });
+    const r = A.last('spun'); jack = r.jack; pot = Math.round((pot + bet * 0.04) * 100) / 100;
+    if (!jack && (g.jack !== pot || r.pot !== Math.floor(pot) || uA.chips !== before - bet + r.win)) potOk = false;
+    if (uA.chips < 1000) uA.chips = 100000;
+  }
+  const last = A.last('spun');
+  check('puljen vokser med 4 % af hver indsats på grisen', potOk && n > 1, 'efter ' + n + ' spin');
+  check('tre grise udbetaler puljen (hele ved højeste indsats, ellers en andel), og den begynder forfra', jack > 0 && jack === Math.floor(Math.floor(pot) * last.bet / 50) && last.win >= jack && g.jack >= 1000 && (last.bet < 50 || g.jack === 1000), JSON.stringify([jack, pot, last.bet, g.jack]));
+  check('og hele gruppen får det at vide', /tømte Sparegrisen for \d+ jetoner!/.test(C.last('chat').m.s) && C.since('spin').pop().pot === Math.floor(g.jack));
+  mark(B); A.send({ t: 'sclose' });
+  check('når man går fra maskinen, ser de andre det', memB().busy === '' && B.since('mem').length >= 1);
+  A.send({ t: 'move', x: 22, y: 3 });
+  check('og så kan man gå igen', A.since('mv').length === 1);
+  B.send({ t: 'enter', g: GID });
+  const again = B.last('room');
+  check('den, der kommer ind i klubhuset, ser puljen og dagens tal', again.pot === Math.floor(g.jack) && again.mem.find(x => x.id === idA).today[0] > staked && again.mem.find(x => x.id === idA).stats.slots.n > 400);
+  uA.chips = chips0; A.send({ t: 'dnd', on: false });
 }
 
 section('stilarket');

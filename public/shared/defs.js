@@ -19,6 +19,7 @@ export const ECON = {
 export const LIMITS = {
   nameMin: 2, nameMax: 20, passMin: 6, passMax: 100, groupMin: 2, groupMax: 30,
   chat: 240, chatKeep: 200, chatSend: 80, members: 40, groups: 12, tables: 30, ownOpen: 3,
+  pushMax: 6,          // devices with notifications per account
 };
 
 // Free: what an avatar can do on its own.

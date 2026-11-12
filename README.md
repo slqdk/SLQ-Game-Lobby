@@ -16,6 +16,7 @@ What is in it:
 - **Poker** at the card table: Texas Hold'em without a limit as a small tournament for two to six. Everybody starts with 1,000 poker chips, the blinds rise every eighth hand, and the last one with chips takes the buy-ins. A clock keeps it moving (40 seconds per decision), and robots in three strengths can fill the seats at tables without a buy-in.
 - **Yatzy** at the dice table: five dice, the Danish sheet with fifteen fields and the bonus for 63, two to four players, live or one turn now and the next tomorrow, with or without robots.
 - **Meyer** at the dice table: two dice under a cup, say the same as the one before or higher (true or not), believe it or lift the cup. Six lives each, Meyer costs two, two to six players, a clock, robots that lie and doubt.
+- **Notifications** on phone and computer when it is your turn, when somebody asks you to a table, or when a new round has begun in EagleEye Commander, and the clubhouse is not in front of you. Switched on per device in the ☰ menu.
 - **Ludo** at the board-game table: two to four players, a six to get out, globes and stars, two together stand safely, an exact throw into the goal. The pieces hop along the board, robots in three levels, and like Yatzy it can be played over days.
 
 No dependencies: Node 20 or newer and a browser. The user interface is in Danish.
@@ -33,6 +34,9 @@ PORT=8090 DATA_DIR=/var/lib/slq-game-lobby node server/server.js
 | `DATA_DIR` | `./data` | Where accounts, groups and the login key are kept |
 | `HOST` | all interfaces | Listen on one address only, e.g. `127.0.0.1` |
 | `TRUSTED_PROXY` | none | Extra reverse-proxy addresses or networks, comma separated (see "Behind a reverse proxy") |
+| `PUSH` | on | `off` runs without notifications |
+| `PUSH_CONTACT` | the lobby's own address | Whom a push service may contact about this server, e.g. `mailto:you@example.com` (see "Notifications") |
+| `PUSH_HOSTS` | none | More push services than the big browsers' own, comma separated host names |
 
 The installed service runs on Danish time (`TZ=Europe/Copenhagen` in `deploy/slq-game-lobby.service`): that decides when a new day starts for the daily chips.
 
@@ -109,12 +113,22 @@ Proxy host: Scheme `http`, Forward Hostname/IP = the container's address, Forwar
 
 The login throttle (eight wrong attempts from an address, then ten minutes' wait) needs the visitor's real address. A forwarded address is believed when the proxy is on the same machine, on a private network, or on one of the server's own networks. A proxy somewhere else is named with `TRUSTED_PROXY=203.0.113.7` (addresses or networks, comma separated) in the service file.
 
+## Notifications
+
+Everybody switches them on for themselves, per device: ☰ menu, **Beskeder på denne enhed**. The button **Send en prøvebesked** next to it shows at once whether a message gets through.
+
+- They need **HTTPS** (browsers only allow them on a secure page), so they work through the reverse proxy and not on `http://<address>:8080`.
+- On **iPhone and iPad** the clubhouse must first be put on the home screen (Share, "Føj til hjemmeskærm") and opened from there; Safari only gives notifications to such pages. Android, Windows, macOS and Linux browsers need nothing extra.
+- A message is sent when it is your turn at a table where another person is waiting, when somebody asks you to a table, when a game you sat in has ended, and when a new round has begun in EagleEye Commander; only to somebody who is not looking at the clubhouse (no page open, the tab hidden, the window behind another, or untouched for five minutes), and once per table until they have been back at it.
+- The server must be able to reach the browsers' push services on the internet (port 443 outwards): Google's for Chrome, Edge, Brave and Samsung, Mozilla's for Firefox, Apple's for Safari. Messages are encrypted for the one browser; the push service cannot read them.
+- The server's key pair for this is made at the first start and kept in `config.json`. If that file is lost, everybody has to switch notifications on again.
+
 ## Data and backup
 
 Everything is JSON in the data folder (`/var/lib/slq-game-lobby` when installed):
 
-- `config.json`: the key that signs logins, and the installation code
-- `users.json`: accounts (names, salted password hashes, chips, looks, counters)
+- `config.json`: the key that signs logins, the installation code, and the key pair for notifications
+- `users.json`: accounts (names, salted password hashes, chips, looks, counters, the browsers that get notifications)
 - `groups/<id>.json`: one file per group with members, the last 200 chat lines and the tables
 - `eagleeye/<code>.json`: one file per EagleEye Commander match
 

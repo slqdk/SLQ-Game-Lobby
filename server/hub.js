@@ -18,10 +18,15 @@ const norm = c => String(c ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 // An entry of one of the fixed lists, by a key from the browser (only a text counts as a key).
 const pick = (list, k) => typeof k === 'string' && Object.hasOwn(list, k) ? list[k] : null;
 const HOUR = 3600e3;
+const andList = n => n.length > 2 ? n.slice(0, -1).join(', ') + ' og ' + n[n.length - 1] : n.join(' og ');
+// A key as a browser hands it over with a push subscription: base64url of exactly n bytes.
+const keyOk = (k, n, first) => { if (typeof k !== 'string' || k.length > 120 || !/^[\w-]+$/.test(k)) return false; const b = Buffer.from(k, 'base64url'); return b.length === n && (first === undefined || b[0] === first); };
 
 // ee: the EagleEye Commander matches (server/eagleeye.js), or null to run without that game.
 // arena: the shooter's matches (server/arena.js), or null to run without it.
-export function createHub({ store, ee = null, arena = null, version = '', now = () => Date.now(), botDelay = [700, 1500], rand = Math.random }) {
+// push: what sends notifications to browsers (server/push.js), or null to run without them. nudgeMs: how long
+// somebody's turn waits before they are told (those who are looking at the clubhouse are never told).
+export function createHub({ store, ee = null, arena = null, version = '', now = () => Date.now(), botDelay = [700, 1500], rand = Math.random, push = null, nudgeMs = 5000 }) {
   const conns = new Map();        // user id -> the connection that user is on (one at a time)
   const rooms = new Map();        // group id -> Map(user id -> presence): who is in that clubhouse right now
   const invites = new Map();      // invite code -> group id
@@ -124,7 +129,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
   // ---------- connections ----------
   function connect(send, close, ip = '') {
-    return { send, close, ip, user: null, gid: null, budget: 60, budgetAt: now(), fast: 150, fastAt: now(), said: [], emoAt: 0, prankAt: 0, drinkAt: 0, invAt: 0, badCodes: 0 };
+    return { send, close, ip, user: null, gid: null, away: false, testAt: 0, budget: 60, budgetAt: now(), fast: 150, fastAt: now(), said: [], emoAt: 0, prankAt: 0, drinkAt: 0, invAt: 0, badCodes: 0 };
   }
 
   function message(conn, text) {
@@ -310,6 +315,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   };
   function pushTable(g, t) {
     store.saveGroup(g);
+    turnNudge(g, t);
     const room = rooms.get(g.id);
     if (!room) return;
     cast(g.id, { t: 'tb', tb: tableSum(t) });
@@ -317,6 +323,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   }
   function dropTable(g, t) {
     delete g.tables[t.id];
+    forget(g, t);
     store.saveGroup(g);
     const room = rooms.get(g.id);
     if (!room) return;
@@ -393,6 +400,14 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     });
     t.phase = 'over'; t.pot = 0; t.endAt = now(); t.again = {}; t.wake = null;
     t.res = { win: res.win, draw: !!res.draw, why: res.why || '', by: res.by ?? -1, pay };
+    forget(g, t);
+    // whoever is not there to see it hears how it ended (when people played each other)
+    if (push && t.seats.filter(s => s.u).length > 1) t.seats.forEach((s, i) => {
+      if (!s.u || s.left || !absent(s.u, g.id)) return;
+      const won = !res.draw && res.win.includes(i);
+      notify(store.users.get(s.u), { t: res.draw ? 'Uafgjort i ' + game.name : won ? 'Du vandt i ' + game.name + '!' : andList(res.win.map(k => t.seats[k].n)) + ' vandt i ' + game.name,
+        b: 'Spillet i ' + g.name + ' er slut.' + (pay[i] ? ' +' + pay[i] + ' jetoner.' : ''), tag: 't' + g.id + ':' + t.id, u: './?g=' + g.id + '&t=' + t.id }, { topic: 't' + g.id + ':' + t.id });
+    });
     if (!robot) {
       const names = l => { const n = l.map(i => t.seats[i].n); return n.length > 2 ? n.slice(0, -1).join(', ') + ' og ' + n[n.length - 1] : n.join(' og '); }, los = others(t, -1).filter(i => !res.win.includes(i));
       const pot = share ? ' og fik puljen på ' + (share + rest) + ' jetoner' : '';
@@ -449,6 +464,55 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     cast(g.id, { t: 'mem', m: { id: p.u.id, open: 0 } });
   }
 
+  // ---------- messages to people who are away ----------
+  // Somebody whose turn it is, and who is not looking at this clubhouse, gets a notification on the devices where
+  // they have asked for it: once per table until they have been back at it, and only when a person waits for them.
+  const nudges = new Map();       // what waits to be told: key -> { at, uid, gid, tid } or { at, uid, gid, code, round }
+  const pinged = new Set();       // "group:table:user": told, and not again before they have been at the table
+  const eeRound = new Map();      // EagleEye match -> the round that was last seen
+  const absent = (uid, gid) => { const c = conns.get(uid); return !c || c.away || c.gid !== gid; };
+  // One message to one browser. A browser that no longer listens is taken off the account.
+  const deliver = (u, sub, payload, opts) => push.send(sub, payload, opts).then(code => {
+    if (code === 404 || code === 410) { const i = (u.push || []).indexOf(sub); if (i >= 0) { u.push.splice(i, 1); store.saveUsers(); } }
+    return code;
+  }, () => -1);
+  function notify(u, payload, opts) {
+    if (!push || !u || !u.push) return 0;
+    for (const sub of u.push.slice()) deliver(u, sub, payload, opts);
+    return u.push.length;
+  }
+  function turnNudge(g, t) {
+    if (!push) return;
+    const key = g.id + ':' + t.id, seat = t.phase === 'play' ? GAMES[t.game].turn(t.state) : -1, s = seat >= 0 ? t.seats[seat] : null;
+    // only people are told, and only when another person waits (a robot never minds)
+    if (!s || !s.u || s.left || !t.seats.some((q, i) => i !== seat && q.u && !q.left) || pinged.has(key + ':' + s.u)) { nudges.delete(key); return; }
+    const cur = nudges.get(key);
+    if (!cur || cur.uid !== s.u) nudges.set(key, { at: now() + nudgeMs, uid: s.u, gid: g.id, tid: t.id });
+  }
+  function forget(g, t) {
+    const key = g.id + ':' + t.id;
+    nudges.delete(key);
+    for (const s of t.seats) if (s.u) pinged.delete(key + ':' + s.u);
+  }
+  function nudgeDue(t0) {
+    for (const [key, n] of nudges) {
+      if (t0 < n.at) continue;
+      nudges.delete(key);
+      const g = store.groups.get(n.gid), u = store.users.get(n.uid);
+      if (!g || !u || !g.members[n.uid] || !absent(n.uid, g.id)) continue;
+      if (n.code) {
+        const m = ee ? ee.ofGroup(g.id).find(x => x.code === n.code) : null;
+        if (m && m.round === n.round && eeTurn(m, n.uid)) notify(u, { t: 'Ny runde i EagleEye Commander', b: '«' + m.name + '» · runde ' + m.round + ' · ' + g.name, tag: 'e' + m.code, u: './?g=' + g.id + '&e=' + m.code }, { topic: 'e' + m.code });
+        continue;
+      }
+      const t = g.tables[n.tid], seat = t && t.phase === 'play' ? GAMES[t.game].turn(t.state) : -1;
+      if (seat < 0 || t.seats[seat].u !== n.uid) continue;
+      pinged.add(key + ':' + n.uid);
+      const who = t.seats.filter((q, i) => i !== seat && q.u && !q.left).map(q => q.n);
+      notify(u, { t: 'Din tur i ' + GAMES[t.game].name, b: andList(who) + ' venter i ' + g.name + '.', tag: 't' + key, u: './?g=' + g.id + '&t=' + t.id }, { topic: 't' + key, urgent: !!GAMES[t.game].clock });
+    }
+  }
+
   // ---------- EagleEye Commander ----------
   // A match belongs to the group; its generals are accounts. The game runs on its own page (public/eagleeye) with
   // a login for that one general, which the lobby hands to the account when it opens the match.
@@ -467,6 +531,10 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   // A match was saved in a new state: tell the group, and pay out when it has ended.
   function eeChanged(m, game) {
     cast(m.gid, { t: 'ee', m: eeSum(m) });
+    if (push && game.phase === 'play' && eeRound.get(m.code) !== game.round) {            // a new round: the generals who are away hear of it
+      eeRound.set(m.code, game.round);
+      for (const uid of Object.keys(m.users)) nudges.set('e' + m.code + ':' + uid, { at: now() + nudgeMs, uid: +uid, gid: m.gid, code: m.code, round: game.round });
+    }
     if (game.phase !== 'over' || m.paid) return;
     ee.markPaid(m.code);
     if (game.round < ECON.ee.rounds) return;
@@ -529,7 +597,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       let bonus = 0;
       if (u.daily !== today()) { u.daily = today(); u.chips += ECON.daily; bonus = ECON.daily; }
       u.seen = now(); store.saveUsers();
-      conn.send(J({ t: 'welcome', me: mine(u), groups: groupList(u), bonus, now: now(), version }));
+      conn.send(J({ t: 'welcome', me: mine(u), groups: groupList(u), bonus, now: now(), version, push: push ? push.key : '' }));
     },
 
     enter(conn, m) {
@@ -784,6 +852,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (now() - conn.invAt < 3000) fail('Lige et øjeblik …');
       conn.invAt = now();
       guest.conn.send(J({ t: 'inv', id: t.id, from: u.id, game: t.game, stake: t.stake }));
+      if (guest.conn.away) notify(guest.u, { t: u.name + ' vil spille ' + GAMES[t.game].name, b: 'Sæt dig ved bordet i ' + g.name + (t.stake ? ' (indsats ' + t.stake + ' jetoner).' : '.'), tag: 'i' + g.id + ':' + t.id, u: './?g=' + g.id + '&t=' + t.id }, { ttl: 600, urgent: true });
     },
 
     tbot(conn, m) {
@@ -810,6 +879,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       const g = groupOf(conn), t = tableOf(g, m.id), seat = t.seats.findIndex(s => s.u === conn.user.id);
       if (seat < 0) fail('Du sidder ikke ved det bord.');
       if (t.phase !== 'play') fail('Spillet er ikke i gang.');
+      pinged.delete(g.id + ':' + t.id + ':' + conn.user.id);          // back at the table: the next turn may be told again
       if (m.a && m.a.resign) return giveUp(g, t, seat);
       play(g, t, seat, m.a);
     },
@@ -890,8 +960,41 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     ap(conn, m) { arena.msg(conn.user.id, m); },
     at(conn, m) { arena.msg(conn.user.id, m); },
 
-    topen(conn, m) { const p = need(conn), g = groupOf(conn), t = tableOf(g, m.id); if (p.open && p.open !== t.id) closeTable(g, p); openTable(g, p, t); },
+    topen(conn, m) { const p = need(conn), g = groupOf(conn), t = tableOf(g, m.id); if (p.open && p.open !== t.id) closeTable(g, p); pinged.delete(g.id + ':' + t.id + ':' + conn.user.id); openTable(g, p, t); },
     tclose(conn) { const p = presOf(conn); if (p) closeTable(groupOf(conn), p); },
+
+    // ---- notifications ----
+    // Whether the page is in front of somebody: a hidden tab, a window behind another, nobody touching it.
+    vis(conn, m) { conn.away = !m.on; },
+    // This browser wants the account's notifications. A browser belongs to one account at a time.
+    psub(conn, m) {
+      const u = conn.user, sub = m.sub && typeof m.sub === 'object' ? m.sub : {}, k = sub.keys && typeof sub.keys === 'object' ? sub.keys : {};
+      if (!push) fail('Beskeder er ikke slået til på denne server.');
+      if (typeof sub.endpoint !== 'string' || sub.endpoint.length > 700 || !push.allowed(sub.endpoint)) fail('Den browsers beskedtjeneste kender serveren ikke.');
+      if (!keyOk(k.p256dh, 65, 4) || !keyOk(k.auth, 16)) fail('Browserens nøgler til beskeder kan ikke læses.');
+      for (const o of store.users.values()) if (o.push && o.push.some(x => x.e === sub.endpoint)) o.push = o.push.filter(x => x.e !== sub.endpoint);
+      const origin = typeof m.origin === 'string' && m.origin.length <= 200 && /^https:\/\/[^\s\/]+$/.test(m.origin) ? m.origin : '';
+      (u.push = u.push || []).push({ e: sub.endpoint, p: k.p256dh, a: k.auth, o: origin, at: now() });
+      if (u.push.length > LIMITS.pushMax) u.push.splice(0, u.push.length - LIMITS.pushMax);
+      store.saveUsers();
+      conn.send(J({ t: 'psub', n: u.push.length }));
+    },
+    punsub(conn, m) {
+      const u = conn.user, n = (u.push || []).length;
+      u.push = (u.push || []).filter(x => x.e !== m.endpoint);
+      if (u.push.length !== n) store.saveUsers();
+      conn.send(J({ t: 'psub', n: u.push.length }));
+    },
+    // A message to one's own devices, to see that it arrives.
+    ptest(conn) {
+      const u = conn.user;
+      if (!push) fail('Beskeder er ikke slået til på denne server.');
+      if (!u.push || !u.push.length) fail('Ingen af dine enheder har beskeder slået til.');
+      if (now() - conn.testAt < 5000) fail('Lige et øjeblik …');
+      conn.testAt = now();
+      Promise.all(u.push.slice().map(sub => deliver(u, sub, { t: 'SLQ Game Lobby', b: 'Beskeder virker på denne enhed.', tag: 'test', u: './' }, { ttl: 120, urgent: true })))
+        .then(codes => conn.send(J({ t: 'ptest', ok: codes.filter(c => c >= 200 && c < 300).length, bad: codes.filter(c => !(c >= 200 && c < 300)) })), () => {});
+    },
   };
 
   // ---------- housekeeping ----------
@@ -916,6 +1019,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   // Once a second: the clocks of the games that have one.
   function tick() {
     const t0 = now();
+    nudgeDue(t0);
     for (const g of store.groups.values()) for (const t of Object.values(g.tables)) {
       if (t.phase !== 'play' || !t.wake || t0 < t.wake.at) continue;
       const w = t.wake;
@@ -924,7 +1028,9 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     }
   }
 
-  // After a restart: robots whose move it was carry on.
+  // After a restart: the rounds EagleEye's matches are in are known (so that only a new one is told), and robots
+  // whose move it was carry on.
+  if (ee && push) for (const g of store.groups.values()) for (const m of ee.ofGroup(g.id)) eeRound.set(m.code, m.round);
   for (const g of store.groups.values()) for (const t of Object.values(g.tables)) botSoon(g, t);
 
   return { api, connect, message, disconnect, tidy, tick, eeChanged, arChanged, arEnded, arLeft, online: () => conns.size, adminKey: () => sign('admin:' + today()) };

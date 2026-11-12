@@ -16,6 +16,7 @@ import { createHub, LobbyError } from './hub.js';
 import { upgrade } from './ws.js';
 import { createEagleEye, GameError as EagleEyeError } from './eagleeye.js';
 import { createArena } from './arena.js';
+import { createPush } from './push.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, '..', 'public');
@@ -30,7 +31,9 @@ const ee = createEagleEye({ dir: path.join(DATA, 'eagleeye'), secret: store.conf
 // the shooter's matches: the lobby hears when one changes, when a round ends and when somebody is out of one
 let arHooks = null;
 const arena = createArena({ changed: (...a) => arHooks.arChanged(...a), ended: r => arHooks.arEnded(r), left: (...a) => arHooks.arLeft(...a) });
-const hub = createHub({ store, ee, arena, version: VERSION });
+// notifications to browsers (PUSH=off runs without them)
+const push = process.env.PUSH === 'off' ? null : createPush({ config: store.config, save: store.saveConfig, contact: process.env.PUSH_CONTACT || '', hosts: String(process.env.PUSH_HOSTS || '').split(',') });
+const hub = createHub({ store, ee, arena, version: VERSION, push });
 eeChanged = hub.eeChanged; arHooks = hub;
 
 // ---------- HTTP ----------

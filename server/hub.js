@@ -7,6 +7,7 @@ import { ROOM, STATION, findPath, posAt, pathFrom, nearestFree } from '../public
 import { GAMES, GameError } from '../public/shared/games/index.js';
 import { hashText } from '../public/shared/util.js';
 import { randomCode } from './store.js';
+import { GameError as EagleEyeError } from './eagleeye.js';
 
 export class LobbyError extends Error {}
 const fail = msg => { throw new LobbyError(msg); };
@@ -16,7 +17,8 @@ const norm = c => String(c ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const pick = (list, k) => typeof k === 'string' && Object.hasOwn(list, k) ? list[k] : null;
 const HOUR = 3600e3;
 
-export function createHub({ store, version = '', now = () => Date.now(), botDelay = [700, 1500], rand = Math.random }) {
+// ee: the EagleEye Commander matches (server/eagleeye.js), or null to run without that game.
+export function createHub({ store, ee = null, version = '', now = () => Date.now(), botDelay = [700, 1500], rand = Math.random }) {
   const conns = new Map();        // user id -> the connection that user is on (one at a time)
   const rooms = new Map();        // group id -> Map(user id -> presence): who is in that clubhouse right now
   const invites = new Map();      // invite code -> group id
@@ -55,7 +57,7 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
   const isAdmin = (g, uid) => roleOf(g, uid) === 'owner' || roleOf(g, uid) === 'admin';
   const groupList = u => groupsOf(u.id).map(g => ({
     id: g.id, name: g.name, role: roleOf(g, u.id), n: Object.keys(g.members).length, on: rooms.has(g.id) ? rooms.get(g.id).size : 0,
-    turn: Object.values(g.tables).filter(t => myTurn(t, u.id)).length,
+    turn: Object.values(g.tables).filter(t => myTurn(t, u.id)).length + (ee ? ee.ofGroup(g.id).filter(m => eeTurn(m, u.id)).length : 0),
   }));
 
   const api = {
@@ -162,7 +164,7 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
     const u = store.users.get(uid), p = rooms.has(g.id) ? rooms.get(g.id).get(uid) : null;
     const out = { id: uid, name: u.name, role: roleOf(g, uid), look: u.look, chips: u.chips, dnd: !!u.dnd, seen: u.seen, stats: u.stats, on: !!p };
     if (p) {
-      out.p = pathFrom(p.path, (now() - p.t0) / 1000 * ROOM.speed); out.sit = p.sit; out.open = p.open;
+      out.p = pathFrom(p.path, (now() - p.t0) / 1000 * ROOM.speed); out.sit = p.sit; out.open = p.open; out.busy = p.busy;
       out.fx = Object.entries(p.fx).filter(e => e[1] > now()).map(e => [e[0], e[1] - now()]);
       out.drink = p.drink && p.drink[1] > now() ? [p.drink[0], p.drink[1] - now()] : null; out.buzz = buzzOf(uid);
     }
@@ -206,6 +208,23 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
     if (want >= 0 && want < st.seats.length && !taken.has(want)) return want;
     for (let i = 0; i < st.seats.length; i++) if (!taken.has(i)) return i;
     return -1;
+  }
+
+  // Busy with something that is played on a page of its own (EagleEye Commander, the shooter): the avatar goes to
+  // that piece of furniture and stays there until the player comes back.
+  function occupy(g, p, stationId, what) {
+    if (p.open) closeTable(g, p);
+    if (p.busy === what) return;
+    p.busy = what;
+    const st = STATION[stationId], seat = st.seats ? freeSeat(g.id, st, p.u.id) : -1;
+    if (seat >= 0) walk(g.id, p, st.seats[seat], [st.id, seat]);
+    else walk(g.id, p, [st.use[0] + (rand() - 0.5) * 2, st.use[1] + rand() * 0.7]);
+    cast(g.id, { t: 'mem', m: { id: p.u.id, busy: what } });
+  }
+  function release(g, p) {
+    if (!p.busy) return;
+    p.busy = ''; standUp(g.id, p);
+    cast(g.id, { t: 'mem', m: { id: p.u.id, busy: '' } });
   }
 
   // Tells a player what changed about them, and the room how many chips they have now.
@@ -254,6 +273,7 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
 
   function deleteGroup(g) {
     for (const t of Object.values(g.tables)) refund(t);
+    if (ee) ee.dropGroup(g.id);
     const room = rooms.get(g.id), people = Object.keys(g.members).map(Number);
     if (room) for (const p of room.values()) { p.conn.gid = null; p.conn.send(J({ t: 'out', g: g.id })); }
     rooms.delete(g.id); invites.delete(g.invite); store.dropGroup(g.id);
@@ -377,6 +397,7 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
 
   // Opening a table puts one's avatar on a seat at that piece of furniture.
   function openTable(g, p, t) {
+    if (p.busy) release(g, p);
     if (p.open !== t.id) {
       p.open = t.id;
       const st = STATION[GAMES[t.game].station], seat = freeSeat(g.id, st, p.u.id, t.seats.findIndex(s => s.u === p.u.id));
@@ -390,6 +411,40 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
     if (!p.open) return;
     p.open = 0; standUp(g.id, p);
     cast(g.id, { t: 'mem', m: { id: p.u.id, open: 0 } });
+  }
+
+  // ---------- EagleEye Commander ----------
+  // A match belongs to the group; its generals are accounts. The game runs on its own page (public/eagleeye) with
+  // a login for that one general, which the lobby hands to the account when it opens the match.
+  const eeUser = (m, pid) => { for (const uid of Object.keys(m.users)) if (m.users[uid] === pid) return +uid; return 0; };
+  const eeTurn = (m, uid) => m.phase === 'play' && m.players.some(p => p.id === m.users[uid] && p.alive && !p.ready);
+  const eeSum = m => ({ code: m.code, name: m.name, phase: m.phase, round: m.round, deadline: m.deadline, at: m.created, host: eeUser(m, m.host), winner: m.winner,
+    players: m.players.map(p => ({ u: eeUser(m, p.id), n: p.name, ai: p.kind === 'ai', alive: p.alive, ready: p.ready })) });
+  const eeTry = f => { try { return f(); } catch (e) { if (e instanceof EagleEyeError) fail(e.message); throw e; } };
+  const eeNeed = () => ee || fail('EagleEye Commander er ikke med på denne server.');
+  function eeOpen(conn, p, g, code) {
+    const token = eeNeed().token(g.id, code, conn.user.id);
+    if (!token) fail('Du er ikke med i den kamp.');
+    occupy(g, p, 'command', 'ee');
+    conn.send(J({ t: 'eopen', code, token }));
+  }
+  // A match was saved in a new state: tell the group, and pay out when it has ended.
+  function eeChanged(m, game) {
+    cast(m.gid, { t: 'ee', m: eeSum(m) });
+    if (game.phase !== 'over' || m.paid) return;
+    ee.markPaid(m.code);
+    if (game.round < ECON.ee.rounds) return;
+    const humans = game.players.filter(p => p.kind === 'human').length, names = new Set(game.winner ? game.winner.names : []);
+    for (const uid of Object.keys(m.users)) {
+      const u = store.users.get(+uid), p = game.players.find(q => q.id === m.users[uid]);
+      if (!u || !p) continue;
+      const won = names.has(p.name), st = u.stats.ee || (u.stats.ee = { p: 0, w: 0 });
+      st.p++; if (won) st.w++;
+      u.chips += humans > 1 ? (won ? ECON.ee.win : ECON.ee.play) : won ? ECON.ee.botWin : 0;
+      pushMe(u);
+    }
+    const g = store.groups.get(m.gid);
+    if (g && humans > 1 && names.size) addChat(g, null, [...names].join(' og ') + ' vandt «' + game.name + '» i EagleEye Commander.');
   }
 
   // ---------- messages from the browser ----------
@@ -413,13 +468,13 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
       leaveRoom(conn);
       if (!rooms.has(g.id)) rooms.set(g.id, new Map());
       const spot = nearestFree(ROOM.spawn[0] + (rand() - 0.5) * 2, ROOM.spawn[1] + rand() * 0.9);
-      rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, fx: {}, drink: null });
+      rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, busy: '', fx: {}, drink: null });
       conn.gid = g.id;
       cast(g.id, { t: 'on', m: member(g, u.id) }, u.id);
       conn.send(J({
         t: 'room', g: { id: g.id, name: g.name, owner: g.owner, invite: isAdmin(g, u.id) ? g.invite : '' },
         mem: Object.keys(g.members).map(id => member(g, +id)), chat: g.chat.slice(-LIMITS.chatSend),
-        tables: Object.values(g.tables).map(tableSum), now: now(),
+        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], now: now(),
       }));
     },
 
@@ -427,13 +482,13 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
 
     move(conn, m) {
       const p = presOf(conn), x = +m.x, y = +m.y;
-      if (!p || p.open || !Number.isFinite(x) || !Number.isFinite(y)) return;      // at a game one sits still
+      if (!p || p.open || p.busy || !Number.isFinite(x) || !Number.isFinite(y)) return;      // at a game one sits still
       walk(conn.gid, p, [x, y]);
     },
 
     sit(conn, m) {
       const p = presOf(conn), st = pick(STATION, m.st);
-      if (!p || p.open || !st || (st.kind !== 'sit' && st.kind !== 'bar')) return;
+      if (!p || p.open || p.busy || !st || (st.kind !== 'sit' && st.kind !== 'bar')) return;
       if (p.sit && p.sit[0] === st.id) return;
       const seat = freeSeat(conn.gid, st, conn.user.id);
       if (seat >= 0) return walk(conn.gid, p, st.seats[seat], [st.id, seat]);
@@ -720,6 +775,30 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
       if (seat >= 0) leaveSeat(g, t, seat);
     },
 
+    // ----- EagleEye Commander -----
+    enew(conn, m) {
+      const p = need(conn), g = groupOf(conn), u = conn.user;
+      if (eeNeed().ofGroup(g.id).filter(x => x.phase !== 'over').length >= 8) fail('Der er mange kampe i gang. Gør en færdig, eller fjern en, først.');
+      eeOpen(conn, p, g, eeTry(() => ee.create(g.id, u.id, u.name, m.name)));
+    },
+    ejoin(conn, m) {
+      const p = need(conn), g = groupOf(conn), u = conn.user;
+      eeOpen(conn, p, g, eeTry(() => eeNeed().join(g.id, String(m.code ?? ''), u.id, u.name)));
+    },
+    eopen(conn, m) { const p = need(conn); eeOpen(conn, p, groupOf(conn), String(m.code ?? '')); },
+    eclose(conn) { const p = presOf(conn); if (p && p.busy === 'ee') release(groupOf(conn), p); },
+    // Out of a match that has not started yet.
+    eleave(conn, m) { need(conn); eeTry(() => eeNeed().leave(conn.gid, String(m.code ?? ''), conn.user.id)); if (!ee.get(String(m.code ?? ''))) cast(conn.gid, { t: 'eex', code: String(m.code ?? '') }); },
+    // Removes a match: its host before the start or after the end, a group admin at any time.
+    edrop(conn, m) {
+      need(conn);
+      const g = groupOf(conn), x = eeNeed().get(String(m.code ?? ''));
+      if (!x || x.gid !== g.id) fail('Kampen findes ikke længere.');
+      if (!isAdmin(g, conn.user.id) && !(eeUser(x, x.host) === conn.user.id && x.phase !== 'play')) fail('Det kan kun værten (før start eller efter slut) eller en admin.');
+      ee.drop(g.id, x.code);
+      cast(g.id, { t: 'eex', code: x.code });
+    },
+
     topen(conn, m) { const p = need(conn), g = groupOf(conn), t = tableOf(g, m.id); if (p.open && p.open !== t.id) closeTable(g, p); openTable(g, p, t); },
     tclose(conn) { const p = presOf(conn); if (p) closeTable(groupOf(conn), p); },
   };
@@ -746,5 +825,5 @@ export function createHub({ store, version = '', now = () => Date.now(), botDela
   // After a restart: robots whose move it was carry on.
   for (const g of store.groups.values()) for (const t of Object.values(g.tables)) botSoon(g, t);
 
-  return { api, connect, message, disconnect, tidy, online: () => conns.size, adminKey: () => sign('admin:' + today()) };
+  return { api, connect, message, disconnect, tidy, eeChanged, online: () => conns.size, adminKey: () => sign('admin:' + today()) };
 }

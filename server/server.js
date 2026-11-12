@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from './store.js';
 import { createHub, LobbyError } from './hub.js';
 import { upgrade } from './ws.js';
+import { createEagleEye, GameError as EagleEyeError } from './eagleeye.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, '..', 'public');
@@ -22,7 +23,11 @@ const PORT = +process.env.PORT || 8080, HOST = process.env.HOST || undefined;
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, '..', 'package.json'), 'utf8')).version;
 
 const store = createStore(DATA);
-const hub = createHub({ store, version: VERSION });
+// EagleEye Commander keeps its matches in a folder of its own and tells the lobby when one changes.
+let eeChanged = () => {};
+const ee = createEagleEye({ dir: path.join(DATA, 'eagleeye'), secret: store.config.secret, changed: (m, g) => eeChanged(m, g) });
+const hub = createHub({ store, ee, version: VERSION });
+eeChanged = hub.eeChanged;
 
 // ---------- HTTP ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml',
@@ -44,10 +49,13 @@ function serveStatic(req, res) {
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain' }).end('404'); return; }
     const ext = path.extname(file), tag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
-    const head = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.woff2' ? 'public, max-age=2592000' : 'no-cache', ETag: tag, Vary: 'Accept-Encoding',
+    const head = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.woff2' || ext === '.mp3' ? 'public, max-age=2592000' : 'no-cache', ETag: tag, Vary: 'Accept-Encoding',
       'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };     // no-referrer: an invitation code in the address stays here
-    // the pages only load their own files and talk to their own server
-    if (ext === '.html') head['Content-Security-Policy'] = "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+    // The pages only load their own files and talk to their own server. The lobby may not be put in a frame; the
+    // game pages under it (EagleEye Commander) only in the lobby's own, and they write styles into their markup.
+    if (ext === '.html') head['Content-Security-Policy'] = file.startsWith(path.join(PUBLIC, 'eagleeye') + path.sep)
+      ? "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; frame-ancestors 'self'; base-uri 'none'; form-action 'self'"
+      : "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
     if (req.headers['if-none-match'] === tag) { res.writeHead(304, head).end(); return; }
     let c = packed.get(file);
     if (!c || c.tag !== tag) {
@@ -95,20 +103,20 @@ const server = http.createServer((req, res) => {
   try { handle(req, res); } catch (e) { console.error(e); try { res.writeHead(500).end(); } catch {} }
 });
 function handle(req, res) {
-  const m = /^\/api\/(\w+)$/.exec(pathOf(req));
+  const m = /^(\/eagleeye)?\/api\/(\w+)$/.exec(pathOf(req));
   if (!m) return serveStatic(req, res);
-  const op = Object.hasOwn(hub.api, m[1]) ? hub.api[m[1]] : null, ip = clientIp(req);
+  const calls = m[1] ? ee.api : hub.api, op = Object.hasOwn(calls, m[2]) ? calls[m[2]] : null, ip = clientIp(req);
   const send = (code, obj) => res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(obj));
   if (!op) return send(404, { error: 'Ukendt kald.' });
   let body = '';
-  req.on('data', c => { body += c; if (body.length > 20000) req.destroy(); });
+  req.on('data', c => { body += c; if (body.length > (m[1] ? 300000 : 20000)) req.destroy(); });
   req.on('end', () => {
     let b;
     try { b = body ? JSON.parse(body) : {}; } catch { return send(400, { error: 'Ugyldigt kald.' }); }
     if (!b || typeof b !== 'object') return send(400, { error: 'Ugyldigt kald.' });
     try { send(200, op(b, ip)); }
     catch (e) {
-      if (e instanceof LobbyError) send(400, { error: e.message });
+      if (e instanceof LobbyError || e instanceof EagleEyeError) send(400, { error: e.message });
       else { console.error(e); send(500, { error: 'Serverfejl.' }); }
     }
   });
@@ -145,7 +153,7 @@ setInterval(() => {
     if (t - p.alive > 70000 || (!p.conn.user && t - p.since > 20000)) p.socket.destroy(); else p.ping();
   }
 }, 25000).unref();
-setInterval(() => { try { hub.tidy(); } catch (e) { console.error(e); } }, 60000).unref();
+setInterval(() => { try { hub.tidy(); ee.tick(); } catch (e) { console.error(e); } }, 60000).unref();
 
 // What has changed is written within a couple of seconds; on the way out, at once.
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { try { store.flush(); } finally { process.exit(0); } });

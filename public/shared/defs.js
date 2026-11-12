@@ -9,6 +9,8 @@ export const ECON = {
   botWin: 5,             // reward for beating the house robot
   stakes: [0, 10, 25, 50, 100],
   claimHours: 48,        // a player who has waited this long for the other one's move may claim the game
+  // EagleEye Commander: for a match that lasted at least `rounds` rounds
+  ee: { win: 150, play: 40, botWin: 30, rounds: 3 },
 };
 
 export const LIMITS = {

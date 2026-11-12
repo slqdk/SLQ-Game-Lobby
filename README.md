@@ -2,7 +2,7 @@
 
 A clubhouse for a group of friends. Each group gets a drawn room where everybody's avatar hangs out: you walk around, chat, tease each other, sit at the bar, and sit down at a table to play. The room shows who is in and who plays what.
 
-In this first version:
+What is in it:
 
 - **Groups** with an owner, admins and an invitation link. An account is a name and a password.
 - **The clubhouse**: a 2D room seen from the front and a little from above. Click or tap the floor to walk, the furniture to use it, another avatar to tease or challenge. Works with a mouse and on a phone.
@@ -11,7 +11,8 @@ In this first version:
 - **Teasing**: snowball, tomato, water balloon, cream pie, banana peel, tickle feather, whoopee cushion, rain cloud, turning somebody into a hen; and the friendly ones, confetti and a hug. Only looks, and it wears off. "Forstyr ikke" switches it off both ways.
 - **The bar**: sit on a stool and buy for yourself, for a friend, or a round for everybody. The glass stays in the avatar's hand, and a few too many show.
 - **4 på stribe** against a friend (live, or one move now and the next tomorrow), with or without a stake, or against the house robot in three strengths.
-- The furniture for what comes next already stands in the room: Ludo, Yatzy, Meyer, poker, the shooter and EagleEye Commander.
+- **EagleEye Commander** at the command table: the round-based strategy game, with the group's matches listed in the clubhouse and no codes or PINs (the lobby account is the general).
+- The furniture for what comes next already stands in the room: Ludo, Yatzy, Meyer, poker and the shooter.
 
 No dependencies: Node 20 or newer and a browser. The user interface is in Danish.
 
@@ -111,6 +112,7 @@ Everything is JSON in the data folder (`/var/lib/slq-game-lobby` when installed)
 - `config.json`: the key that signs logins, and the installation code
 - `users.json`: accounts (names, salted password hashes, chips, looks, counters)
 - `groups/<id>.json`: one file per group with members, the last 200 chat lines and the tables
+- `eagleeye/<code>.json`: one file per EagleEye Commander match
 
 Back up by copying the folder, or the whole container. None of it belongs in git (`.gitignore` keeps `data/` out). Deleting `config.json` logs everybody out and makes a new installation code.
 
@@ -125,6 +127,7 @@ server/server.js      HTTP: pages, /api/health, register, login, invite. WebSock
 server/ws.js          the WebSocket protocol (RFC 6455), written out: no packages needed
 server/hub.js         the lobby itself: accounts, groups, the room, chat, chips, teasing, bar, tables
 server/store.js       JSON files, written a moment after something changes and on shutdown
+server/eagleeye.js    EagleEye Commander's matches: the game's own rules, with lobby accounts as generals
 public/shared/        rules both sides use: defs.js (prices, looks, limits), room.js (the room, where
                       one can walk, path finding), games/ (one module per game: rules and robot)
 public/js/main.js     screens, menus, and what each message from the server means
@@ -132,11 +135,12 @@ public/js/room.js     the room on screen: who is where, walking, bubbles, things
 public/js/roomart.js  how the room and the furniture look
 public/js/avatar.js   how avatars, hats, glasses of beer and thrown tomatoes look
 public/js/games/      one module per game for the screen
+public/eagleeye/      EagleEye Commander 2.5.0 (its page, rules, graphics, voices), opened in a frame
 deploy/               installer, service file, Proxmox helper
 tools/selftest.mjs    the self test
 tools/admin.mjs       what lobby-password runs: list accounts, give somebody a new password
 ```
 
-All graphics are drawn by code; there are no picture files. Sounds are made with WebAudio. The font is Fredoka (SIL Open Font License, see `public/fonts/Fredoka-OFL.txt`).
+All graphics are drawn by code; there are no picture files. Sounds are made with WebAudio, except the recorded radio voices of EagleEye Commander (`public/eagleeye/audio/voices.mp3`). The fonts are Fredoka, and Lilita One and Barlow Semi Condensed in EagleEye Commander (all SIL Open Font License, see the `fonts` folders); they are served from here, so no page asks another server for anything.
 
 `HANDOFF.md` has the decisions, the message protocol, how to add a game, and what is not built yet.

@@ -8,6 +8,8 @@ import { GAMES, GameError } from '../public/shared/games/index.js';
 import { hashText } from '../public/shared/util.js';
 import { randomCode } from './store.js';
 import { GameError as EagleEyeError } from './eagleeye.js';
+import { ArenaError, FAST } from './arena.js';
+import { MODES, TEAMS } from '../public/shooter/rules.js';
 
 export class LobbyError extends Error {}
 const fail = msg => { throw new LobbyError(msg); };
@@ -18,7 +20,8 @@ const pick = (list, k) => typeof k === 'string' && Object.hasOwn(list, k) ? list
 const HOUR = 3600e3;
 
 // ee: the EagleEye Commander matches (server/eagleeye.js), or null to run without that game.
-export function createHub({ store, ee = null, version = '', now = () => Date.now(), botDelay = [700, 1500], rand = Math.random }) {
+// arena: the shooter's matches (server/arena.js), or null to run without it.
+export function createHub({ store, ee = null, arena = null, version = '', now = () => Date.now(), botDelay = [700, 1500], rand = Math.random }) {
   const conns = new Map();        // user id -> the connection that user is on (one at a time)
   const rooms = new Map();        // group id -> Map(user id -> presence): who is in that clubhouse right now
   const invites = new Map();      // invite code -> group id
@@ -121,13 +124,19 @@ export function createHub({ store, ee = null, version = '', now = () => Date.now
 
   // ---------- connections ----------
   function connect(send, close, ip = '') {
-    return { send, close, ip, user: null, gid: null, budget: 60, budgetAt: now(), said: [], emoAt: 0, prankAt: 0, drinkAt: 0, invAt: 0, badCodes: 0 };
+    return { send, close, ip, user: null, gid: null, budget: 60, budgetAt: now(), fast: 150, fastAt: now(), said: [], emoAt: 0, prankAt: 0, drinkAt: 0, invAt: 0, badCodes: 0 };
   }
 
   function message(conn, text) {
     const t = now();
-    conn.budget = Math.min(60, conn.budget + (t - conn.budgetAt) / 1000 * 25); conn.budgetAt = t;
-    if (--conn.budget < 0) { if (conn.budget < -200) conn.close(); return; }       // talking too fast: not heard
+    if (text.length < 300 && text.charCodeAt(6) === 97 && FAST.has(text.slice(6, 8))) {
+      // where one is and what one shoots in the shooter comes many times a second: a budget of its own
+      conn.fast = Math.min(150, conn.fast + (t - conn.fastAt) / 1000 * 90); conn.fastAt = t;
+      if (--conn.fast < 0) { if (conn.fast < -1000) conn.close(); return; }
+    } else {
+      conn.budget = Math.min(60, conn.budget + (t - conn.budgetAt) / 1000 * 25); conn.budgetAt = t;
+      if (--conn.budget < 0) { if (conn.budget < -200) conn.close(); return; }       // talking too fast: not heard
+    }
     let m;
     try { m = JSON.parse(text); } catch { return; }
     if (!m || typeof m !== 'object' || typeof m.t !== 'string') return;
@@ -184,6 +193,7 @@ export function createHub({ store, ee = null, version = '', now = () => Date.now
     const gid = conn.gid, room = rooms.get(gid);
     conn.gid = null;
     if (!room || !conn.user || !room.has(conn.user.id) || room.get(conn.user.id).conn !== conn) return;
+    if (arena) arena.leave(conn.user.id);
     room.delete(conn.user.id);
     conn.user.seen = now();
     cast(gid, { t: 'off', u: conn.user.id, seen: now() });
@@ -223,7 +233,9 @@ export function createHub({ store, ee = null, version = '', now = () => Date.now
   }
   function release(g, p) {
     if (!p.busy) return;
+    const was = p.busy;
     p.busy = ''; standUp(g.id, p);
+    if (was === 'shooter' && arena) arena.leave(p.u.id);
     cast(g.id, { t: 'mem', m: { id: p.u.id, busy: '' } });
   }
 
@@ -274,6 +286,7 @@ export function createHub({ store, ee = null, version = '', now = () => Date.now
   function deleteGroup(g) {
     for (const t of Object.values(g.tables)) refund(t);
     if (ee) ee.dropGroup(g.id);
+    if (arena) arena.dropGroup(g.id);
     const room = rooms.get(g.id), people = Object.keys(g.members).map(Number);
     if (room) for (const p of room.values()) { p.conn.gid = null; p.conn.send(J({ t: 'out', g: g.id })); }
     rooms.delete(g.id); invites.delete(g.invite); store.dropGroup(g.id);
@@ -447,6 +460,40 @@ export function createHub({ store, ee = null, version = '', now = () => Date.now
     if (g && humans > 1 && names.size) addChat(g, null, [...names].join(' og ') + ' vandt «' + game.name + '» i EagleEye Commander.');
   }
 
+  // ---------- the shooter ----------
+  // A match is played in the arcade corner; it lives in arena.js for as long as somebody plays. The lobby says
+  // who is in it, shows it to the group, and pays out when a round is over.
+  const arNeed = () => arena || fail('Skydespillet er ikke med på denne server.');
+  const arTry = f => { try { return f(); } catch (e) { if (e instanceof ArenaError) fail(e.message); throw e; } };
+  function arChanged(gid, sum, id) { cast(gid, sum ? { t: 'ar', m: sum } : { t: 'arx', id }); }
+  function arLeft(uid, gid) {
+    const room = rooms.get(gid), p = room && room.get(uid);
+    if (p && p.busy === 'shooter') release(store.groups.get(gid), p);
+  }
+  // A round is over: chips and the tally for the people who really played it, and a line in the chat when people
+  // stood against each other. Returns what was paid ({ user id: chips }), for the scoreboard in the game.
+  function arEnded(r) {
+    const paid = {}, E = ECON.shooter;
+    if (r.secs < E.minSec) return paid;
+    for (const row of r.rows) {
+      const u = row.uid ? store.users.get(row.uid) : null;
+      if (!u || row.played < E.minPlayed) continue;
+      const c = r.opposed ? (row.won ? E.win : E.play) : row.won ? E.botWin : E.botPlay;
+      const st = u.stats.sh || (u.stats.sh = { p: 0, w: 0, k: 0 });
+      st.p++; st.k += row.kills; if (row.won) st.w++;
+      u.chips += c; paid[u.id] = c;
+      pushMe(u);
+    }
+    const g = store.groups.get(r.gid);
+    if (g && r.opposed) {
+      const name = MODES[r.mode].name, sc = r.mode === 'stars' ? r.stars : r.kills;
+      if (r.winner === null) addChat(g, null, name + ' i skydespillet endte uafgjort.');
+      else if (r.teams) addChat(g, null, TEAMS[r.winner].name + ' hold vandt ' + name + ' i skydespillet, ' + Math.max(sc[0], sc[1]) + '–' + Math.min(sc[0], sc[1]) + '.');
+      else { const w = r.rows.find(x => x.won); if (w) addChat(g, null, w.name + ' vandt ' + name + ' i skydespillet med ' + w.kills + ' drab.'); }
+    }
+    return paid;
+  }
+
   // ---------- messages from the browser ----------
   const on = {
     hello(conn, m) {
@@ -474,7 +521,7 @@ export function createHub({ store, ee = null, version = '', now = () => Date.now
       conn.send(J({
         t: 'room', g: { id: g.id, name: g.name, owner: g.owner, invite: isAdmin(g, u.id) ? g.invite : '' },
         mem: Object.keys(g.members).map(id => member(g, +id)), chat: g.chat.slice(-LIMITS.chatSend),
-        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], now: now(),
+        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], now: now(),
       }));
     },
 
@@ -799,6 +846,25 @@ export function createHub({ store, ee = null, version = '', now = () => Date.now
       cast(g.id, { t: 'eex', code: x.code });
     },
 
+    // ----- the shooter -----
+    anew(conn, m) {
+      const p = need(conn), g = groupOf(conn), u = conn.user;
+      arTry(() => arNeed().create(g.id, u, s => conn.send(s), { mode: m.mode, fill: m.fill, level: m.level }));
+      occupy(g, p, 'arcade', 'shooter');
+    },
+    ajoin(conn, m) {
+      const p = need(conn), g = groupOf(conn), u = conn.user;
+      arTry(() => arNeed().join(g.id, m.id, u, s => conn.send(s)));
+      occupy(g, p, 'arcade', 'shooter');
+    },
+    aleave(conn) { if (arena) arena.leave(conn.user.id); },
+    as(conn, m) { arena.msg(conn.user.id, m); },
+    af(conn, m) { arena.msg(conn.user.id, m); },
+    ah(conn, m) { arena.msg(conn.user.id, m); },
+    ae(conn, m) { arena.msg(conn.user.id, m); },
+    ap(conn, m) { arena.msg(conn.user.id, m); },
+    at(conn, m) { arena.msg(conn.user.id, m); },
+
     topen(conn, m) { const p = need(conn), g = groupOf(conn), t = tableOf(g, m.id); if (p.open && p.open !== t.id) closeTable(g, p); openTable(g, p, t); },
     tclose(conn) { const p = presOf(conn); if (p) closeTable(groupOf(conn), p); },
   };
@@ -825,5 +891,5 @@ export function createHub({ store, ee = null, version = '', now = () => Date.now
   // After a restart: robots whose move it was carry on.
   for (const g of store.groups.values()) for (const t of Object.values(g.tables)) botSoon(g, t);
 
-  return { api, connect, message, disconnect, tidy, eeChanged, online: () => conns.size, adminKey: () => sign('admin:' + today()) };
+  return { api, connect, message, disconnect, tidy, eeChanged, arChanged, arEnded, arLeft, online: () => conns.size, adminKey: () => sign('admin:' + today()) };
 }

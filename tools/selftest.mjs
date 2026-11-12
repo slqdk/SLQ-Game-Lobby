@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from '../server/store.js';
 import { createPush, encrypt as pushEncrypt } from '../server/push.js';
 import { MACHINES, settle, returnOf, windowOf, LINES } from '../public/shared/slots.js';
+import * as BJ from '../public/shared/blackjack.js';
 import { createHub } from '../server/hub.js';
 import { createEagleEye } from '../server/eagleeye.js';
 import { createArena } from '../server/arena.js';
@@ -1096,6 +1097,143 @@ section('kasinoet: slotmaskinerne');
   const again = B.last('room');
   check('den, der kommer ind i klubhuset, ser puljen og dagens tal', again.pot === Math.floor(g.jack) && again.mem.find(x => x.id === idA).today[0] > staked && again.mem.find(x => x.id === idA).stats.slots.n > 400);
   uA.chips = chips0; A.send({ t: 'dnd', on: false });
+}
+
+section('kasinoet: blackjack');
+{
+  const R = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'], c = (name, suit = 0) => R.indexOf(name) + 13 * suit;
+  // a shoe that gives the cards we name, in that order (two to each stake in seat order, then the dealer's open and hidden card)
+  const rig = (t, ...names) => { t.shoe = [...Array.from({ length: 120 }, (_, i) => i % 52), ...names.map((n, i) => c(n, i % 4)).reverse()]; };
+  const table = (...bets) => { const t = BJ.newTable(); bets.forEach((b, i) => { BJ.sit(t, i, 100 + i, 'P' + i); BJ.bet(t, i, b); }); return t; };
+  const no = f => { try { f(); return false; } catch (e) { return e instanceof BJ.BlackjackError; } };
+  check('et es tæller elleve, til det bliver for meget', BJ.total([c('A'), c('K')]).t === 21 && BJ.total([c('A'), c('6')]).soft && BJ.total([c('A'), c('6'), c('10')]).t === 17 && !BJ.total([c('A'), c('6'), c('10')]).soft && BJ.total([c('A'), c('A'), c('9')]).t === 21);
+  let t = table(20); rig(t, 'A', 'K', '9', '7'); BJ.deal(t, rnd);
+  check('blackjack betaler 3 til 2, og dealeren trækker ikke mod den', t.phase === 'show' && t.seats[0].hands[0].res === 'bj' && t.seats[0].back === 50 && t.seats[0].net === 30 && t.dealer.length === 2);
+  t = table(20, 20); rig(t, '10', '9', 'A', 'J', 'A', 'K'); BJ.deal(t, rnd);
+  check('har dealeren blackjack, er runden slut med det samme: 19 taber, blackjack står lige', t.phase === 'show' && t.seats[0].hands[0].res === 'lose' && t.seats[0].back === 0 && t.seats[1].hands[0].res === 'push' && t.seats[1].back === 20);
+  t = table(20); rig(t, '10', '6', '10', '7', '6'); BJ.deal(t, rnd);
+  check('med to forskellige kort kan man trække, stå eller doble', t.phase === 'play' && t.turn === 0 && BJ.options(t, 0).join() === 'hit,stand,double' && no(() => BJ.act(t, 0, 'split', rnd)) && no(() => BJ.act(t, 1, 'hit', rnd)));
+  check('dealerens andet kort og bunken er skjult for alle', BJ.view(t).dealer.join() === c('10', 2) + ',-1' && BJ.view(t).shoe === t.shoe.length && t.hidden);
+  BJ.act(t, 0, 'hit', rnd);
+  check('over 21 er tabt, og dealeren trækker ikke, når ingen er tilbage', t.phase === 'show' && t.seats[0].hands[0].res === 'bust' && t.seats[0].back === 0 && t.dealer.length === 2 && !t.hidden);
+  t = table(20); rig(t, '10', '8', 'A', '6'); BJ.deal(t, rnd); BJ.act(t, 0, 'stand', rnd);
+  check('dealeren står på 17, også med et es', t.dealer.length === 2 && t.seats[0].hands[0].res === 'win' && t.seats[0].back === 40);
+  t = table(20); rig(t, '10', '8', '10', '6', '5'); BJ.deal(t, rnd); BJ.act(t, 0, 'stand', rnd);
+  check('og trækker til 17 ellers', t.dealer.length === 3 && BJ.total(t.dealer).t === 21 && t.seats[0].hands[0].res === 'lose');
+  t = table(20); rig(t, '5', '6', '6', '10', '10', 'K'); BJ.deal(t, rnd);
+  check('at doble koster indsatsen en gang til', BJ.cost(t, 0, 'double') === 20 && BJ.cost(t, 0, 'hit') === 0);
+  BJ.act(t, 0, 'double', rnd);
+  check('og giver ét kort mere til dobbelt indsats', t.seats[0].hands[0].cards.length === 3 && t.seats[0].hands[0].bet === 40 && t.seats[0].hands[0].res === 'win' && t.seats[0].back === 80 && t.seats[0].net === 40);
+  t = table(20); rig(t, '8', '8', '6', '10', '3', '10', 'K', '10'); BJ.deal(t, rnd);
+  check('et par kan splittes', BJ.options(t, 0).includes('split') && BJ.cost(t, 0, 'split') === 20);
+  BJ.act(t, 0, 'split', rnd);
+  check('til to hænder med hver sin indsats, som spilles efter tur', t.seats[0].hands.length === 2 && t.seats[0].hands[0].cards.join() === [c('8', 0), c('3', 0)].join() && t.seats[0].cur === 0 && !BJ.options(t, 0).includes('split') && BJ.options(t, 0).includes('double'));
+  BJ.act(t, 0, 'hit', rnd);
+  check('når den første er færdig, er det den anden hånds tur', t.phase === 'play' && t.seats[0].cur === 1 && BJ.total(t.seats[0].hands[0].cards).t === 21);
+  BJ.act(t, 0, 'stand', rnd);
+  check('21 efter et split er ikke blackjack: det betaler 1 til 1', t.phase === 'show' && t.seats[0].hands[0].res === 'win' && t.seats[0].hands[0].pay === 40 && t.seats[0].staked === 40);
+  t = table(20); rig(t, 'A', 'A', '6', '10', 'K', '5'); BJ.deal(t, rnd); BJ.act(t, 0, 'split', rnd);
+  check('splittede esser får ét kort hver, og så er det dealerens tur', t.phase === 'show' && t.seats[0].hands.every(h => h.cards.length === 2) && t.seats[0].hands[0].res !== 'bj');
+  t = table(20); rig(t, '10', '8', '10', '8'); BJ.deal(t, rnd); BJ.act(t, 0, 'stand', rnd);
+  check('lige meget på begge sider: indsatsen kommer tilbage', t.seats[0].hands[0].res === 'push' && t.seats[0].back === 20 && t.seats[0].net === 0);
+  t = table(10, 50); rig(t, '10', '5', '9', '9', '7', '10'); BJ.deal(t, rnd);
+  check('to ved bordet spiller efter tur', t.turn === 0 && no(() => BJ.act(t, 1, 'stand', rnd)));
+  BJ.timeout(t, rnd);
+  check('løber uret ud, står hånden', t.turn === 1 && t.seats[0].hands[0].done);
+  BJ.leave(t, 1, rnd);
+  check('går man midt i en runde, står ens hånd, og pladsen bliver fri bagefter', t.phase === 'show' && t.seats[1].gone && t.seats[1].hands[0].res === 'win' && t.seats[1].back === 100);
+  BJ.timeout(t, rnd);
+  check('efter runden ryddes bordet til den næste', t.phase === 'bet' && t.seats[1] === null && t.seats[0].bet === 0 && t.seats[0].hands.length === 0 && t.seats[0].last === 10 && t.dealer.length === 0);
+  check('går man, mens der satses, kommer indsatsen tilbage', BJ.bet(t, 0, 50) === 50 && BJ.bet(t, 0, 20) === -30 && BJ.leave(t, 0, rnd) === 20 && t.seats[0] === null);
+  t = table(20); BJ.sit(t, 3, 9, 'X');
+  check('kortene gives først, når alle ved bordet har satset (eller uret løber ud)', !BJ.ready(t) && BJ.bet(t, 3, 10) === 10 && BJ.ready(t) && no(() => BJ.bet(t, 3, 15)) && no(() => BJ.sit(t, 3, 5, 'Y')));
+  // mimicking the dealer loses about 5.7 %; whatever is played, the house keeps a little
+  { const tb = table(10, 10, 10); let staked = 30, back = 0;
+    for (let r = 0; r < 30000; r++) {
+      if (r) for (const i of [0, 1, 2]) staked += BJ.bet(tb, i, 10);
+      BJ.deal(tb, rnd);
+      for (let k = 0; tb.phase === 'play' && k < 80; k++) BJ.act(tb, tb.turn, BJ.total(tb.seats[tb.turn].hands[tb.seats[tb.turn].cur].cards).t < 17 ? 'hit' : 'stand', rnd);
+      for (const q of tb.seats) if (q) back += q.back;
+      BJ.timeout(tb, rnd);
+    }
+    check('den, der spiller som dealeren, får godt 94 % tilbage i længden', back / staked > 0.925 && back / staked < 0.96, (back / staked * 100).toFixed(2) + ' %'); }
+
+  // ---- at the table in the clubhouse ----
+  for (const x of [A, B, C]) x.send({ t: 'tclose' });
+  const idA = A.me().id, idB = B.me().id, uA = store.users.get(idA), uB = store.users.get(idB), g = store.groups.get(GID), a0 = uA.chips, b0 = uB.chips;
+  const bj = x => x.last('bj').v, memOf = (x, id) => x.got.filter(m => m.t === 'mem' && m.m.id === id).pop().m;
+  mark(C); A.send({ t: 'bjsit' });
+  check('man sætter sig ved blackjackbordet, og de andre ser det', bj(A).seats[0].u === idA && memOf(C, idA).busy === 'bj' && memOf(C, idA).net === 0 && C.since('mv')[0].sit.join() === 'blackjack,0' && C.last('bjs').s.n === 1);
+  B.send({ t: 'bjsit', seat: 3 }); B.send({ t: 'bjsit', seat: 4 });
+  check('man vælger selv plads, og kan kun sidde ét sted', bj(B).seats[3].u === idB && bj(B).seats[4] === null);
+  C.send({ t: 'bjbet', bet: 20 });
+  check('kun den, der sidder ved bordet, kan satse', /Sæt dig/.test(C.err()));
+  A.send({ t: 'bjbet', bet: 20 });
+  check('indsatsen trækkes med det samme, og uret går i gang', uA.chips === a0 - 20 && bj(A).phase === 'bet' && bj(A).seats[0].bet === 20 && A.last('bj').clock > 14 && A.last('bj').clock <= 15);
+  A.send({ t: 'bjbet', bet: 35 }); const e1 = A.err(); uB.chips = 40; B.send({ t: 'bjbet', bet: 50 });
+  check('en indsats, bordet ikke tager, eller flere jetoner end man har, afvises', /Den indsats/.test(e1) && /ikke jetoner nok/.test(B.err()) && uB.chips === 40);
+  uB.chips = b0; C.send({ t: 'bjopen' });
+  check('den, der ser på, ser bordet men ikke dealerens skjulte kort', bj(C).seats[0].bet === 20 && C.last('bj').v.shoe >= 0);
+  B.send({ t: 'bjbet', bet: 50 });
+  check('når alle har satset, gives kortene', bj(A).phase !== 'bet' && bj(A).round === 1 && uB.chips === b0 - 50 && bj(C).seats[3].hands.length >= 1);
+  // play rounds by standing on 17 like the dealer: every chip must be accounted for, and everybody must be told
+  mark(C);
+  const start = uA.chips + uB.chips + 70;
+  let rounds = 0, paidA = 0, paidB = 0, stakedA = 20, stakedB = 50, told = 0;
+  const P = { [idA]: A, [idB]: B };
+  for (let k = 0; k < 4000 && rounds < 60; k++) {
+    const t = g.bj;
+    clock += 300;
+    if (t.phase === 'play') { const q = t.seats[t.turn], who = P[q.u]; who.send({ t: 'bjact', a: BJ.total(q.hands[q.cur].cards).t < 17 ? 'hit' : 'stand' }); }
+    else if (t.phase === 'show') {
+      rounds++;
+      for (const q of t.seats) if (q) { if (q.u === idA) paidA += q.back; else paidB += q.back; }
+      clock += 8000; hub.tick();
+      if (rounds < 60) { A.send({ t: 'bjbet', bet: 20 }); B.send({ t: 'bjbet', bet: 50 }); stakedA += 20; stakedB += 50; }
+    }
+  }
+  const res = C.since('bjres');
+  check('tres runder: hver jeton går op for begge', rounds === 60 && uA.chips === a0 - stakedA + paidA && uB.chips === b0 - stakedB + paidB, [uA.chips, a0 - stakedA + paidA, uB.chips, b0 - stakedB + paidB].join(' '));
+  check('alle i klubhuset får hver rundes indsats og gevinst at vide, og hvad spillerne står til', res.length === 60 && res.every(m => m.r.length === 2) && res.reduce((s, m) => s + m.r.find(x => x.u === idA).win, 0) === paidA && res[59].r.find(x => x.u === idB).net === paidB - stakedB && res[59].r.find(x => x.u === idA).today[1] >= paidA);
+  check('tallene tæller med', uA.stats.bj.n >= 60 && uA.stats.bj.bet === stakedA && uA.stats.bj.won === paidA && memOf(C, idA).stats.bj.n === uA.stats.bj.n);
+  check('efter en runde venter bordet på nye indsatser, uden ur', g.bj.phase === 'bet' && g.bj.at === 0 && bj(C).phase === 'bet');
+  // the clocks
+  A.send({ t: 'bjbet', bet: 10 }); clock += 16000; hub.tick();
+  check('har ikke alle satset, gives kortene, når uret er løbet ud, til dem der har', g.bj.round === 61 && g.bj.seats[0].hands.length === 1 && g.bj.seats[3].hands.length === 0);
+  if (g.bj.phase === 'play') { const before = g.bj.seats[0].hands[0].cards.length; clock += 26000; hub.tick(); check('tænker man for længe, står hånden', g.bj.phase === 'show' && g.bj.seats[0].hands[0].cards.length === before); }
+  clock += 8000; hub.tick();
+  // doubling without the chips for it, leaving, and walking away to something else
+  let dealt = false;
+  for (let k = 0; k < 40 && !dealt; k++) { A.send({ t: 'bjbet', bet: 10 }); B.send({ t: 'bjbet', bet: 10 }); if (g.bj.phase === 'play' && g.bj.turn === 0) dealt = true; else { for (let j = 0; j < 20 && g.bj.phase === 'play'; j++) { clock += 300; P[g.bj.seats[g.bj.turn].u].send({ t: 'bjact', a: 'stand' }); } clock += 8000; hub.tick(); } }
+  const keep = uA.chips; uA.chips = 5; A.send({ t: 'bjact', a: 'double' });
+  check('man kan ikke doble uden jetoner til det', dealt && /ikke jetoner nok/.test(A.err()) && uA.chips === 5 && g.bj.seats[0].hands[0].cards.length === 2);
+  uA.chips = keep;
+  mark(C); A.send({ t: 'bjclose' });
+  check('lukker man bordet midt i en runde, står ens hånd, og man rejser sig', memOf(C, idA).busy === '' && g.bj.seats[0].gone && g.bj.seats[0].hands[0].done);
+  for (let j = 0; j < 20 && g.bj.phase === 'play'; j++) { clock += 300; B.send({ t: 'bjact', a: 'stand' }); }
+  const afterA = uA.chips;
+  clock += 8000; hub.tick();
+  check('gevinsten kommer alligevel, og pladsen er fri til næste runde', g.bj.seats[0] === null && uA.chips === afterA && uA.chips >= keep);
+  const bb = uB.chips; A.send({ t: 'bjsit' }); B.send({ t: 'bjbet', bet: 20 }); B.send({ t: 'bjbet', bet: 0 });
+  check('en indsats kan tages tilbage, så længe de andre ikke har satset', g.bj.phase === 'bet' && g.bj.at === 0 && uB.chips === bb);
+  B.send({ t: 'bjbet', bet: 20 }); B.send({ t: 'sopen', m: 'cherry' });
+  check('går man hen til en slotmaskine, forlader man bordet og får sin indsats igen', uB.chips === bb && g.bj.seats[3] === null && memOf(C, idB).busy === 'slot');
+  B.send({ t: 'sclose' }); A.send({ t: 'bjclose' });
+  // one round with cards we know: 19 against the dealer's 17
+  A.send({ t: 'bjsit' }); rig(g.bj, 'K', '9', '10', '7');
+  const best0 = uA.stats.bj.best || 0, chips0 = uA.chips; uA.stats.bj.best = 0;
+  A.send({ t: 'bjbet', bet: 20 });
+  const from = A.got.length; A.send({ t: 'bjact', a: 'stand' });
+  const tail = A.got.slice(from), order = tail.map(m => m.t), resAt = order.indexOf('bjres'), meAt = order.indexOf('me');
+  check('19 mod dealerens 17 vinder indsatsen', g.bj.phase === 'show' && uA.chips === chips0 + 20 && tail[resAt].r[0].win === 40 && tail[resAt].cards === 2 && uA.stats.bj.best === 20, order.join(' '));
+  check('rundens resultat kommer før jetonerne: så kan skærmen vente med begge, til dealeren har trukket', resAt >= 0 && meAt > resAt && tail[meAt].me.chips === chips0 + 20, order.join(' '));
+  check('resultatet står i fire sekunder efter dealerens sidste kort', g.bj.at - clock === BJ.dealerMs(2) + BJ.T_SHOW * 1000 && BJ.dealerMs(2) === 850 && BJ.dealerMs(5) === 2200 && BJ.dealerMs(30) === 3500, String(g.bj.at - clock));
+  uA.stats.bj.best = Math.max(best0, 20);
+  clock += 8000; hub.tick(); A.send({ t: 'bjclose' }); C.send({ t: 'bjclose' });
+  check('bordet står tomt tilbage', g.bj.seats.every(q => !q) && g.bj.phase === 'bet');
+  const bjSt = (await import('../public/shared/room.js')).STATION.blackjack, soon = (await import('../public/shared/games/index.js')).SOON;
+  check('bordet i fløjen er blackjackbordet, og intet i klubhuset siger længere «Kommer snart»', bjSt.kind === 'blackjack' && bjSt.seats.length === BJ.SEATS && Object.keys(soon).length === 0);
+  uA.chips = a0; uB.chips = b0;
 }
 
 section('stilarket');

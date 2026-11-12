@@ -35,12 +35,12 @@ export const STATIONS = [
   { id: 'plant2', kind: 'decor', round: [23.25, 1.0, 0.38, 0.38], h: 1.6 },
   { id: 'lamp', kind: 'decor', round: [23.3, 10.9, 0.28, 0.28], h: 2.6 },
   // the casino wing: three slot machines (`machine` names the one in shared/slots.js), the board that shows what is
-  // won and lost, and the blackjack table
+  // won and lost, and the blackjack table (shared/blackjack.js; one table for the group, against the house)
   { id: 'slot1', kind: 'slot', machine: 'cherry', name: 'Kirsebærhaven', box: [24.9, 0.2, 1.3, 0.9], h: 2.45, use: [25.55, 1.95] },
   { id: 'slot2', kind: 'slot', machine: 'robot', name: 'Robotværkstedet', box: [26.7, 0.2, 1.3, 0.9], h: 2.45, use: [27.35, 1.95], lift: 0.5 },      // lift: its label sits higher, clear of its neighbours'
   { id: 'slot3', kind: 'slot', machine: 'pig', name: 'Sparegrisen', box: [28.5, 0.2, 1.3, 0.9], h: 2.45, use: [29.15, 1.95] },
   { id: 'casino', kind: 'casino', name: 'Kasinotavlen', wall: [30.05, 1.15, 1.8, 1.65], use: [30.95, 1.3] },
-  { id: 'blackjack', kind: 'game', name: 'Blackjackbordet', games: ['blackjack'], round: [28.2, 7.2, 2.1, 1.15], h: 0.9, use: [28.2, 9.35],
+  { id: 'blackjack', kind: 'blackjack', name: 'Blackjackbordet', round: [28.2, 7.2, 2.1, 1.15], h: 0.9, use: [28.2, 9.35],
     seats: [[26.2, 8.2], [27.15, 8.85], [28.2, 9.05], [29.25, 8.85], [30.2, 8.2]] },
   { id: 'plant3', kind: 'decor', round: [31.2, 12.0, 0.42, 0.42], h: 1.6 },
 ];

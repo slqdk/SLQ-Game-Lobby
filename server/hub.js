@@ -11,6 +11,7 @@ import { GameError as EagleEyeError } from './eagleeye.js';
 import { ArenaError, FAST } from './arena.js';
 import { MODES, TEAMS } from '../public/shooter/rules.js';
 import { MACHINES, spin as slotSpin } from '../public/shared/slots.js';
+import * as BJ from '../public/shared/blackjack.js';
 
 export class LobbyError extends Error {}
 const fail = msg => { throw new LobbyError(msg); };
@@ -180,7 +181,8 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     const out = { id: uid, name: u.name, role: roleOf(g, uid), look: u.look, chips: u.chips, dnd: !!u.dnd, seen: u.seen, stats: u.stats, on: !!p, today: todayOf(u) };
     if (p) {
       out.p = pathFrom(p.path, (now() - p.t0) / 1000 * ROOM.speed); out.sit = p.sit; out.open = p.open; out.busy = p.busy;
-      if (p.busy === 'slot') { out.slot = p.slot; out.net = p.net; }
+      if (p.busy === 'slot') out.slot = p.slot;
+      if (p.busy === 'slot' || p.busy === 'bj') out.net = p.net;
       out.fx = Object.entries(p.fx).filter(e => e[1] > now()).map(e => [e[0], e[1] - now()]);
       out.drink = p.drink && p.drink[1] > now() ? [p.drink[0], p.drink[1] - now()] : null; out.buzz = buzzOf(uid);
     }
@@ -201,6 +203,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     conn.gid = null;
     if (!room || !conn.user || !room.has(conn.user.id) || room.get(conn.user.id).conn !== conn) return;
     if (arena) arena.leave(conn.user.id);
+    if (store.groups.has(gid)) bjVacate(store.groups.get(gid), conn.user.id);
     room.delete(conn.user.id);
     conn.user.seen = now();
     cast(gid, { t: 'off', u: conn.user.id, seen: now() });
@@ -243,6 +246,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     const was = p.busy;
     p.busy = ''; p.slot = ''; standUp(g.id, p);
     if (was === 'shooter' && arena) arena.leave(p.u.id);
+    if (was === 'bj') { p.bj = false; bjVacate(g, p.u.id); }
     cast(g.id, { t: 'mem', m: { id: p.u.id, busy: '' } });
   }
 
@@ -275,6 +279,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
   // Takes somebody out of a group: off the tables, out of the room, off the list.
   function removeMember(g, uid, text) {
+    bjVacate(g, uid);
     for (const t of Object.values(g.tables)) { const seat = t.seats.findIndex(s => s.u === uid && !s.left); if (seat >= 0) leaveSeat(g, t, seat); }
     const room = rooms.get(g.id), p = room && room.get(uid);
     if (p) {
@@ -292,6 +297,10 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
   function deleteGroup(g) {
     for (const t of Object.values(g.tables)) refund(t);
+    if (g.bj && !g.bj.paid) for (const q of g.bj.seats) {            // stakes that are on the blackjack table go back
+      const u = q && store.users.get(q.u), back = q ? (g.bj.phase === 'bet' ? q.bet : q.hands.reduce((a, h) => a + h.bet, 0)) : 0;
+      if (u && back) { u.chips += back; pushMe(u); }
+    }
     if (ee) ee.dropGroup(g.id);
     if (arena) arena.dropGroup(g.id);
     const room = rooms.get(g.id), people = Object.keys(g.members).map(Number);
@@ -472,6 +481,52 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   const potOf = g => Math.floor(g.jack ?? MACHINES.pig.seed);
   // what somebody has staked and won at the machines today: [staked, won]
   const todayOf = u => u.casino && u.casino.day === today() ? [u.casino.bet, u.casino.won] : [0, 0];
+  const tally = u => { const day = today(); if (!u.casino || u.casino.day !== day) u.casino = { day, bet: 0, won: 0 }; return u.casino; };
+
+  // Blackjack: one table per group, against the house. The cards are in shared/blackjack.js; here the chips move,
+  // the clock runs, and the clubhouse is told what was staked and won.
+  const bjTry = f => { try { return f(); } catch (e) { if (e instanceof BJ.BlackjackError) fail(e.message); throw e; } };
+  const bjSeat = (g, uid) => g.bj ? g.bj.seats.findIndex(q => q && q.u === uid && !q.gone) : -1;
+  const bjSum = t => ({ n: t.seats.filter(q => q && !q.gone).length, phase: t.phase });
+  const bjClock = t => t.at ? Math.max(0, Math.round((t.at - now()) / 100) / 10) : 0;
+  // After anything has happened at the table: deal when everybody has staked, pay a round that has just been
+  // settled, set the clock for what comes next, and show the table to those who look at it.
+  function bjSync(g) {
+    const t = g.bj, room = rooms.get(g.id);
+    if (t.phase === 'bet' && BJ.ready(t)) BJ.deal(t, rand);
+    if (t.phase === 'show' && !t.paid) {
+      t.paid = true; t.at = now() + BJ.dealerMs(t.dealer.length) + BJ.T_SHOW * 1000;
+      const res = [], paid = [];
+      for (const q of t.seats) {
+        const u = q && q.hands.length ? store.users.get(q.u) : null;
+        if (!u) continue;
+        const st = u.stats.bj || (u.stats.bj = { n: 0, bet: 0, won: 0, nat: 0 }), p = room && room.get(q.u);
+        st.n += q.hands.length; st.bet += q.staked; st.won += q.back; st.nat += q.hands.filter(h => h.res === 'bj').length;
+        if (q.back - q.staked > (st.best || 0)) st.best = q.back - q.staked;
+        u.chips += q.back; tally(u).won += q.back;
+        if (p && p.busy === 'bj') p.net = q.net;
+        paid.push(u);
+        res.push({ u: q.u, bet: q.staked, win: q.back, net: q.net, today: todayOf(u) });
+      }
+      // the room hears what the round gave before the chip counts change: the browsers show both when the dealer has drawn
+      cast(g.id, { t: 'bjres', r: res, cards: t.dealer.length });
+      for (const u of paid) pushMe(u);
+    } else if (t.phase === 'play') t.at = now() + BJ.T_TURN * 1000;
+    else if (t.phase === 'bet') t.at = BJ.anyBet(t) ? (t.at || now() + BJ.T_BET * 1000) : 0;
+    store.saveGroup(g);
+    if (!room) return;
+    const v = J({ t: 'bj', v: BJ.view(t), clock: bjClock(t) });
+    for (const p of room.values()) if (p.bj) p.conn.send(v);
+    cast(g.id, { t: 'bjs', s: bjSum(t) });
+  }
+  // Somebody is no longer at the table: a stake that was not yet in play comes back; hands in play stand.
+  function bjVacate(g, uid) {
+    const i = bjSeat(g, uid);
+    if (i < 0) return;
+    const back = BJ.leave(g.bj, i, rand), u = store.users.get(uid);
+    if (back && u) { u.chips += back; tally(u).bet -= back; pushMe(u); }
+    bjSync(g);
+  }
 
   // ---------- messages to people who are away ----------
   // Somebody whose turn it is, and who is not looking at this clubhouse, gets a notification on the devices where
@@ -615,13 +670,13 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       leaveRoom(conn);
       if (!rooms.has(g.id)) rooms.set(g.id, new Map());
       const spot = nearestFree(ROOM.spawn[0] + (rand() - 0.5) * 2, ROOM.spawn[1] + rand() * 0.9);
-      rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, busy: '', slot: '', net: 0, fx: {}, drink: null });
+      rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, busy: '', slot: '', net: 0, bj: false, fx: {}, drink: null });
       conn.gid = g.id;
       cast(g.id, { t: 'on', m: member(g, u.id) }, u.id);
       conn.send(J({
         t: 'room', g: { id: g.id, name: g.name, owner: g.owner, invite: isAdmin(g, u.id) ? g.invite : '' },
         mem: Object.keys(g.members).map(id => member(g, +id)), chat: g.chat.slice(-LIMITS.chatSend),
-        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), now: now(),
+        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), bj: g.bj ? bjSum(g.bj) : null, now: now(),
       }));
     },
 
@@ -1022,6 +1077,51 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       else if (win >= 200 && win >= bet * 40) addChat(g, null, u.name + ' vandt ' + win + ' jetoner på ' + mach.name + '.');
     },
 
+    // ---- blackjack ----
+    bjopen(conn) {
+      const p = need(conn), g = groupOf(conn), t = g.bj || (g.bj = BJ.newTable());
+      if (p.open) closeTable(g, p);
+      p.bj = true;
+      if (!p.busy) { const st = STATION.blackjack; walk(g.id, p, [st.use[0] + (rand() - 0.5) * 3, st.use[1] + rand() * 0.5]); }
+      conn.send(J({ t: 'bj', v: BJ.view(t), clock: bjClock(t) }));
+    },
+    bjclose(conn) { const p = presOf(conn); if (!p) return; p.bj = false; if (p.busy === 'bj') release(groupOf(conn), p); },
+    bjsit(conn, m) {
+      const p = need(conn), g = groupOf(conn), u = conn.user, t = g.bj || (g.bj = BJ.newTable());
+      if (bjSeat(g, u.id) >= 0) return;
+      const i = Number.isInteger(m.seat) && m.seat >= 0 && m.seat < BJ.SEATS && !t.seats[m.seat] ? m.seat : t.seats.findIndex(q => !q);
+      if (i < 0) fail('Der er ikke en ledig plads ved bordet.');
+      if (p.open) closeTable(g, p);
+      if (p.busy) release(g, p);
+      bjTry(() => BJ.sit(t, i, u.id, u.name));
+      p.busy = 'bj'; p.bj = true; p.net = 0;
+      walk(g.id, p, STATION.blackjack.seats[i], ['blackjack', i]);
+      cast(g.id, { t: 'mem', m: { id: u.id, busy: 'bj', net: 0 } });
+      bjSync(g);
+    },
+    // A stake for the coming round (0 takes it back). The chips leave the account at once.
+    bjbet(conn, m) {
+      need(conn);
+      const g = groupOf(conn), u = conn.user, i = bjSeat(g, u.id);
+      if (i < 0) fail('Sæt dig ved bordet først.');
+      if (m.bet !== 0 && !BJ.BETS.includes(m.bet)) fail('Den indsats tager bordet ikke.');
+      if (m.bet - g.bj.seats[i].bet > u.chips) fail('Du har ikke jetoner nok.');
+      const d = bjTry(() => BJ.bet(g.bj, i, m.bet));
+      if (d) { u.chips -= d; tally(u).bet += d; pushMe(u); }
+      bjSync(g);
+    },
+    // hit, stand, double or split
+    bjact(conn, m) {
+      need(conn);
+      const g = groupOf(conn), u = conn.user, i = bjSeat(g, u.id), a = String(m.a);
+      if (i < 0) fail('Sæt dig ved bordet først.');
+      const c = BJ.cost(g.bj, i, a);
+      if (c > u.chips) fail('Du har ikke jetoner nok til det.');
+      bjTry(() => BJ.act(g.bj, i, a, rand));
+      if (c) { u.chips -= c; tally(u).bet += c; pushMe(u); }
+      bjSync(g);
+    },
+
     // ---- notifications ----
     // Whether the page is in front of somebody: a hidden tab, a window behind another, nobody touching it.
     vis(conn, m) { conn.away = !m.on; },
@@ -1079,6 +1179,9 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   function tick() {
     const t0 = now();
     nudgeDue(t0);
+    for (const g of store.groups.values()) if (g.bj && g.bj.at && t0 >= g.bj.at) {            // the blackjack table's clock
+      try { BJ.timeout(g.bj, rand); bjSync(g); } catch (e) { console.error('blackjack:', e); g.bj.at = 0; }
+    }
     for (const g of store.groups.values()) for (const t of Object.values(g.tables)) {
       if (t.phase !== 'play' || !t.wake || t0 < t.wake.at) continue;
       const w = t.wake;

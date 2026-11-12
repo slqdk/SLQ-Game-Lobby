@@ -423,3 +423,64 @@ label small { color: var(--mute); font-weight: 500; }
 .cs-row .n small { display: block; color: var(--mute); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
 .cs-row canvas { border-radius: 50%; border: 2px solid var(--ink); }
 .cs-row.head { color: var(--mute); font-size: .8rem; font-weight: 600; padding-bottom: 0; }
+
+/* ---------- blackjack ---------- */
+.bj-felt { --bjw: 36px; display: grid; gap: 8px; padding: 12px 12px 22px; border-radius: 20px 20px 42% 42% / 20px 20px 22% 22%; background: radial-gradient(ellipse at 50% 0, #2f8f63, #1d6a48 70%, #17573b); border: 8px solid #6b4423; box-shadow: inset 0 0 0 3px #17121f, 0 4px 0 #17121f; }
+.bj-dealer { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 12px; min-height: calc(var(--bjw) * 1.42 + 6px); }
+.bj-none { color: #d8f5e4; font-weight: 600; opacity: .85; }
+.bj-who { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; align-items: center; max-width: 100%; background: var(--panel); border: 2px solid var(--ink); border-radius: 99px; padding: 2px 12px 2px 2px; line-height: 1.15; }
+.bj-who canvas { grid-row: 1 / span 2; border-radius: 50%; border: 2px solid var(--ink); background: var(--panel2); }
+.bj-who b { font-size: .8rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bj-who .bj-net { grid-column: 2; }
+.bj-dealer .bj-who b { grid-row: 1 / span 2; }
+.bj-net { font-size: .78rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--mute); white-space: nowrap; }
+.bj-net.up { color: #7fe08a; } .bj-net.down { color: #ff8f80; }
+.bj-cards { display: flex; flex-wrap: wrap; justify-content: center; row-gap: 3px; padding-left: calc(var(--bjw) * .4); }
+.bj-cards .pcard { width: var(--bjw); height: calc(var(--bjw) * 1.42); margin-left: calc(var(--bjw) * -.4); }
+.bj-cards .pcard b { font-size: calc(var(--bjw) * .42); letter-spacing: -.04em; } .bj-cards .pcard i { font-size: calc(var(--bjw) * .44); }
+.bj-cards .pcard:not(:last-child) { align-items: flex-start; padding-left: calc(var(--bjw) * .07); }      /* a card under another shows its corner */
+.bj-cards.bj-n5 { padding-left: calc(var(--bjw) * .52); } .bj-cards.bj-n5 .pcard { margin-left: calc(var(--bjw) * -.52); }
+.bj-cards.bj-n7 { padding-left: calc(var(--bjw) * .62); } .bj-cards.bj-n7 .pcard { margin-left: calc(var(--bjw) * -.62); }
+.bj-seats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; align-items: end; }
+.bj-seat { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.bj-seat:nth-child(1), .bj-seat:nth-child(5) { margin-bottom: 34px; } .bj-seat:nth-child(2), .bj-seat:nth-child(4) { margin-bottom: 12px; }      /* the rim of the table is an arc */
+.bj-seat.turn .bj-who { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(255, 179, 71, .35); }
+.bj-seat.me .bj-who b { color: var(--amber); }
+.bj-seat.gone { opacity: .55; }
+.bj-hands { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; gap: 4px; min-width: 0; max-width: 100%; }
+.bj-hand { display: grid; justify-items: center; gap: 4px; padding: 4px 5px; border-radius: 12px; min-width: 0; }
+.bj-hand.cur { background: rgba(255, 179, 71, .2); box-shadow: 0 0 0 2px var(--amber); }
+.bj-line { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px; }
+.bj-tot { font-size: .8rem; font-weight: 700; background: #17121fd9; color: #fff; border-radius: 99px; padding: 1px 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bj-tot.bust { background: #7a1f24; color: #ffd9d6; } .bj-tot.top { background: var(--amber); color: var(--amber-ink); }
+.bj-bet { display: inline-flex; align-items: center; gap: 4px; font-size: .8rem; font-weight: 700; color: #fff4d6; font-variant-numeric: tabular-nums; white-space: nowrap; text-shadow: 0 1px 2px #0008; }
+.bj-bet::before { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--amber); border: 2px dashed #7a4a12; box-shadow: 0 1px 0 #0006; }
+.bj-bet.none { color: #d8f5e4; font-weight: 500; opacity: .85; } .bj-bet.none::before { display: none; }
+.bj-res { font-size: .78rem; font-weight: 700; border-radius: 99px; padding: 0 8px; white-space: nowrap; border: 2px solid var(--ink); background: var(--panel2); color: var(--text); }
+.bj-res.win { background: #7fe08a; color: #0c2a12; } .bj-res.bj { background: #ffd45e; color: #2b1a08; }
+.bj-res.lose, .bj-res.bust { background: #ff8f80; color: #3a0d08; }
+.bj-free { background: none; border: 0; padding: 0; color: #e9ffe9; font-weight: 600; font-size: .85rem; }
+.bj-free i { width: 44px; height: 44px; border-radius: 50%; border: 2px dashed rgba(255, 255, 255, .45); background: rgba(0, 0, 0, .14); }
+.bj-free:not(:disabled):hover i { border-color: var(--amber); background: rgba(255, 179, 71, .22); }
+.bj-free:disabled { opacity: .5; cursor: default; }
+.bj-new { animation: bj-deal .28s ease-out backwards; } .bj-flip { animation: bj-flip .35s ease-out backwards; } .bj-late { animation: fade .3s backwards; }
+@keyframes bj-deal { from { transform: translate(18px, -30px) rotate(14deg); opacity: 0; } }
+@keyframes bj-flip { from { transform: rotateY(90deg); } }
+.pk-clock.bj-off { visibility: hidden; }
+.bj-act { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 46px; }
+.bj-act .bj-leave { margin-left: auto; }
+@media (max-width: 560px) {
+  .bj-felt { --bjw: 30px; border-radius: 18px; border-width: 6px; padding: 10px 8px; }
+  .bj-seats { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .bj-seat { flex-direction: row; justify-content: flex-start; gap: 8px; min-height: 40px; }
+  .bj-seat:nth-child(n) { margin-bottom: 0; }
+  .bj-seat .bj-who { order: -1; width: 112px; flex: none; }
+  .bj-hands { justify-content: flex-start; flex: 1; }
+  .bj-hand { grid-auto-flow: column; align-items: center; justify-items: start; gap: 6px; padding: 3px 5px; }
+  .bj-line { justify-content: flex-start; }
+  .bj-free { justify-content: center; min-height: 34px; border: 2px dashed rgba(255, 255, 255, .35); border-radius: 12px; }
+  .bj-free i { display: none; }
+  .bj-idle { display: none; }
+  .bj-act .btn { padding: 8px 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .bj-new, .bj-flip, .bj-late { animation: none !important; } }

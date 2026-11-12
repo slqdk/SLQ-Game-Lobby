@@ -1,6 +1,6 @@
 # SLQ Game Lobby — handoff
 
-Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is a pull request on top of it (it contains #1). Read this first when continuing in a new chat.
+Status after the first session (12 Nov 2026): v0.1.0 is on `main`; v0.2.0 (EagleEye Commander in the clubhouse) is pull request #1; v0.3.0 (the shooter in the arcade) is pull request #2 on top of it (it contains #1); v0.4.0 (poker) is a pull request on top of that (it contains both). Read this first when continuing in a new chat.
 
 - The code lives in **https://github.com/slqdk/SLQ-Game-Lobby** (public, branch `main`). Søren's server pulls from `main` with `lobby-update`, so `main` must always work; larger work goes on a branch and a pull request.
 - It runs in a Proxmox LXC behind Nginx Proxy Manager, which needs **Websockets Support** switched on (see the README).
@@ -27,7 +27,9 @@ Accounts, groups (owner, admins, invitation link), the clubhouse with avatars, c
 
 **v0.3.0** adds the shooter in the arcade (see "The shooter in the arcade" below).
 
-The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table), Yatzy and Meyer (dice table), poker (card table, Texas Hold'em: Søren's choice).
+**v0.4.0** adds poker at the card table (see "Poker" below).
+
+The furniture for the rest stands in the room and answers "Kommer snart": Ludo (board-game table), Yatzy and Meyer (dice table).
 
 ## Decisions made without asking (tell Søren, change if he wants)
 
@@ -115,6 +117,17 @@ Søren asked for the shooter to be "improved a lot" and built in, on all four fr
 
 **Decisions made without asking**: one starts every round with the knife only and keeps what one picks up until the round ends (as before); a weapon one already has is left for the others; robots take 6, 12 or 20 seconds (by level) to notice a new star, so people get a head start; robots never jump off edges (they take the stairs); a match holds eight players, a group two matches at a time; no friendly fire; one cannot change sides so that all people end up on one team.
 
+### Poker (v0.4.0)
+
+Søren chose Texas Hold'em. It is built as a **small tournament** (a "sit and go"), because that is what the tables already were: everybody pays the same buy-in, the winner takes the pot, a rematch needs everybody. A loose table where one sits down with one's own chips and leaves at will was not built; it would reuse the rules and the screen, and needs seats that come and go and chips moving between wallet and table in `hub.js`.
+
+- **The rules** (`public/shared/games/poker.js`): two to six players, 1,000 poker chips each, blinds from 5/10 rising every eighth hand (`BLINDS`, `HANDS_PER_LEVEL`), no limit. The state is plain data: stacks, who is out, the deck, the board, hole cards, what everybody has bet in this round (`bet`) and this hand (`total`), who folded, who is all in, who has spoken since the last real raise (`acted`), `toCall`, `minRaise`, `turn`, and `last` (the result of the hand that just ended, shown for a few seconds). Moves: `{fold}`, `{call}` (a check when nothing is owed), `{raise: n}` (raise *to* n), and `{next}` (deal the next hand). A raise must be at least as big as the last one; an all-in smaller than that does not let those who have already spoken raise again. Side pots are worked out from `total` at the end of the hand; what nobody could match goes back. With two players the dealer has the small blind and speaks first before the flop.
+- `handValue(cards)` turns the best five of up to seven cards into one number; `handName` gives the Danish name. `equity()` deals the rest of the cards many times and is what the robots judge a hand by (120, 220 or 360 deals by level; the easy robot also misjudges and calls too much, the hard one raises more and bluffs a little).
+- **What the tables learned** (`hub.js`, described in `games/base.js`): `botList` (names for several robots at one table; a robot table starts when it is full or when the host says so), `drop(state, seat)` (somebody leaves and the others play on; when only robots are left the table is closed), and `clock(state)` (when nobody acts in time the lobby makes the move the game asks for). The clock is `t.wake = { at, seat, a }` on the table, stored with it, and `hub.tick()` (once a second from `server.js`) makes the moves that are due. Poker asks for 40 seconds per decision (then a check, or a fold when a bet is owed), 4 seconds for somebody who has let the clock run out twice in a row, and 7 seconds between hands. `tclaim` (taking the win after 48 hours) is refused for games with a clock.
+- **The screen** (`public/js/games/poker.js`): the table with the seats around it (one's own at the bottom), cards, bets, the dealer button, what everybody last did, the clock, and Fold / Check or Call / a slider with Min, ½ pot, Pot and All-in. Spectators see no hole cards; the server never sends them (`view`).
+- Chips: the buy-ins go to the winner; the usual rewards on top (25 for winning, 5 for the others; 5 for beating robots). A tournament that is over in fewer than three moves per seat earns no reward.
+- Decisions made without asking: a tournament and not a loose table; winner takes all (no second prize); robots only at tables without a buy-in (as in 4 på stribe); everybody still in at the end shows their cards (no mucking); somebody who leaves loses their poker chips (they are taken out of play); the poker words are the English ones players use (fold, check, call, raise, all-in), the hands have Danish names.
+
 ### Adding a game
 
 1. `public/shared/games/<id>.js`: an object with `id`, `name`, `min`, `max`, `station` (the furniture), `setup`, `act`, `turn`, `result`, `view`, `bot` (see `base.js`; `c4.js` is the example). The state must be plain data. `view(state, seat)` is where hidden cards or dice are kept from the others.
@@ -130,7 +143,7 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 
 ## What comes next
 
-- **Milestone 2**: Yatzy, Meyer, Ludo, poker. Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer and poker need `view` to hide things, poker needs betting with the shared chips (the table's `stake`/`pot` is a fixed buy-in today).
+- **Milestone 2**: Yatzy, Meyer, Ludo (poker is done in v0.4.0). Dice games need the server's random numbers (`rand` is already handed to `setup`/`act`), Meyer needs `view` to hide the dice (poker shows how). The tables now handle more than two seats, robots with names, leaving in the middle and a clock (see "Poker"). Poker itself could get a loose table (sit down with one's own chips, leave at will) and a second prize.
 - ~~Milestone 3: the shooter~~ done in v0.3.0. Left to do there: controls for phones (touch sticks), text chat inside a match, the clubhouse's teasing inside a match, more arenas (the arena is one module, `world.js`), spectating, and tuning after real play: how good the robots are, how eager they are for the star, the rewards.
 - ~~Milestone 4: EagleEye Commander in the clubhouse~~ done in v0.2.0. Left to do there: the game still polls its server every few seconds (the lobby's WebSocket could tell it at once), and the clubhouse avatar is not shown inside the game.
 
@@ -148,4 +161,5 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 10. The robot at 4 på stribe thinks for up to about 30 ms on the server's only thread, and so does the first shooter match after a start (0.3 s for the robots' walking grid); a shooter match steps 20 times a second, so a long think shows as a short hitch there.
 11. **The shooter has never run on a real graphics card.** It was driven by scripts in a headless browser with a software renderer at one to three frames a second: starting from the arcade, joining, walking, picking up a pistol, shooting somebody else, dying, coming back, the table, leaving; and whole matches of robots against each other on the server. How it *feels* (movement, recoil, the mouse, the frame rate, whether the robots are fun) nobody has tried. Catching the mouse (pointer lock) was not tested either; the scripts play without it.
 12. The shooter's sounds are the old ones plus a few new blips, unheard like the rest.
-13. In the shooter a shooter's own browser says what its bullets hit. The server checks that it is plausible, not that it is true: fine among friends, not against cheats.
+13. **Poker has only been played by scripts and robots**: thousands of tournaments of random and robot players on the server (no chip appears or disappears), and one person with four robots in a browser at desk and phone size. Whether the robots are fun to play against, and whether 40 seconds and blinds every eighth hand feel right, nobody has tried.
+14. In the shooter a shooter's own browser says what its bullets hit. The server checks that it is plausible, not that it is true: fine among friends, not against cheats.

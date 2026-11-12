@@ -330,7 +330,7 @@ function tablesChanged() {
     const g = GAMES[t.game];
     if (!g || t.phase === 'over') continue;
     const names = t.seats.map(s => s.n.replace(/ \(.*/, ''));
-    labels[g.station] = t.phase === 'open' ? names[0] + ' venter på en modspiller' : names.join(' mod ');
+    labels[g.station] = g.max > 2 ? g.name + ': ' + (t.phase === 'open' ? names[0] + ' venter på spillere' : names.length + ' ved bordet') : t.phase === 'open' ? names[0] + ' venter på en modspiller' : names.join(' mod ');
   }
   const wars = [...st.ee.values()].filter(x => x.phase === 'play');
   if (wars.length) labels.command = wars.length === 1 ? '«' + wars[0].name + '» · runde ' + wars[0].round : wars.length + ' kampe i gang';

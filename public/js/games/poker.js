@@ -68,8 +68,8 @@ export function renderPoker(tv, ctx) {
     felt.append(el);
   });
   const boardCards = show ? last.board : v.board;
-  felt.append(h('div', { class: 'pk-mid' }, h('div', { class: 'board' }, [0, 1, 2, 3, 4].map(k => boardCards[k] !== undefined ? card(boardCards[k]) : h('div', { class: 'card empty' }))),
-    h('div', { class: 'potline' }, v.phase === 'bet' ? 'I potten: ' + v.pot : '')));
+  felt.append(h('div', { class: 'pk-mid' }, h('div', { class: 'potline' }, v.phase === 'bet' ? 'I potten: ' + v.pot : ''),
+    h('div', { class: 'board' }, [0, 1, 2, 3, 4].map(k => boardCards[k] !== undefined ? card(boardCards[k]) : h('div', { class: 'card empty' })))));
   out.push(h('div', { class: 'pk-wrap' }, felt));
 
   // ---- what is going on ----

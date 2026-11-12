@@ -269,9 +269,9 @@ label small { color: var(--mute); font-weight: 500; }
 .pk-who canvas { border-radius: 50%; border: 2px solid var(--ink); }
 .pk-who b { font-weight: 600; font-size: .85rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pk-who.free { opacity: .45; } .pk-who.free span { width: 44px; height: 44px; border-radius: 50%; border: 2px dashed var(--line); }
-.pk-wrap { padding: 44px 44px 58px; }
+.pk-wrap { padding: 62px 44px 58px; }
 .pk-felt { position: relative; aspect-ratio: 16 / 9; min-height: 170px; border-radius: 999px; background: radial-gradient(ellipse at center, #2f8f63, #1d6a48 70%, #17573b); border: 8px solid #6b4423; box-shadow: inset 0 0 0 3px #17121f, 0 4px 0 #17121f; }
-.pk-mid { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.pk-mid { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .pk-mid .board { display: flex; gap: 4px; }
 .pk-mid .potline { font-size: .8rem; font-weight: 600; color: #e9ffe9; min-height: 1.2em; text-shadow: 0 1px 2px #0008; }
 .card { width: 38px; height: 54px; border-radius: 6px; background: #fbf7ee; border: 2px solid var(--ink); color: #1d1a22; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; flex: none; box-shadow: 0 2px 0 #0005; }
@@ -301,4 +301,4 @@ label small { color: var(--mute); font-weight: 500; }
 .pk-act { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .pk-raise { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
 .pk-raise input { width: 100%; accent-color: var(--amber); min-height: 32px; }
-@media (max-width: 520px) { .pk-wrap { padding: 40px 34px 54px; } .pk-seat { width: 78px; } .card { width: 30px; height: 44px; } .card b { font-size: .9rem; } .card i { font-size: .95rem; } .pk-seat .who span { max-width: 70px; } }
+@media (max-width: 520px) { .pk-wrap { padding: 60px 34px 54px; } .pk-seat { width: 78px; } .card { width: 30px; height: 44px; } .card b { font-size: .9rem; } .card i { font-size: .95rem; } .pk-seat .who span { max-width: 70px; } }

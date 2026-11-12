@@ -1,0 +1,21 @@
+# SLQ Game Lobby — systemd unit. deploy/install.sh installs it (and fills in other paths if you chose any).
+[Unit]
+Description=SLQ Game Lobby
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=slqlobby
+Group=slqlobby
+WorkingDirectory=/opt/slq-game-lobby
+Environment=NODE_ENV=production
+Environment=PORT=8080
+Environment=DATA_DIR=/var/lib/slq-game-lobby
+ExecStart=/usr/bin/env node server/server.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

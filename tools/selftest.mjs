@@ -432,7 +432,29 @@ section('én forbindelse ad gangen, og at gå offline');
   mark(B);
   C.conn.close();
   check('lukker man browseren, ser de andre det', B.last('off').u === C.last('welcome').me.id && B.last('off').seen === clock);
+  // ... and the one who went lies down where they stood (Søren: "så lægger vedkommende sig ned der hvor han/hun stod")
+  const idC = C.last('welcome').me.id, cAt = C.last('room').mem.find(x => x.id === idC).p.slice(-1)[0], rest = B.last('off').rest;
+  const body = r => [0, 0.5, 1, -0.5, -1].map(k => [r[0] + Math.sin(r[2]) * 0.85 * k, r[1] + Math.cos(r[2]) * 0.85 * k]);
+  check('den, der går, lægger sig til at sove dér, hvor han stod, og ligger frit af møblerne', Array.isArray(rest) && rest.length === 3 && Math.hypot(rest[0] - cAt[0], rest[1] - cAt[1]) < 3.3 && body(rest).every(q => isFree(q[0], q[1])), JSON.stringify([cAt, rest]));
+  B.send({ t: 'leave' }); B.send({ t: 'enter', g: GID });
+  const seenC = B.last('room').mem.find(x => x.id === idC);
+  check('den, der kommer ind, ser de sovende, og hvor de ligger', !seenC.on && JSON.stringify(seenC.rest) === JSON.stringify(rest) && !B.last('room').mem.find(x => x.id === B.last('welcome').me.id).rest);
   C = client(tokC); C.send({ t: 'enter', g: GID });
+  const up = C.last('room').mem.find(x => x.id === idC).p[0];
+  check('kommer han igen, rejser han sig, hvor han lå', Math.hypot(up[0] - rest[0], up[1] - rest[1]) < 0.8 && JSON.stringify(C.last('room').up) === JSON.stringify(rest) && B.last('on').m.id === idC && !B.last('on').m.rest);
+  // two who go from the same spot do not lie on top of each other
+  const spot = [13.5, 8.6];
+  for (const c of [A, C]) c.send({ t: 'move', x: spot[0], y: spot[1] });
+  clock += 8000; mark(B);
+  A.send({ t: 'leave' }); C.send({ t: 'leave' });
+  const two = B.since('off').map(m => m.rest);
+  check('to, der går fra samme sted, ligger ved siden af hinanden', two.length === 2 && Math.hypot(two[0][0] - two[1][0], two[0][1] - two[1][1]) >= 1 && two.every(r => Math.hypot(r[0] - spot[0], r[1] - spot[1]) < 2.5 && body(r).every(q => isFree(q[0], q[1]))), JSON.stringify(two));
+  A.send({ t: 'enter', g: GID }); C.send({ t: 'enter', g: GID });
+  // the server is stopped for an update: everybody lies down where they are, and is kept so
+  B.send({ t: 'move', x: 16.2, y: 9.4 }); clock += 8000;
+  const idB = B.last('welcome').me.id; hub.sleepAll();
+  const kept = store.groups.get(GID).rest[idB];
+  check('stoppes serveren, lægger alle sig, hvor de er, og rejser sig dér igen bagefter', kept && Math.hypot(kept[0] - 16.2, kept[1] - 9.4) < 1.2);
 }
 
 section('admin');
@@ -458,7 +480,7 @@ section('admin');
   C.send({ t: 'tnew', game: 'c4', stake: 10 });
   B.send({ t: 'gkick', u: idC });
   check('den der tages ud får sin indsats tilbage og sendes ud', C.me().chips === c0 && C.last('out').g === GID && C.last('groups').groups.length === 0);
-  check('de andre ser, at han er væk', A.last('gone').u === idC && /taget ud/.test(A.last('chat').m.s));
+  check('de andre ser, at han er væk', A.last('gone').u === idC && /taget ud/.test(A.last('chat').m.s) && !(store.groups.get(GID).rest || {})[idC]);
   C.send({ t: 'enter', g: GID });
   check('og han kan ikke komme ind igen', /ikke med/.test(C.err()));
   C.send({ t: 'gjoin', code: INV });
@@ -944,8 +966,8 @@ section('klubhuset i 3D: saloonen og figurerne');
   for (const k of Object.keys(DRINKS)) poses.push([{ ...base, drink: { k } }, { ...st0, sip: 0.7, fill: 0.4 }], [{ ...base, drink: { k }, emote: 'cheers' }, { ...st0, seat: 'high', seatY: SEAT_H.high }]);
   for (const e of ['wave', 'dance', 'laugh', 'cheer', 'cry', 'sleep', 'cheers']) poses.push([{ ...base, emote: e }, st0]);
   for (const k of Object.keys(PRANKS)) for (const age of [0.1, 1.5, 3.5]) poses.push([base, { ...st0, fx: { [k]: age }, hen: k === 'chicken' && age > 1 }]);
-  poses.push([base, { ...st0, first: true }]);
-  check('en figur kan gå, sidde, drikke af hvert glas, gøre alle fagter og blive drillet på alle måder', poses.every(([a, o]) => { who.pose(a, o); return finite(who.group); }), poses.length + ' stillinger');
+  poses.push([base, { ...st0, first: true }], [base, { ...st0, lie: 0.5 }], [base, { ...st0, lie: 1 }], [{ ...base, walk: 1 }, { ...st0, lie: 0.2 }]);      // (asleep on the floor, lying down)
+  check('en figur kan gå, sidde, drikke af hvert glas, gøre alle fagter, blive drillet på alle måder og sove på gulvet', poses.every(([a, o]) => { who.pose(a, o); return finite(who.group); }), poses.length + ' stillinger');
   who.dispose(); sal.dispose();
 }
 
@@ -1078,7 +1100,7 @@ section('skydespillet: en kamp i arkaden');
     if (k % 20 === 0 && mine(B) && mine(B).e.alive) { const e = mine(B).e; at(B, e.x + (k % 40 ? 0.3 : -0.3), e.y, e.z, k / 100); }
     const st = B.last('ast'); if (st && st.state === 'ended') ended = st;
   }
-  check('robotterne spiller en runde til ende', !!ended && (ended.kills[0] >= MODES.tdm.goal || ended.kills[1] >= MODES.tdm.goal || (clock - start) / 1000 >= MODES.tdm.time), ended ? JSON.stringify(ended.kills) : 'ingen ende');
+  check('robotterne spiller en runde til ende', !!ended && (ended.kills[0] >= MODES.tdm.goal || ended.kills[1] >= MODES.tdm.goal || ended.time >= MODES.tdm.time - 1), ended ? JSON.stringify(ended.kills) + ' efter ' + ended.time + ' s' : 'ingen ende');      // (the round's own clock: it may have begun before this part of the test)
   check('alle står på tavlen bagefter', !!ended && ended.rows.length === 6 && ended.rows.reduce((n, r) => n + r.k, 0) >= 20);
   const mineRow = ended && ended.rows.find(r => r.id === mine(B).e.id), paid = B.me().chips - a0;
   check('mod robotter alene giver en runde den lille belønning', !!mineRow && paid === mineRow.chips && (paid === ECON.shooter.botWin || paid === ECON.shooter.botPlay), String(paid));

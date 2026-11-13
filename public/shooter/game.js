@@ -9,6 +9,7 @@ import { makeSfx } from './sfx.js';
 import { makeFx } from './fx.js';
 import { makeArsenal } from './weapons.js';
 import { makeViewModel } from './viewmodel.js';
+import { weaponIcons } from './icons.js';
 import { makeFigures } from './figure.js';
 import { mergeStatic } from './merge.js';
 import { dressWorld } from './scenery.js';
@@ -35,9 +36,12 @@ export function startGame({ root, info, send, sound = true, leave }) {
   for (let i = 0; i < 4; i++) H.cross.append(el('i'));
   H.health = el('div', 'sh-health'); H.hpBar = el('i'); H.hpNum = el('b', '', '100');
   const bar = el('div', 'sh-bar'); bar.append(H.hpBar); H.health.append(bar, H.hpNum); hud.append(H.health);
+  // the weapons, in the middle at the bottom: the name of the one in the hands and what is in it, and under that a
+  // box for each key with a picture of the weapon when one has it (the pictures are drawn below, from the models)
   H.weapon = el('div', 'sh-weapon'); H.wName = el('b'); H.wAmmo = el('span'); H.slots = el('div', 'sh-slots');
-  WEAPON_IDS.forEach((id, i) => { const s = el('i', '', String(i + 1)); s.title = WEAPONS[id].name; H.slots.append(s); });
-  H.weapon.append(H.wName, H.wAmmo, H.slots); hud.append(H.weapon);
+  const wline = el('div', 'sh-wline'); wline.append(H.wName, H.wAmmo);
+  WEAPON_IDS.forEach((id, i) => { const s = el('div', 'sh-slot'); s.title = WEAPONS[id].name; s.append(el('i', '', String(i + 1)), el('em')); H.slots.append(s); });
+  H.weapon.append(wline, H.slots); hud.append(H.weapon);
   const board = el('div', 'sh-board'); board.hidden = true;
   const menu = el('div', 'sh-menu');
   root.replaceChildren(canvas, hud, board, menu);
@@ -65,6 +69,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
   // The weapons: one arsenal makes the models, for my own hands (the view model, drawn on top of the arena),
   // for the hands of the others and for what lies ready. My arms have my own skin and sleeves.
   const arsenal = makeArsenal(THREE, renderer);
+  { const pics = weaponIcons(THREE, WEAPON_IDS); WEAPON_IDS.forEach((id, i) => { if (pics[id]) H.slots.children[i].prepend(pics[id]); }); }
   const fx = makeFx(THREE, scene, world.PICKUPS, world.HEALTH_PACKS, arsenal);
   const myLook = (info.ents.find(a => a.id === you) || {}).look || {}, lookOf = k => LOOK[k][myLook[k]] !== undefined ? LOOK[k][myLook[k]] : LOOK[k][0], hexOf = s => parseInt(s.slice(1), 16);
   const vm = makeViewModel(THREE, arsenal, { skin: hexOf(lookOf('skin')), sleeve: hexOf(lookOf('topCol')), bare: ['tee', 'stripes'].includes(lookOf('top')), sound: name => sfx.gear(name) });
@@ -167,7 +172,11 @@ export function startGame({ root, info, send, sound = true, leave }) {
     const id = WEAPON_IDS[my.w], w = WEAPONS[id];
     H.wName.textContent = w.name;
     H.wAmmo.textContent = w.melee ? '' : my.reload > 0 ? 'lader …' : my.mags[my.w] + ' / ' + w.magMax;
-    [...H.slots.children].forEach((s, i) => { s.className = (my.owned & (1 << i) ? 'own' : '') + (i === my.w ? ' on' : ''); });
+    [...H.slots.children].forEach((s, i) => {
+      const wi = WEAPONS[WEAPON_IDS[i]], own = !!(my.owned & (1 << i)), left = wi.melee ? -1 : my.mags[i];
+      s.className = 'sh-slot' + (own ? ' own' : '') + (i === my.w ? ' on' : '') + (own && left === 0 ? ' empty' : '');
+      s.lastChild.textContent = own && left >= 0 ? String(left) : '';
+    });
     vm.set(id, false, !!w.melee || my.mags[my.w] > 0);
   }
   function healthHud() { H.hpBar.style.width = Math.max(0, my.hp) + '%'; H.hpNum.textContent = String(Math.max(0, my.hp)); H.health.classList.toggle('low', my.hp <= 35); }

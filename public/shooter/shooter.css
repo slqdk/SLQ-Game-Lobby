@@ -87,6 +87,11 @@
 .sh-menu .keys div { display: flex; gap: 8px; align-items: baseline; }
 .sh-menu kbd { font: inherit; font-size: .8rem; background: rgba(255, 255, 255, .12); border-radius: 6px; padding: 1px 7px; white-space: nowrap; }
 .sh-menu .btn.big { width: 100%; margin-bottom: 10px; }
+.sh-sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin: -4px 0 14px; }
+.sh-slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; font-size: .85rem; }
+.sh-slider input { grid-column: 1 / -1; grid-row: 2; width: 100%; accent-color: #ffb547; }
+.sh-slider b { opacity: .75; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .sh-sliders { grid-template-columns: 1fr; } }
 .sh-menu .row { display: flex; flex-wrap: wrap; gap: 8px; }
 .sh-menu .row .btn { flex: 1 1 auto; }
 @media (max-width: 900px) { .sh-feed { top: 58px; font-size: .85rem; } .sh-score { font-size: 1.05rem; } }

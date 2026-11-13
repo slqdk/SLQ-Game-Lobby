@@ -11,6 +11,7 @@ import { drawPrank, INK } from './avatar.js';
 import { play } from './sfx.js';
 import { makeKit } from './saloon/kit.js';
 import { buildSaloon, seatSpot, WALL_H, SEAT_H } from './saloon/place.js';
+import { mouse } from './mouse.js';
 import { makePeople } from './saloon/people.js';
 
 const TAU = Math.PI * 2, FONT = 'Fredoka, system-ui, sans-serif';
@@ -415,8 +416,9 @@ export function createRoom3D(canvas, over, hooks) {
   const onMouse = e => {
     if (!locked) return;
     const mx = clamp(e.movementX || 0, -250, 250), my = clamp(e.movementY || 0, -250, 250);
-    cam.yaw -= mx * SENS; cam.free = false;
-    if (cam.view === 'eyes') cam.pitch = clamp(cam.pitch - my * SENS, -1.35, 1.35); else cam.pitch = clamp(cam.pitch + my * SENS, -0.5, 1.3);
+    const k = SENS * mouse.look;                                  // (the player's own speed: mouse.js)
+    cam.yaw -= mx * k; cam.free = false;
+    if (cam.view === 'eyes') cam.pitch = clamp(cam.pitch - my * k, -1.35, 1.35); else cam.pitch = clamp(cam.pitch + my * k, -0.5, 1.3);
   };
   document.addEventListener('pointerlockchange', onLock); document.addEventListener('pointerlockerror', onLockError); document.addEventListener('mousemove', onMouse);
   canvas.addEventListener('contextmenu', e => e.preventDefault());

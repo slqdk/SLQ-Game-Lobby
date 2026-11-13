@@ -19,6 +19,7 @@ import { ECON, LIMITS, EMOTES, PRANKS, JUKE, ITEMS, DRINKS, DRINK_KINDS, LOOK, L
 import { ROOM, STATION, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
 import { MODES, MODE_IDS, LEVELS, FILLS } from '../shooter/rules.js';
+import { mouseSlider } from './mouse.js';
 
 const load = k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const save = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch {} };
@@ -530,6 +531,7 @@ function openSelf() {
   sheet.open({ title: st.me.name, kind: 'self', body: [h('div', { class: 'sec' }, 'Fagter'), emoteTiles(),
     room.sitting(mine()) === 'bar' ? h('button', { class: 'btn', onclick: openBar }, 'Bestil i baren') : null,
     h('button', { class: 'btn alt', onclick: () => { sheet.close(); sip(); } }, 'Tag en tår af glasset'), dndSwitch(),
+    deep && matchMedia('(pointer: fine)').matches ? mouseSlider('look', 'Musehastighed i 3D', 'slider') : null,
     h('div', { class: 'row' }, h('button', { class: 'btn alt', onclick: () => openWardrobe() }, 'Garderoben'), h('button', { class: 'btn alt', onclick: openShop }, 'Tøjbutikken'))] });
 }
 $('#btnEmote').addEventListener('click', () => sheet.open({ title: 'Fagter', kind: 'emote', body: emoteTiles() }));

@@ -584,14 +584,34 @@ section('skydespillet: banen, og hvor robotterne kan gå');
   const N = nullThree(), w = buildWorld(N, N, N);
   const sig = o => crypto.createHash('sha1').update(JSON.stringify(o)).digest('hex').slice(0, 16);
   // Is the arena changed on purpose, this number must be changed with it.
-  check('banen har de vægge, gulve og lofter, den plejer', w.colliders.length === 1223 && w.surfaces.length === 855 && w.ceilings.length === 5 && sig([w.colliders, w.surfaces, w.ceilings]) === '3b34c9baaa61d24a', [w.colliders.length, w.surfaces.length, w.ceilings.length, sig([w.colliders, w.surfaces, w.ceilings])].join(' '));
+  check('banen har de vægge, gulve og lofter, den plejer', w.colliders.length === 1247 && w.surfaces.length === 867 && w.ceilings.length === 5 && sig([w.colliders, w.surfaces, w.ceilings]) === '48c1d1a3c718ca5b', [w.colliders.length, w.surfaces.length, w.ceilings.length, sig([w.colliders, w.surfaces, w.ceilings])].join(' '));
   // the browser builds it with the real three.js: the same numbers must come out
   const THREE = await import('../public/shooter/vendor/three.module.min.js'), { makeTextures } = await import('../public/shooter/tex.js');
   const hadDoc = 'document' in globalThis;
   if (!hadDoc) globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => N }) };
-  const scene = new THREE.Scene(), w3 = buildWorld(THREE, scene, makeTextures(THREE));
+  const scene = new THREE.Scene(), tex3 = makeTextures(THREE), w3 = buildWorld(THREE, scene, tex3), bare = scene.children.length;
+  check('browserens bane (med three.js) er den samme som serverens', sig([w3.colliders, w3.surfaces, w3.ceilings]) === sig([w.colliders, w.surfaces, w.ceilings]) && bare > 1000);
+  // what one sees on top of the arena (leaves, grass, roofs, the tunnel's brick, flags, clouds): built here without a screen
+  const { dressWorld } = await import('../public/shooter/scenery.js'), sc = dressWorld(THREE, scene, w3, tex3);
   if (!hadDoc) delete globalThis.document;
-  check('browserens bane (med three.js) er den samme som serverens', sig([w3.colliders, w3.surfaces, w3.ceilings]) === sig([w.colliders, w.surfaces, w.ceilings]) && scene.children.length > 1000);
+  const D = w.decor, finite = Object.values(sc.meshes).every(m => { const a = m.geometry.attributes.position.array; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) return false; return a.length > 0; });
+  check('banen fortæller, hvad der skal klædes på: hække, huse, tårne, tunnel og kældertrapper', D.hedges.length === 7 && D.hedges.filter(h => h.edge).length === 4 && D.houses.length === 6 && D.towers.length === 4 && D.tunnel.floors.length >= 5 && D.tunnel.walls.length >= 10 && D.tunnel.runs.length === 3 && D.stairs.length === 2 && D.piers.length === 2, [D.hedges.length, D.houses.length, D.towers.length, D.tunnel.floors.length, D.tunnel.walls.length, D.stairs.length].join(' '));
+  check('landskabet bygges uden skærm: løv, græs, tage, tunnel, flag og skyer (og ikke for tungt)', finite && sc.count() > 120000 && sc.count() < 260000 && ['leaves', 'twigs', 'blades', 'turf', 'pave', 'solid', 'tunWall', 'tunFloor', 'flags', 'clouds', 'lit', 'glow'].every(k => sc.meshes[k]) && sc.smokers.length >= 3 && (() => { sc.tick(0.016, 1); sc.tick(0.016, 2.5); sc.setDetail(0); const off = !sc.meshes.blades.visible && !sc.meshes.twigs.visible; sc.setDetail(2); return off && sc.meshes.blades.visible; })(), Math.round(sc.count()) + ' trekanter');
+  check('landskabet er kun til at se på: banens vægge og gulve er de samme bagefter, og serveren indlæser det ikke', sig([w3.colliders, w3.surfaces, w3.ceilings]) === sig([w.colliders, w.surfaces, w.ceilings]) && !/scenery/.test(fs.readFileSync(new URL('../server/arena.js', import.meta.url), 'utf8') + fs.readFileSync(new URL('../server/arena-bots.js', import.meta.url), 'utf8') + fs.readFileSync(new URL('../server/arena-nav.js', import.meta.url), 'utf8')));
+  // every house has a roof (0.12.0)
+  const doorsOf = H => [['north', 0, -1], ['south', 0, 1], ['west', -1, 0], ['east', 1, 0]].filter(s => H.o[s[0]] === 'door').map(s => ({ nx: s[1], nz: s[2], half: s[1] ? H.w / 2 : H.d / 2 }));
+  check('alle seks huse har tag: et skud standses af taget, loftet er tæt, og i stuen er der frit', D.houses.every(H => {
+    const q = H.alongX ? [H.cx, H.cz + H.span * 0.5] : [H.cx + H.span * 0.5, H.cz], y = H.eave + H.rise * 0.5;
+    return w.hitWorld(q[0], y - 0.2, q[1]) && !w.hitWorld(q[0], y + 0.4, q[1]) && !w.hitWorld(H.cx + 1.2, 2, H.cz + 1.2) && w.hitWorld(H.cx, H.wallH + 0.1, H.cz) && w.hitWorld(H.cx, H.eave + H.rise * 0.6, H.cz) && !w.hitWorld(H.cx, H.eave + H.rise + 0.6, H.cz);
+  }));
+  check('man kan ikke se ned i et hus gennem taget (heller ikke robotterne fra et tårn), men stadig ind ad døren', D.houses.every(H => !w.losClear(H.cx - 14, 9, H.cz - 3, H.cx + 0.3, 1.2, H.cz + 0.5) && !w.losClear(H.cx + 3, 12, H.cz + 16, H.cx + 0.5, 1, H.cz) && !w.losClear(H.cx + 0.4, 15, H.cz + 0.4, H.cx + 0.4, 1, H.cz + 0.4)
+    && doorsOf(H).length === 1 && doorsOf(H).every(d => w.losClear(H.cx + d.nx * (d.half + 4), 1.5, H.cz + d.nz * (d.half + 4), H.cx + d.nx * (d.half - 2), 1.5, H.cz + d.nz * (d.half - 2)) && !w.losClear(H.cx + d.nx * (d.half + 4), 3.6, H.cz + d.nz * (d.half + 4), H.cx + d.nx * (d.half - 2), 3.6, H.cz + d.nz * (d.half - 2)))));
+  check('man kan hoppe ind ad hver dør uden at støde på muren over den', D.houses.every(H => doorsOf(H).every(d => {
+    const p = w.newWalker(H.cx + d.nx * (d.half + 3), H.cz + d.nz * (d.half + 3), 0);
+    let top = 0;
+    for (let i = 0; i < 60; i++) { w.stepPlayer(p, { mx: -d.nx, mz: -d.nz, sprint: false, jump: true }, 1 / 60); top = Math.max(top, p.y); }
+    return top > 1 && Math.abs(p.x - H.cx) < H.w / 2 - 0.3 && Math.abs(p.z - H.cz) < H.d / 2 - 0.3;
+  })));
   check('toget kører i ring og er samme sted til samme tid', (() => { w.setTrain(50); const a = [w.bazCar.cx, w.bazCar.cz]; w3.setTrain(50); w.setTrain(50 + w.LOOP_L); return Math.hypot(a[0] - w3.bazCar.cx, a[1] - w3.bazCar.cz) < 1e-9 && Math.hypot(a[0] - w.bazCar.cx, a[1] - w.bazCar.cz) < 1e-6; })());
 
   const nav = buildNav(w, [[0, -52, 0], [0, 52, 0]]);

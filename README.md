@@ -5,7 +5,7 @@ A clubhouse for a group of friends. Each group gets a drawn room where everybody
 What is in it:
 
 - **Groups** with an owner, admins and an invitation link. An account is a name and a password.
-- **The clubhouse in 3D**: a western saloon with a casino wing. Follow your figure with the camera, look through its eyes (with your glass in your hand), or see the whole room from the front; walk by pressing the floor or with W A S D. The drawn, flat clubhouse is still there as a fourth view.
+- **The clubhouse in 3D**: a western saloon with a casino wing. Follow your figure with the camera, look through its eyes (with your glass in your hand), or see the whole room from the front; steer as in the shooter: click to let the mouse look round, W A S D to walk, E to use what you look at (or press the floor to walk, as on a phone). The drawn, flat clubhouse is still there as a fourth view.
 - **The flat clubhouse**: a 2D room seen from the front and a little from above. Click or tap the floor to walk, the furniture to use it, another avatar to tease or challenge. Works with a mouse and on a phone.
 - **Avatars** you build yourself when you first log in: man or woman, build, height, skin, hair, face and plain clothes, on a figure you can turn round. Vests, jackets, a poncho, boots, hats, glasses and more are bought in the clothes shop.
 - **Chips** (jetoner): one wallet per player. 100 for showing up each day, a reward for every finished game against a friend, and the pot when you play for a stake. Spent in the bar, in the clothes shop and on teasing.

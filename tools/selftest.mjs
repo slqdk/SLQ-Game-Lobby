@@ -23,7 +23,7 @@ import { buildWorld, nullThree, EYE, RAD, STEP } from '../public/shooter/world.j
 import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, FLAG, dirAim, aimDir, falloff, zoneAt, flyShot, newShot } from '../public/shooter/rules.js';
 import { ECON, PRANKS, JUKE, ITEMS, DRINKS, BAR, LOOK, cleanLook, randomLook } from '../public/shared/defs.js';
 import { tuneIds, tuneBeats } from '../public/js/music.js';
-import { ROOM, STATIONS, STATION, isFree, findPath, pathLen } from '../public/shared/room.js';
+import { ROOM, STATIONS, STATION, isFree, nearestFree, findPath, pathLen } from '../public/shared/room.js';
 import { GAMES } from '../public/shared/games/index.js';
 import { mulberry32 } from '../public/shared/util.js';
 
@@ -147,6 +147,32 @@ section('gå rundt, snak og fagter');
   C.send({ t: 'enter', g: GID });
   const am = C.last('room').mem.find(m => m.name === 'Søren');
   check('den der kommer ind senere ser, hvor de andre står', am.p.length === 1 && am.p[0][0] === end[0]);
+  // walking by the keys: the browser moves its own figure and says where it is; the others get a short walk there
+  {
+    const near = (q, d = 0.4) => [[d, 0], [0, d], [-d, 0], [0, -d]].map(([dx, dy]) => [Math.round((q[0] + dx) * 100) / 100, Math.round((q[1] + dy) * 100) / 100]).find(v => isFree(...v));
+    const to = near(end);
+    mark(A, B); A.send({ t: 'step', x: to[0], y: to[1] });
+    const got = B.since('mv')[0];
+    check('et skridt med tasterne når de andre som en kort gang, og en selv får intet ekko', got && got.u === A.me().id && got.p.length === 2 && got.p[0][0] === end[0] && got.p[0][1] === end[1] && got.p[1][0] === to[0] && got.p[1][1] === to[1] && got.sit === null && A.since('mv').length === 0, JSON.stringify(got));
+    clock += 1000;
+    mark(A, B); A.send({ t: 'step', x: 11.6, y: 5.9 });
+    const back = A.since('mv')[0];
+    check('et skridt ind i et bord afvises: man får at vide, hvor serveren har én', back && back.u === A.me().id && back.p.length === 1 && back.p[0][0] === to[0] && back.p[0][1] === to[1] && B.since('mv').length === 0, JSON.stringify(back));
+    mark(A, B); A.send({ t: 'step', x: 28, y: 11.5 });
+    check('et skridt alt for langt væk afvises også', isFree(28, 11.5) && A.since('mv').length === 1 && A.since('mv')[0].p[0][0] === to[0] && B.since('mv').length === 0);
+    // forty steps in a row, as the keys send them: all heard (they have a budget of their own), and the server follows
+    let x = to[0], y = to[1], heard = 0;
+    for (let i = 0; i < 40; i++) { const q = near([x, y], 0.3); mark(B); clock += 100; A.send({ t: 'step', x: q[0], y: q[1] }); if (B.since('mv').length === 1) heard++; x = q[0]; y = q[1]; }
+    clock += 1000; mark(A, B); A.send({ t: 'step', x, y });
+    const at = B.since('mv')[0];
+    check('mange skridt i træk bliver alle hørt, og serveren følger med', heard === 40 && at && Math.hypot(at.p[0][0] - x, at.p[0][1] - y) < 0.02, heard + ' hørt');
+    // from a bar stool: one gets up
+    A.send({ t: 'sit', st: 'bar' }); clock += 60000;
+    const stool = A.last('mv').p.slice(-1)[0], off = nearestFree(stool[0], stool[1] + 0.5);
+    mark(A, B); A.send({ t: 'step', x: off[0], y: off[1] });
+    check('fra en barstol rejser man sig med det første skridt', A.last('mv').sit && A.last('mv').sit[0] === 'bar' && B.since('mv').length === 1 && B.since('mv')[0].sit === null && Math.hypot(B.since('mv')[0].p[0][0] - stool[0], B.since('mv')[0].p[0][1] - stool[1]) < 0.02, JSON.stringify(B.since('mv')[0]));
+    clock += 2000; A.send({ t: 'move', x: end[0], y: end[1] }); clock += 60000;
+  }
   A.send({ t: 'say', s: '  Hej   med\u0000 jer \n <b>!</b> ' });
   const msg = C.last('chat').m;
   check('chat når alle, ryddet for mærkelige tegn', msg.s === 'Hej med jer <b>!</b>' && msg.n === 'Søren' && msg.u > 0, JSON.stringify(msg.s));

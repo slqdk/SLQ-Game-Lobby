@@ -3,7 +3,7 @@
 // and the messages that arrive. That also makes it easy to test (tools/selftest.mjs).
 import crypto from 'node:crypto';
 import { ECON, LIMITS, EMOTES, PRANKS, PRANK_GAP, JUKE, ITEMS, DRINKS, BAR, cleanLook, randomLook, nameOk } from '../public/shared/defs.js';
-import { ROOM, STATION, findPath, posAt, pathFrom, nearestFree } from '../public/shared/room.js';
+import { ROOM, STATION, findPath, posAt, pathFrom, nearestFree, isFree } from '../public/shared/room.js';
 import { GAMES, GameError } from '../public/shared/games/index.js';
 import { hashText } from '../public/shared/util.js';
 import { randomCode } from './store.js';
@@ -20,6 +20,7 @@ const norm = c => String(c ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 // An entry of one of the fixed lists, by a key from the browser (only a text counts as a key).
 const pick = (list, k) => typeof k === 'string' && Object.hasOwn(list, k) ? list[k] : null;
 const HOUR = 3600e3;
+const STEP_FAR = 3;        // how far from where the server has one a step by the keys may be (lag and a slow frame allowed for)
 const andList = n => n.length > 2 ? n.slice(0, -1).join(', ') + ' og ' + n[n.length - 1] : n.join(' og ');
 // A key as a browser hands it over with a push subscription: base64url of exactly n bytes.
 const keyOk = (k, n, first) => { if (typeof k !== 'string' || k.length > 120 || !/^[\w-]+$/.test(k)) return false; const b = Buffer.from(k, 'base64url'); return b.length === n && (first === undefined || b[0] === first); };
@@ -138,8 +139,9 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
   function message(conn, text) {
     const t = now();
-    if (text.length < 300 && text.charCodeAt(6) === 97 && FAST.has(text.slice(6, 8))) {
-      // where one is and what one shoots in the shooter comes many times a second: a budget of its own
+    if (text.length < 300 && (text.charCodeAt(6) === 97 ? FAST.has(text.slice(6, 8)) : text.startsWith('{"t":"step"'))) {
+      // where one is and what one shoots in the shooter comes many times a second, and so does where one walks
+      // by the keys in the clubhouse: a budget of its own
       conn.fast = Math.min(150, conn.fast + (t - conn.fastAt) / 1000 * 90); conn.fastAt = t;
       if (--conn.fast < 0) { if (conn.fast < -1000) conn.close(); return; }
     } else {
@@ -689,6 +691,19 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       const p = presOf(conn), x = +m.x, y = +m.y;
       if (!p || p.open || p.busy || !Number.isFinite(x) || !Number.isFinite(y)) return;      // at a game one sits still
       walk(conn.gid, p, [x, y]);
+    },
+
+    // Walking by the keys: the browser moves its own figure and says where it is a few times a second. The server
+    // keeps its own idea of the place (for everybody else, and for what one may do where) as a short walk from
+    // where it has the member to there; the member itself is not told. A spot one cannot stand on, one too far
+    // off to have walked there, or a step from a game's table is answered with where the server has one.
+    step(conn, m) {
+      const p = presOf(conn), x = Math.round(+m.x * 100) / 100, y = Math.round(+m.y * 100) / 100;
+      if (!p || !Number.isFinite(x) || !Number.isFinite(y)) return;
+      const far = (now() - p.t0) / 1000 * ROOM.speed, [cx, cy] = posAt(p.path, far);
+      if (p.open || p.busy || !isFree(x, y) || Math.hypot(x - cx, y - cy) > STEP_FAR) return conn.send(J({ t: 'mv', u: p.u.id, p: pathFrom(p.path, far), sit: p.sit }));
+      p.path = [[Math.round(cx * 100) / 100, Math.round(cy * 100) / 100], [x, y]]; p.t0 = now(); p.sit = null;
+      cast(conn.gid, { t: 'mv', u: p.u.id, p: p.path, sit: null }, p.u.id);
     },
 
     sit(conn, m) {

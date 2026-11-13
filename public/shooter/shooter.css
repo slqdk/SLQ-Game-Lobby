@@ -36,13 +36,24 @@
 .sh-bar { width: 220px; height: 16px; border-radius: 9px; background: rgba(10, 14, 20, .6); overflow: hidden; box-shadow: 0 0 0 2px rgba(255, 255, 255, .18); }
 .sh-bar i { display: block; height: 100%; width: 100%; background: linear-gradient(#7fe36a, #45b83a); transition: width .15s; }
 .sh-health.low .sh-bar i { background: linear-gradient(#ff7a6a, #d23b3b); }
-.sh-weapon { position: absolute; right: 18px; bottom: 16px; text-align: right; }
-.sh-weapon b { display: block; font-size: 1.2rem; }
-.sh-weapon span { display: block; font-size: 1.7rem; font-variant-numeric: tabular-nums; min-height: 1.2em; }
-.sh-slots { display: flex; gap: 5px; justify-content: flex-end; margin-top: 4px; }
-.sh-slots i { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; font-style: normal; font-size: .8rem; background: rgba(10, 14, 20, .5); opacity: .35; text-shadow: none; }
-.sh-slots i.own { opacity: .85; }
-.sh-slots i.on { background: #ffb347; color: #1c1728; opacity: 1; }
+/* the weapons, in the middle at the bottom: the one in the hands by name with what is in it, and a box for each
+   key with a picture of the weapon when one has it */
+.sh-weapon { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); }
+.sh-wline { display: flex; gap: 14px; justify-content: center; align-items: baseline; margin-bottom: 9px; white-space: nowrap; }
+.sh-wline b { font-size: 1.15rem; }
+.sh-wline span { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.sh-wline span:empty { display: none; }
+.sh-slots { display: flex; gap: 8px; justify-content: center; }
+.sh-slot { position: relative; width: 106px; height: 62px; border-radius: 10px; background: rgba(10, 14, 20, .5); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .1); opacity: .4; transition: transform .12s, background .12s, box-shadow .12s; }
+.sh-slot canvas { position: absolute; left: 7px; top: 6px; width: calc(100% - 14px); height: calc(100% - 12px); object-fit: contain; visibility: hidden; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .55)); }
+.sh-slot i { position: absolute; left: 8px; top: 4px; font-style: normal; font-size: .8rem; opacity: .9; }
+.sh-slot em { position: absolute; right: 8px; bottom: 3px; font-style: normal; font-size: .9rem; font-variant-numeric: tabular-nums; }
+.sh-slot.own { opacity: 1; }
+.sh-slot.own canvas { visibility: visible; }
+.sh-slot.empty em { color: #ff8577; }
+.sh-slot.on { background: rgba(255, 179, 71, .26); box-shadow: inset 0 0 0 2px #ffb347, 0 5px 14px rgba(0, 0, 0, .35); transform: translateY(-6px) scale(1.07); }
+.sh-slot.on i { color: #ffc878; }
+@media (max-width: 1000px) { .sh-slot { width: 80px; height: 48px; } .sh-slots { gap: 6px; } }
 
 .sh-dmg { position: absolute; inset: 0; opacity: 0; box-shadow: inset 0 0 150px 45px rgba(200, 25, 25, .8); }
 .sh-arrow { position: absolute; left: 50%; top: 50%; width: 260px; height: 260px; opacity: 0; border-radius: 50%; border: 0 solid transparent; border-top: 10px solid rgba(255, 70, 60, .85); transform: translate(-50%, -50%); filter: blur(1px); }

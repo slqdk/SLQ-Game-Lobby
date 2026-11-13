@@ -20,7 +20,7 @@ import { createEagleEye } from '../server/eagleeye.js';
 import { createArena } from '../server/arena.js';
 import { buildNav } from '../server/arena-nav.js';
 import { buildWorld, nullThree, EYE, RAD, STEP } from '../public/shooter/world.js';
-import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, FLAG, dirAim, aimDir, falloff, zoneAt, flyShot, newShot } from '../public/shooter/rules.js';
+import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, DINO, FLAG, dirAim, aimDir, falloff, zoneAt, flyShot, newShot } from '../public/shooter/rules.js';
 import { ECON, PRANKS, JUKE, ITEMS, DRINKS, BAR, LOOK, cleanLook, randomLook } from '../public/shared/defs.js';
 import { tuneIds, tuneBeats } from '../public/js/music.js';
 import { ROOM, STATIONS, STATION, isFree, nearestFree, findPath, pathLen } from '../public/shared/room.js';
@@ -808,6 +808,35 @@ section('skydespillet: banen, og hvor robotterne kan gå');
   check('en hurtig kugle springer ikke gennem en person eller ud gennem hækken', hit1 === 'body' && wall === 'wall' && s2.z < 55.5);
 }
 
+section('skydespillet: lydene');
+{
+  // every sound is worked out here as the browser does it (at half the rate: enough to judge them by, and quicker)
+  const { SOUNDS, renderSound, arenaEcho, VOICES } = await import('../public/shooter/sounds.js');
+  const SR = 22050, first = {}, bad = [], t0 = Date.now();
+  const measure = x => { let pk = 0, e = 0, ok = true, zc = 0, heard = 0; for (let i = 0; i < x.length; i++) { if (!Number.isFinite(x[i])) ok = false; const a = Math.abs(x[i]); if (a > pk) pk = a; e += x[i] * x[i]; if (i && x[i] * x[i - 1] < 0) zc++; } for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) > pk * 0.02) heard = i; return { ok, pk, rms: Math.sqrt(e / x.length), secs: x.length / SR, heard: heard / SR, cross: zc / (x.length / SR), end: Math.abs(x[x.length - 1]) }; };
+  let takes = 0;
+  for (const [name, [, n]] of Object.entries(SOUNDS)) for (let v = 0; v < n; v++) {
+    const x = renderSound(name, SR, v), q = measure(x); takes++;
+    if (!q.ok || q.pk > 1 || q.pk < 0.5 || q.rms < 0.02 || q.secs < 0.02 || q.secs > 2.6 || (name !== 'train' && q.end > 0.02)) bad.push(name + ':' + v);
+    if (v === 0) first[name] = Object.assign(q, { x });
+  }
+  const ms = Date.now() - t0;
+  check('hver lyd kan regnes ud uden browser: endelig, hørbar, ikke for høj og med en blød slutning', bad.length === 0 && Object.keys(SOUNDS).length >= 40 && takes >= 80, bad.join(' ') + ' (' + takes + ' optagelser på ' + ms + ' ms)');
+  check('det går hurtigt nok til at ske, mens menuen står der', ms < 6000, ms + ' ms');
+  const again = renderSound('shot_pistol', SR, 0), other2 = renderSound('shot_pistol', SR, 1);
+  check('en lyd er den samme hver gang, og dens optagelser er ikke ens', again.every((v, i) => v === first.shot_pistol.x[i]) && other2.some((v, i) => v !== again[i]) && renderSound('findes ikke', SR) === null);
+  // the weapons are heard apart: the sniper's shot rolls on longest, the bad pistol's is over at once and has least weight
+  const low = x => { let y = 0, e = 0, all = 0; const k = 1 - Math.exp(-2 * Math.PI * 160 / SR); for (let i = 0; i < x.length; i++) { y += (x[i] - y) * k; e += y * y; all += x[i] * x[i]; } return e / all; };
+  check('våbnene kan høres fra hinanden: snigskytten ruller længst, den dårlige pistol er kortest og tyndest', first.shot_sniper.heard > first.shot_pistol.heard * 1.5 && first.shot_pistol.heard > first.shot_badgun.heard * 2 && low(first.shot_badgun.x) < low(first.shot_pistol.x) && first.explosion.heard > first.shot_sniper.heard,
+    ['shot_sniper', 'shot_pistol', 'shot_badgun', 'explosion'].map(n => first[n].heard.toFixed(2)).join(' ') + ' s; lavt: ' + low(first.shot_pistol.x).toFixed(2) + ' ' + low(first.shot_badgun.x).toFixed(2));
+  check('et hovedskud ringer lysere og længere end et almindeligt træf, og et træf er et kort slag, ikke et bip', first.headshot.cross > first.hit.cross * 1.5 && first.headshot.heard > first.hit.heard * 1.5 && first.hit.heard < 0.12 && first.thud.heard < 0.16);
+  check('stemmerne er forskellige: en kvindes er lysere end en mands, og et dødsskrig er længere end et grynt', Object.keys(VOICES).join() === 'm,f,r' && first.grunt_f.cross > first.grunt_m.cross * 1.3 && first.cry_m.secs > first.grunt_m.secs * 2 && first.grunt_r.x.some((v, i) => Math.abs(v - first.grunt_m.x[i]) > 0.1));
+  check('dinoens brøl varer lige så længe, som den står og brøler', first.dino_roar.heard > DINO.roar - 0.25 && first.dino_roar.secs < DINO.roar + 0.3 && first.dino_roar.rms > first.dino_hurt.rms * 0.8, first.dino_roar.heard.toFixed(2) + ' s');
+  const ir = arenaEcho(SR, 1.2), energy = ch => ch.reduce((n, v) => n + v * v, 0);
+  check('arenaens ekko er to kanaler, der ikke er ens, og som dør ud', ir.length === 2 && ir[0].length === ir[1].length && ir.every(ch => ch.every(Number.isFinite) && Math.abs(energy(ch) - 1) < 0.2 && Math.abs(ch[ch.length - 1]) < 1e-3) && ir[0].some((v, i) => v !== ir[1][i])
+    && energy(ir[0].subarray(0, SR / 4)) > energy(ir[0].subarray(SR / 2)) * 5);
+}
+
 section('klubhuset i 3D: saloonen og figurerne');
 {
   // built here without a screen: the saloon's furniture (every piece where the paths expect it), and a figure
@@ -995,6 +1024,33 @@ section('skydespillet: en kamp i arkaden');
   check('en ny kamp tager en ud af den gamle', mine(A).m !== m2 && [...m2.ents.values()].filter(e => e.kind === 'human').length === 1 && botsOf().length === 5);
   C.send({ t: 'anew', mode: 'ffa', fill: 0, level: 1 });
   check('en gruppe kan have to kampe ad gangen, ikke tre', /allerede 2 kampe/.test(C.err()));
+  // the dinos of Stjernejagt: one roars before it attacks, and shoots only when it has roared
+  {
+    const ms = mine(A).m, e = mine(A).e;
+    for (let k = 0; k < 20 * (ARENA.countdown + 2) && ms.state !== 'active'; k++) { clock += 50; arena.tick(0.05); }
+    const foe = ms.dinos.find(d => d.team !== e.team), home = [e.x, e.z];
+    // a place in front of it from where it can be seen: twelve steps away, on the arena's side of it
+    let spot = null;
+    for (let r = 12; r >= 5 && !spot; r -= 1) for (let k = 0; k < 24 && !spot; k++) { const x = foe.x + Math.sin(k * 0.2618) * r, z = foe.z + Math.cos(k * 0.2618) * r; if (ms.world.hitWorld(x, 1, z) === false || !ms.world.hitWorld(x, 1, z)) { if (ms.world.losClear(foe.x, 1.5, foe.z, x, 1, z)) spot = [x, z]; } }
+    const shotsOf = () => A.since('af').filter(q => q.dino === foe.id).length, roarsOf = () => A.since('aroar').filter(q => q.id === foe.id).length;
+    const put = (x, z) => { e.x = x; e.z = z; e.y = 0; e.alive = true; };
+    spot = spot || [foe.x, foe.z + 12];
+    put(...spot); mark(A);
+    clock += 50; arena.tick(0.05);
+    const at0 = [foe.x, foe.z], roared = roarsOf();
+    tickFor(DINO.roar - 0.15);
+    const early = shotsOf(), stood = Math.hypot(foe.x - at0[0], foe.z - at0[1]);
+    tickFor(4);
+    const later = shotsOf(), again = roarsOf();
+    check('en dino brøler, når den får øje på en fjende, og står stille imens', ms.state === 'active' && !!foe && !!spot && roared === 1 && stood < 0.01, [ms.state, !!spot, roared, stood.toFixed(2)].join(' '));
+    check('den skyder først, når den har brølet, og brøler ikke igen, så længe fjenden er der', early === 0 && later >= 2 && again === 1, early + ' skud før, ' + later + ' efter, ' + again + ' brøl');
+    // the enemy goes away: after a while the dino has calmed down, and roars again the next time
+    put(home[0], home[1]); tickFor(DINO.calm - 1); put(...spot); mark(A); tickFor(0.2);
+    const soon = roarsOf();
+    put(home[0], home[1]); tickFor(DINO.calm + 0.5); put(...spot); mark(A); tickFor(0.2);
+    check('kommer fjenden hurtigt igen, brøler den ikke; har den fået ro i et stykke tid, brøler den igen', soon === 0 && roarsOf() === 1, soon + ' / ' + roarsOf());
+    put(home[0], home[1]);
+  }
   A.send({ t: 'aleave' });
   // B and the robots: a whole round is played out
   const a0 = B.me().chips, start = clock;
@@ -1522,10 +1578,10 @@ section('kasinoet: blackjack');
   check('en indsats, bordet ikke tager, eller flere jetoner end man har, afvises', /Den indsats/.test(e1) && /ikke jetoner nok/.test(B.err()) && uB.chips === 40);
   uB.chips = b0; C.send({ t: 'bjopen' });
   check('den, der ser på, ser bordet men ikke dealerens skjulte kort', bj(C).seats[0].bet === 20 && C.last('bj').v.shoe >= 0);
+  mark(C);                // (from here on C counts the rounds' results: the very first deal can end a round at once)
   B.send({ t: 'bjbet', bet: 50 });
   check('når alle har satset, gives kortene', bj(A).phase !== 'bet' && bj(A).round === 1 && uB.chips === b0 - 50 && bj(C).seats[3].hands.length >= 1);
   // play rounds by standing on 17 like the dealer: every chip must be accounted for, and everybody must be told
-  mark(C);
   const start = uA.chips + uB.chips + 70;
   let rounds = 0, paidA = 0, paidB = 0, stakedA = 20, stakedB = 50, told = 0;
   const P = { [idA]: A, [idB]: B };

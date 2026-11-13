@@ -186,7 +186,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     const out = { id: uid, name: u.name, role: roleOf(g, uid), look: cleanLook(u.look, u.items), chips: u.chips, dnd: !!u.dnd, seen: u.seen, stats: u.stats, on: !!p, today: todayOf(u) };
     if (!p && g.rest && g.rest[uid]) out.rest = g.rest[uid];                // not here: asleep on the floor, where they were
     if (p) {
-      out.p = pathFrom(p.path, (now() - p.t0) / 1000 * ROOM.speed); out.sit = p.sit; out.open = p.open; out.busy = p.busy;
+      out.p = pathFrom(p.path, (now() - p.t0) / 1000 * ROOM.speed); out.sit = p.sit; out.open = p.open; out.busy = p.busy; out.cabin = p.cabin || 0;
       if (p.busy === 'slot') out.slot = p.slot;
       if (p.busy === 'slot' || p.busy === 'bj') out.net = p.net;
       out.fx = Object.entries(p.fx).filter(e => e[1] > now()).map(e => [e[0], e[1] - now()]);
@@ -248,9 +248,22 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     return 0;
   }
   function lieDown(g, uid, p) {
+    if (p.cabin) {                                                   // at home: one sleeps in one's own bed, and wakes up there
+      if (g.rest) delete g.rest[uid]; (g.home || (g.home = {}))[uid] = 1; store.saveGroup(g);
+      return null;
+    }
     const [x, y] = here(p), spot = restSpot(g, uid, x, y, facingOf(p));
-    (g.rest || (g.rest = {}))[uid] = spot; store.saveGroup(g);
+    (g.rest || (g.rest = {}))[uid] = spot; if (g.home) delete g.home[uid]; store.saveGroup(g);
     return spot;
+  }
+  // ---------- one's own cabin ----------
+  // Søren: "hvis man trykker E på døren, så kommer man direkte ind i sin egen hytte ... Man skal kunne komme tilbage til
+  // klubhuset ved at gå ud af døren". p.cabin: 0 in the saloon, 1 at home, 2 asleep in one's bed. Nobody else is ever
+  // in one's cabin, so the server only keeps that, and where one comes out again (by the door).
+  const CABIN_DOOR = STATION.cabin.use;
+  function outOfCabin(gid, p) {
+    p.cabin = 0; p.sit = null; p.path = [nearestFree(CABIN_DOOR[0], CABIN_DOOR[1])]; p.t0 = now();
+    cast(gid, { t: 'cabin', u: p.u.id, in: 0, p: p.path });
   }
   // the server is stopped (an update): everybody lies down where they are, so that they get up there again
   function sleepAll() {
@@ -259,12 +272,13 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
   // Sends somebody walking. `sit` ([station, seat]) makes them sit down when they get there.
   function walk(gid, p, to, sit = null) {
+    if (p.cabin) outOfCabin(gid, p);                                // (called to a table from one's cabin: out of the door first)
     const [x, y] = here(p);
     p.path = findPath([x, y], to); p.t0 = now(); p.sit = sit;
     cast(gid, { t: 'mv', u: p.u.id, p: p.path, sit });
   }
   function standUp(gid, p) {
-    if (!p.sit) return;
+    if (!p.sit || p.cabin) return;
     const [x, y] = here(p);
     p.path = [[x, y]]; p.t0 = now(); p.sit = null;
     cast(gid, { t: 'mv', u: p.u.id, p: p.path, sit: null });
@@ -334,7 +348,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       p.conn.send(J({ t: 'out', g: g.id }));
       if (!room.size) rooms.delete(g.id);
     }
-    delete g.members[uid]; if (g.rest) delete g.rest[uid];
+    delete g.members[uid]; if (g.rest) delete g.rest[uid]; if (g.home) delete g.home[uid];
     store.saveGroup(g);
     cast(g.id, { t: 'gone', u: uid });
     if (text) addChat(g, null, text);
@@ -716,22 +730,40 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (!g || !g.members[u.id]) fail('Du er ikke med i den gruppe.');
       leaveRoom(conn);
       if (!rooms.has(g.id)) rooms.set(g.id, new Map());
-      const lay = g.rest && g.rest[u.id], spot = lay ? nearestFree(lay[0], lay[1]) : nearestFree(ROOM.spawn[0] + (rand() - 0.5) * 2, ROOM.spawn[1] + rand() * 0.9);      // up again where one lay, or in by the door
-      rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, busy: '', slot: '', net: 0, bj: false, fx: {}, drink: null });
+      const atHome = !!(g.home && g.home[u.id]), lay = !atHome && g.rest && g.rest[u.id];
+      const spot = atHome ? nearestFree(CABIN_DOOR[0], CABIN_DOOR[1]) : lay ? nearestFree(lay[0], lay[1]) : nearestFree(ROOM.spawn[0] + (rand() - 0.5) * 2, ROOM.spawn[1] + rand() * 0.9);      // at home, up again where one lay, or in by the door
+      rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, busy: '', slot: '', net: 0, bj: false, fx: {}, drink: null, cabin: atHome ? 2 : 0 });
       conn.gid = g.id;
       cast(g.id, { t: 'on', m: member(g, u.id) }, u.id);
       conn.send(J({
         t: 'room', g: { id: g.id, name: g.name, owner: g.owner, invite: isAdmin(g, u.id) ? g.invite : '' },
         mem: Object.keys(g.members).map(id => member(g, +id)), chat: g.chat.slice(-LIMITS.chatSend),
-        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), bj: g.bj ? bjSum(g.bj) : null, juke: jukeOf(g.id), now: now(), up: lay || null,
+        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), bj: g.bj ? bjSum(g.bj) : null, juke: jukeOf(g.id), now: now(), up: lay || null, home: atHome ? 1 : 0,
       }));
     },
 
     leave(conn) { leaveRoom(conn); conn.send(J({ t: 'groups', groups: groupList(conn.user) })); },
 
+    // in through the door to one's cabin (from beside it), to sleep in one's bed or get up, and out again
+    cabin(conn, m) {
+      const p = need(conn);
+      if (m.in) {
+        if (!p.cabin) {
+          if (p.busy) fail('Gør det færdigt, du er i gang med, først.');
+          const [x, y] = here(p);
+          if (Math.hypot(x - CABIN_DOOR[0], y - CABIN_DOOR[1]) > 2.5) fail('Gå hen til døren først.');
+          p.sit = null; p.path = [CABIN_DOOR.slice()]; p.t0 = now();
+        }
+        const want = m.sleep ? 2 : 1;
+        if (p.cabin === want) return;
+        p.cabin = want;
+        cast(conn.gid, { t: 'cabin', u: p.u.id, in: want });
+      } else if (p.cabin) outOfCabin(conn.gid, p);
+    },
+
     move(conn, m) {
       const p = presOf(conn), x = +m.x, y = +m.y;
-      if (!p || p.open || p.busy || !Number.isFinite(x) || !Number.isFinite(y)) return;      // at a game one sits still
+      if (!p || p.open || p.busy || p.cabin || !Number.isFinite(x) || !Number.isFinite(y)) return;      // at a game one sits still; at home one is not here
       walk(conn.gid, p, [x, y]);
     },
 
@@ -741,7 +773,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     // off to have walked there, or a step from a game's table is answered with where the server has one.
     step(conn, m) {
       const p = presOf(conn), x = Math.round(+m.x * 100) / 100, y = Math.round(+m.y * 100) / 100;
-      if (!p || !Number.isFinite(x) || !Number.isFinite(y)) return;
+      if (!p || p.cabin || !Number.isFinite(x) || !Number.isFinite(y)) return;
       const far = (now() - p.t0) / 1000 * ROOM.speed, [cx, cy] = posAt(p.path, far);
       if (p.open || p.busy || !isFree(x, y) || Math.hypot(x - cx, y - cy) > STEP_FAR) return conn.send(J({ t: 'mv', u: p.u.id, p: pathFrom(p.path, far), sit: p.sit }));
       p.path = [[Math.round(cx * 100) / 100, Math.round(cy * 100) / 100], [x, y]]; p.t0 = now(); p.sit = null;
@@ -750,7 +782,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
     sit(conn, m) {
       const p = presOf(conn), st = pick(STATION, m.st);
-      if (!p || p.open || p.busy || !st || (st.kind !== 'sit' && st.kind !== 'bar')) return;
+      if (!p || p.open || p.busy || p.cabin || !st || (st.kind !== 'sit' && st.kind !== 'bar')) return;
       if (p.sit && p.sit[0] === st.id) return;
       const seat = freeSeat(conn.gid, st, conn.user.id);
       if (seat >= 0) return walk(conn.gid, p, st.seats[seat], [st.id, seat]);
@@ -818,6 +850,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (!def) fail('Det drilleri findes ikke.');
       if (!to) fail('Det går kun, når den anden er i klubhuset.');
       if (to.u.id === u.id) fail('Du kan ikke drille dig selv.');
+      if (to.cabin) fail(to.u.name + ' er i sin hytte.');
       if (u.dnd) fail('Slå «Forstyr ikke» fra, før du driller andre.');
       if (to.u.dnd) fail(to.u.name + ' vil ikke forstyrres lige nu.');
       if (now() - conn.prankAt < PRANK_GAP) fail('Lige et øjeblik …');

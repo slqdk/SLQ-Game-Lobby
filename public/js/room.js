@@ -19,7 +19,8 @@ export function createRoom(canvas, hooks) {
   let s = 40, dpr = 1, cw = 0, ch = 0, ox = 0, oy = 0, camX = 0, camFree = false;
   let bg = null, pieces = [], stools = {}, builtFor = '', groupName = '';
   let labels = {}, hover = null, hintUntil = 0, music = false, down = null;
-  const casino = { pot: 0, lines: [], spin: {} }, spins = [];     // the jackpot, today's board, which machines turn; results that wait for the reels to stop
+  const casino = { pot: 0, lines: [], spin: {} }, spins = [];
+  let cabins = [];                                                 // who is in their cabin (the board by the door)     // the jackpot, today's board, which machines turn; results that wait for the reels to stop
 
   // ---------- layout and the pictures that are kept ----------
   function resize() {
@@ -63,6 +64,7 @@ export function createRoom(canvas, hooks) {
     const off = !m.on && !!m.rest, p = m.p && m.p.length ? m.p : off ? [[m.rest[0], m.rest[1]]] : [[ROOM.spawn[0], ROOM.spawn[1]]];
     const a = { id: m.id, name: m.name, look: m.look, dnd: m.dnd, path: p, len: pathLen(p), dist: 0, x: p[0][0], y: p[0][1], sit: m.sit || null, seated: false,
       off, rest: m.rest || null, lie: off ? 1 : 0, lieFrom: null, zAt: 0,      // off: not here, asleep on the floor at rest ([x, y, which way the feet point]); lie: 0..1
+      inCabin: !!m.cabin,                                                   // in their own cabin (not to be seen here)
       moving: false, walk: 0, phase: 0, dir: 0, dirT: 0, hop: 0, emote: '', emoteAt: 0, fxs: {}, drink: null, buzz: m.buzz || 0, buzzAt: T, bubble: null, net: m.busy === 'slot' || m.busy === 'bj' ? m.net || 0 : null,
       talkUntil: 0, seed: (m.id * 2.399) % 6.28, born: T };
     if (a.sit && p.length < 2) a.seated = true;
@@ -226,10 +228,10 @@ export function createRoom(canvas, hooks) {
     if (!bg) return;
     c.drawImage(bg, ox, oy, roomW, VIEW_H * s);
     for (let i = spins.length - 1; i >= 0; i--) if (T >= spins[i].at) { const q = spins[i]; spins.splice(i, 1); landSpin(q); }
-    c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; paintLive(c, T, music, casino); c.restore();
+    c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; paintLive(c, T, music, casino, cabins); c.restore();
     // furniture and people, the ones at the back first
     const list = pieces.map(p => ({ key: p.key, p }));
-    for (const a of actors.values()) list.push({ key: place(a)[3], a });
+    for (const a of actors.values()) if (!a.inCabin) list.push({ key: place(a)[3], a });
     list.sort((u, v) => u.key - v.key);
     for (const it of list) {
       if (it.a) drawActor(it.a);
@@ -323,6 +325,7 @@ export function createRoom(canvas, hooks) {
   // ---------- clicks ----------
   // The part of a piece of furniture one can click: [left, top, right, bottom] in room units (picture space).
   function hitBox(st) {
+    if (st.flat) { const [x, z, w, h] = st.flat; return [x, V(0, z + h), x + w, V(0, z)]; }
     if (st.wall) { const [x, z, w, h] = st.wall; return [x, V(0, z + h), x + w, V(0, z)]; }
     if (st.floor) { const [cx, cy, r] = st.floor; return [cx - r, V(cy - r), cx + r, V(cy + r)]; }
     if (st.box) { const [x, y, w, d] = st.box; return [x, V(y, st.h), x + w, V(y + d)]; }
@@ -331,6 +334,7 @@ export function createRoom(canvas, hooks) {
   function pick(px, py) {
     let best = null;
     for (const a of actors.values()) {
+      if (a.inCabin) continue;
       const [x, y, z, key] = place(a), ax = X(x), ay = Y(y, z), wide = a.lie > 0.5 ? 1.05 : 0.5;
       if (Math.abs(px - ax) < s * wide && py < ay + s * (seatOf(a) ? 0.5 : 0.1) && py > ay - s * (topOf(a) + 0.1) && (!best || key > best.key)) best = { actor: a, key };
     }
@@ -388,6 +392,17 @@ export function createRoom(canvas, hooks) {
     hint(seconds = 7) { hintUntil = T + seconds; },
     spot: id => { const b = hitBox(STATION[id]); return [X((b[0] + b[2]) / 2), oy + (b[1] + b[3]) / 2 * s]; },      // where a piece of furniture is in the picture (for trying things out)
     here: id => actors.has(id) && !actors.get(id).off,
+    where(id) { const a = actors.get(id); return a ? [a.x, a.y] : null; },
+    // somebody goes into their own cabin or comes out of it (path: where they come out); this view has no cabin to show
+    cabin(id, inn, path) {
+      const a = actors.get(id); if (!a) return;
+      const was = a.inCabin; a.inCabin = !!inn;
+      if (!inn && path && path.length) { a.path = [path[0]]; a.len = a.dist = 0; a.x = path[0][0]; a.y = path[0][1]; a.sit = null; a.seated = false; }
+      if (was !== a.inCabin) play('door');
+    },
+    homeNow: () => false,
+    setCabins(list) { cabins = list; },
+    setOwner() {},
     sitting: id => { const a = actors.get(id); return a && a.sit ? a.sit[0] : ''; },      // the furniture somebody sits at (or walks to)
     count: () => [...actors.values()].filter(a => !a.off).length,
 
@@ -478,7 +493,7 @@ export function createRoom(canvas, hooks) {
     // the members as they stand right now, in the shape the server sends them: for handing the room over to the other way of showing it (room3d.js)
     snapshot() {
       return [...actors.values()].map(a => ({ id: a.id, name: a.name, look: a.look, dnd: a.dnd, on: !a.off, rest: a.off ? a.rest : undefined, p: a.dist < a.len ? [[a.x, a.y], a.path[a.path.length - 1]] : [[a.x, a.y]], sit: a.sit,
-        fx: Object.keys(a.fxs).map(k => [k, Math.max(0, (PRANKS[k].dur - (T - a.fxs[k])) * 1000)]), drink: a.drink ? [a.drink.k, Math.max(0, (BAR.lasts - (T - a.drink.t0)) * 1000)] : null, buzz: buzzNow(a), busy: a.net !== null ? 'slot' : '', net: a.net || 0 }));
+        fx: Object.keys(a.fxs).map(k => [k, Math.max(0, (PRANKS[k].dur - (T - a.fxs[k])) * 1000)]), drink: a.drink ? [a.drink.k, Math.max(0, (BAR.lasts - (T - a.drink.t0)) * 1000)] : null, buzz: buzzNow(a), busy: a.net !== null ? 'slot' : '', net: a.net || 0, cabin: a.inCabin ? 1 : 0 }));
     },
     // where on the canvas an avatar's head is (for a menu next to it)
     screenOf(id) { const a = actors.get(id); if (!a) return null; const [x, y, z] = place(a); return [X(x), Y(y, z + topOf(a))]; },

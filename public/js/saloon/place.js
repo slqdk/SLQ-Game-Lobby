@@ -127,10 +127,11 @@ export function buildSaloon(THREE, kit, groupName = '') {
   const winHoles = (list, sOf) => list.map(v => [sOf(v) - WIN.w / 2, sOf(v) + WIN.w / 2, WIN.y0, WIN.y1]);
   { const [dx, , dw, dh] = STATION.door.wall;
     wall([0, 0], [CX, 0], CX, paperB, [[dx, dx + dw, 0, dh]]); wall([CX, 0], [W, 0], W - CX, paper2B); }                                                  // the back wall, with the doorway
-  wall([0, D], [0, 0], D, paperB, winHoles(WIN.ends, z => D - z)); wall([W, 0], [W, D], D, paper2B, winHoles(WIN.ends, z => z));                              // the two ends
+  const WD = STATION.cabin.west;                                   // the door to the cabins in the west end: [from z, bottom, width, height]
+  wall([0, D], [0, 0], D, paperB, [...winHoles(WIN.ends, z => D - z), [D - WD[0] - WD[2], D - WD[0], 0, WD[3]]]); wall([W, 0], [W, D], D, paper2B, winHoles(WIN.ends, z => z));                              // the two ends
   wall([CX, D], [0, D], CX, paperB, winHoles(WIN.front.filter(x => x < CX), x => CX - x)); wall([W, D], [CX, D], W - CX, paper2B, winHoles(WIN.front.filter(x => x > CX), x => W - x));      // the front wall (only seen from inside)
   // the rail between boards and paper, and a skirting board
-  for (const [x0, z0, x1, z1] of [[0, 0, W, 0], [0, 0, 0, D], [W, 0, W, D], [0, D, W, D]]) {
+  for (const [x0, z0, x1, z1] of [[0, 0, W, 0], [0, 0, 0, STATION.cabin.west[0] - 0.08], [0, STATION.cabin.west[0] + STATION.cabin.west[2] + 0.08, 0, D], [W, 0, W, D], [0, D, W, D]]) {
     const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz), inx = z0 === 0 && z1 === 0 ? 0 : x0 === 0 && x1 === 0 ? 0.04 : x0 === W && x1 === W ? -0.04 : 0, inz = z0 === 0 && z1 === 0 ? 0.04 : z0 === D && z1 === D ? -0.04 : 0;
     const B2 = z0 === D && z1 === D ? near : solid;                // (the front wall's go with the front wall)
     B2.box((x0 + x1) / 2 + inx, WAIN, (z0 + z1) / 2 + inz, dx ? len : 0.08, 0.09, dz ? len : 0.08, DARK);
@@ -168,7 +169,7 @@ export function buildSaloon(THREE, kit, groupName = '') {
         const z0 = MID + sd * (MID - 0.2), zm = MID + sd * MID / 2;
         high.rod(x, roofY(z0) - 0.1, z0, x, RIDGE - 0.42, MID + sd * 0.12, 0.17, log, 10);                         // a rafter
         high.rod(x, H + 0.16, MID + sd * 0.3, x, roofY(zm) - 0.42, zm, 0.11, log, 8);                              // a strut
-        high.box(x, roofY(z0) - 0.02, z0 + sd * 0.02, 0.44, 0.07, 0.3, IRON, -sd * PITCH);                        // an iron strap at its foot
+        high.box(x, roofY(z0) - 0.02, z0 + sd * 0.02, 0.44, 0.07, 0.3, IRON, sd * PITCH);                         // an iron strap at its foot (a turn about x by +a tips the far end down)
       }
       high.rod(x, H + 0.1, MID, x, RIDGE - 0.3, MID, 0.15, log, 10);                                               // the post in the middle
       high.box(x, H + 0.3, MID, 0.4, 0.09, 0.36, IRON); high.box(x, RIDGE - 0.62, MID, 0.4, 0.09, 0.4, IRON);      // straps round its foot and its head
@@ -181,7 +182,7 @@ export function buildSaloon(THREE, kit, groupName = '') {
     high.rod(0, RIDGE - 0.26, MID, W, RIDGE - 0.26, MID, 0.17, log, 10);
     for (const sd of [-1, 1]) for (const k of [1 / 3, 2 / 3]) { const z = MID + sd * MID * k; high.rod(0, roofY(z) - 0.2, z, W, roofY(z) - 0.2, z, 0.12, log, 8); }
     // light rafters under the boards, one every step
-    for (let x = 1; x < W; x += 1) if (x % 4) for (const sd of [-1, 1]) high.box(x, (H + RIDGE) / 2 - 0.06, MID + sd * MID / 2, 0.09, 0.11, RUN - 0.1, old, -sd * PITCH);
+    for (let x = 1; x < W; x += 1) if (x % 4) for (const sd of [-1, 1]) high.box(x, (H + RIDGE) / 2 - 0.06, MID + sd * MID / 2, 0.09, 0.11, RUN - 0.1, old, sd * PITCH);
     // something over the casino's end: a pair of antlers on a shield (a hunting lodge has them)
     for (const [x, e] of [[0.12, 1], [W - 0.12, -1]]) {
       high.box(x, H + 0.1, MID, 0.05, 0.5, 0.42, old);
@@ -264,22 +265,20 @@ export function buildSaloon(THREE, kit, groupName = '') {
     else if (r) pickBox(st.id, r[0] - r[2], 0, r[1] - r[3], r[0] + r[2], st.h, r[1] + r[3]);
     else if (st.wall) pickBox(st.id, st.wall[0], st.wall[1], 0, st.wall[0] + st.wall[2], st.wall[1] + st.wall[3], 0.25);
     else if (st.floor) pickBox(st.id, st.floor[0] - st.floor[2], 0, st.floor[1] - st.floor[2], st.floor[0] + st.floor[2], 0.06, st.floor[1] + st.floor[2]);
+    else if (st.west) pickBox(st.id, 0, st.west[1], st.west[0], 0.3, st.west[1] + st.west[3], st.west[0] + st.west[2]);
+    if (st.west) { signs.push([st.id, 0.25, st.west[1] + st.west[3] + 0.15, st.west[0] + st.west[2] / 2]); continue; }
     if (st.name) signs.push([st.id, b ? b[0] + b[2] / 2 : r ? r[0] : st.wall ? st.wall[0] + st.wall[2] / 2 : st.floor[0], st.wall ? st.wall[1] + st.wall[3] + 0.15 : (st.h || 0.1) + 0.35, b ? b[1] + b[3] / 2 : r ? r[1] : st.wall ? 0.1 : st.floor[1]]);
   }
 
-  // ---------- the wardrobe: a big cupboard with a looking glass ----------
-  { const [x, z, w, d] = STATION.wardrobe.box, h = 2.5, cx = x + w / 2;
-    solid.box(cx, h / 2, z + d / 2, w, h, d, wood(OAK));
-    solid.box(cx, h + 0.06, z + d / 2 + 0.04, w + 0.16, 0.12, d + 0.12, DARK); solid.box(cx, 0.06, z + d / 2 + 0.03, w + 0.1, 0.12, d + 0.08, DARK);
-    for (const s of [-1, 1]) {
-      solid.box(cx + s * w / 4, h / 2 + 0.05, z + d + 0.02, w / 2 - 0.08, h - 0.4, 0.04, wood(tone(OAK, 1.2)));
-      solid.ball(cx + s * 0.09, h / 2, z + d + 0.07, 0.04, BRASS);
-    }
-    glow.box(cx - w / 4, h / 2 + 0.1, z + d + 0.045, w / 2 - 0.3, h - 0.85, 0.01, [0.5, 0.62, 0.68]);                       // the looking glass
-    solid.box(cx + w / 4, h / 2 + 0.5, z + d + 0.045, w / 2 - 0.3, 0.7, 0.012, wood(tone(OAK, 0.8))); solid.box(cx + w / 4, h / 2 - 0.45, z + d + 0.045, w / 2 - 0.3, 0.7, 0.012, wood(tone(OAK, 0.8)));
-    // a hat and a hat box on top
-    solid.cyl(cx - 0.45, h + 0.12, z + 0.45, 0.36, 0.03, LEATHER, 16); solid.cyl(cx - 0.45, h + 0.15, z + 0.45, 0.17, 0.2, LEATHER, 12, 0.15);
-    solid.cyl(cx + 0.5, h + 0.12, z + 0.45, 0.3, 0.28, [0.6, 0.2, 0.25], 14); solid.cyl(cx + 0.5, h + 0.4, z + 0.45, 0.32, 0.05, CREAM, 14);
+  // ---------- by the back wall's west end: a bench and a row of coat pegs (the wardrobe has moved into the cabin) ----------
+  { const [x, z, w, d] = STATION.hall.box, cx = x + w / 2, seat = wood(tone(PINE, 0.9));
+    solid.box(cx, 0.46, z + d / 2, w, 0.07, d, seat); for (const s2 of [-1, 1]) solid.box(cx + s2 * (w / 2 - 0.1), 0.23, z + d / 2, 0.08, 0.46, d - 0.08, wood(OAK));
+    solid.box(cx, 0.2, z + d / 2, w - 0.3, 0.05, d - 0.15, wood(OAK));
+    solid.box(cx, 1.72, 0.04, w + 0.1, 0.14, 0.05, wood(OAK));
+    for (let i = 0; i < 5; i++) { const px = x + 0.2 + i * (w - 0.4) / 4; solid.rod(px, 1.72, 0.07, px, 1.76, 0.2, 0.018, BRASS, 5); solid.ball(px, 1.77, 0.21, 0.025, BRASS); }
+    solid.box(x + 0.2, 1.38, 0.17, 0.32, 0.62, 0.1, [0.4, 0.27, 0.16]); solid.box(x + 0.2, 1.55, 0.2, 0.12, 0.3, 0.06, [0.6, 0.1, 0.1]);       // a coat and a scarf
+    solid.cyl(x + 0.2 + 2 * (w - 0.4) / 4, 1.64, 0.25, 0.26, 0.03, LEATHER, 14); solid.cyl(x + 0.2 + 2 * (w - 0.4) / 4, 1.66, 0.25, 0.13, 0.16, LEATHER, 12, 0.11);       // a hat on a peg
+    solid.box(x + w - 0.2, 0.62, z + 0.25, 0.3, 0.26, 0.26, [0.55, 0.4, 0.22]);       // a bag on the bench
   }
 
   // ---------- the clothes shop (the 'kiosk' of the code): a counter, a till, shelves with goods, a dummy in a vest ----------
@@ -464,6 +463,21 @@ export function buildSaloon(THREE, kit, groupName = '') {
     solid.box(cx, h + 0.42, 0.07, 0.9, 0.36, 0.05, wood(PINE)); word('UD', cx, h + 0.42, 0.1, 0.84, 0.3);
   }
 
+  // ---------- the door to the cabins, in the west end: one's own cabin is out there among the pines ----------
+  { const [z0, , w, h] = STATION.cabin.west, cz = z0 + w / 2, log = wood(tone(OAK, 0.9));
+    for (const s2 of [-1, 1]) solid.box(-0.135, h / 2, cz + s2 * (w / 2 + 0.035), 0.27, h, 0.07, log);      // the wall's thickness round it
+    solid.box(-0.135, h + 0.035, cz, 0.27, 0.07, w + 0.14, log);
+    for (const s2 of [-1, 1]) solid.box(0.04, h / 2 + 0.03, cz + s2 * (w / 2 + 0.06), 0.06, h + 0.06, 0.12, wood(DARK));
+    solid.box(0.04, h + 0.1, cz, 0.06, 0.14, w + 0.28, wood(DARK));
+    solid.box(0.05, h + 0.45, cz, 0.05, 0.38, 1.3, wood(PINE)); word('HYTTERNE', 0.08, h + 0.45, cz, 1.2, 0.3, 'x+');
+    solid.box(0.06, 1.95, cz - w / 2 - 0.25, 0.12, 0.24, 0.12, IRON); glow.box(0.08, 1.95, cz - w / 2 - 0.25, 0.08, 0.17, 0.08, [2.4, 1.5, 0.6]);      // a lantern (on the side away from the board)
+    live.westDoor = { x: -0.12, z: z0, w, h };
+  }
+  { const [z0, y0, w, h] = STATION.cabins.west;                      // the board's frame (what is on it: setCabins)
+    for (const [dy, dz, hh, ww] of [[h / 2 + 0.04, 0, 0.08, w + 0.16], [-h / 2 - 0.04, 0, 0.08, w + 0.16], [0, w / 2 + 0.04, h, 0.08], [0, -w / 2 - 0.04, h, 0.08]]) solid.box(0.04, y0 + h / 2 + dy, z0 + w / 2 + dz, 0.06, hh, ww, wood(DARK));
+    live.cabinBoard = [0.03, y0 + h / 2, z0 + w / 2, w, h];
+  }
+
   // ---------- tables ----------
   // the board-game table: four in a row standing up, the ludo board lying down
   { const [x, z, w, d] = STATION.games.box, h = STATION.games.h, cx = x + w / 2, cz = z + d / 2;
@@ -558,7 +572,7 @@ export function buildSaloon(THREE, kit, groupName = '') {
   // the casino's name over the opening
   high.box(CX + 0.02, H - 1.2, D / 2, 0.08, 0.7, 3.4, wood(DARK)); word('KASINO', CX - 0.03, H - 1.2, D / 2, 3.2, 0.58, 'x-', '#ffcf6a', true);
   // wanted bills on the walls: the house robot, for cheating at dice
-  live.bills = [[0.02, 1.9, 6.4, 'x+'], [W - 0.02, 1.9, 6.4, 'x-'], [23.3, 2.6, 0.03, 'z+']];
+  live.bills = [[0.02, 1.85, STATION.cabin.west[0] - 0.75, 'x+'], [W - 0.02, 1.9, 6.4, 'x-'], [23.3, 2.6, 0.03, 'z+']];
 
   // ---------- painted words and bills: one sheet for all of them ----------
   const AT = 1024, ROW = 64, quads = batch(), quadsHigh = batch();
@@ -620,7 +634,86 @@ export function buildSaloon(THREE, kit, groupName = '') {
   // What is outside the windows and the door. From above (the whole room at once) there is no outdoors: then the
   // openings are filled with plain daylight instead. The one who holds the camera says which (room3d.js).
   const panes = new THREE.Group(); panes.visible = false; root.add(panes); meshes.push(paneB.mesh(glowMat, panes, 'panes'));
-  const outside = buildOutside(THREE, kit, { W, D, H, RIDGE, door: [STATION.door.wall[0], STATION.door.wall[2]] }); root.add(outside.group);
+  const outside = buildOutside(THREE, kit, { W, D, H, RIDGE, door: [STATION.door.wall[0], STATION.door.wall[2]], west: [STATION.cabin.west[0] + STATION.cabin.west[2] / 2, STATION.cabin.west[2], STATION.cabin.west[3]] }); root.add(outside.group);
+  // The saloon from outside: what one sees of it from one's cabin. Boards on the walls, a roof of shingles, warm light
+  // in the windows; the round windows in the gables and the door to the cabins. Only the outer side of each face is
+  // drawn, so from inside it costs nothing; the front wall's outside is hidden with `near`, the roof with `upper`.
+  const shell = new THREE.Group(), shellNear = new THREE.Group(), shellUp = new THREE.Group(); root.add(shell, shellNear, shellUp);
+  {
+    const OUT = 0.27, lit = outside.lit, tint = (nx, nz, x, y, z) => lit([1, 1, 1])(x, y, z, { x: nx, y: 0, z: nz }), GR = -0.22;
+    const siding = picture(256, 256, (g, w, h) => {
+      for (let i = 0; i < 8; i++) { const k = 0.82 + rnd() * 0.3; g.fillStyle = 'rgb(' + (128 * k | 0) + ',' + (72 * k | 0) + ',' + (44 * k | 0) + ')'; g.fillRect(i * 32, 0, 32, h); for (let j = 0; j < 8; j++) { g.fillStyle = 'rgba(' + (rnd() < 0.5 ? '60,30,14' : '200,150,110') + ',.12)'; g.fillRect(i * 32 + 4 + rnd() * 22, rnd() * h, 1.5, 30 + rnd() * 70); } }
+      for (let i = 0; i < 8; i++) { g.fillStyle = 'rgba(40,20,10,.55)'; g.fillRect(i * 32 - 3, 0, 6, h); g.fillStyle = 'rgba(255,220,180,.12)'; g.fillRect(i * 32 + 3, 0, 2, h); }
+    }, true);
+    const shingles = picture(256, 256, (g, w, h) => {
+      g.fillStyle = '#2a2624'; g.fillRect(0, 0, w, h);
+      for (let r = 0; r < 8; r++) for (let i = 0; i < 9; i++) { const x = i * 32 - (r % 2) * 16, k = 0.8 + rnd() * 0.4; g.fillStyle = 'rgb(' + (64 * k | 0) + ',' + (56 * k | 0) + ',' + (52 * k | 0) + ')'; g.fillRect(x + 1, r * 32 + 1, 30, 30); g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(x, r * 32 + 28, 32, 4); }
+    }, true);
+    const sideB = batch(), sideNearB = batch(), roofOut = batch(), trimB = batch(), trimNearB = batch();
+    // a wall's outside from its bottom corners a to b (seen from outside, left to right), with openings [from, to, bottom, top]
+    const outWall = (B, a, b, holes, nx, nz) => {
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]), ux = (b[0] - a[0]) / len, uz = (b[1] - a[1]) / len, P = (q, y) => [a[0] + ux * q, y, a[1] + uz * q], col = tint(nx, nz, (a[0] + b[0]) / 2, 2, (a[1] + b[1]) / 2);
+      const piece = (q0, q1, y0, y1) => { if (q1 - q0 > 1e-6 && y1 - y0 > 1e-6) B.quad(P(q0, y0), P(q1, y0), P(q1, y1), P(q0, y1), col, q0 / 2.4, y0 / 2.4, q1 / 2.4, y1 / 2.4); };
+      let q = 0;
+      for (const [h0, h1, y0, y1] of holes.slice().sort((p2, p3) => p2[0] - p3[0])) { piece(q, h0, GR, H); piece(h0, h1, GR, y0); piece(h0, h1, y1, H); q = h1; }
+      piece(q, len, GR, H);
+    };
+    const winsAt = (list, qOf) => list.map(v => [qOf(v) - WIN.w / 2, qOf(v) + WIN.w / 2, WIN.y0, WIN.y1]);
+    const [bx, , bw, bh] = STATION.door.wall;
+    outWall(sideB, [-OUT, -OUT], [-OUT, D + OUT], [...winsAt(WIN.ends, z => z + OUT), [WD[0] + OUT, WD[0] + WD[2] + OUT, 0, WD[3]]], -1, 0);      // the west end, with the door to the cabins
+    outWall(sideB, [W + OUT, D + OUT], [W + OUT, -OUT], winsAt(WIN.ends, z => D + OUT - z), 1, 0);
+    outWall(sideB, [W + OUT, -OUT], [-OUT, -OUT], [[W + OUT - bx - bw, W + OUT - bx, 0, bh]], 0, -1);                                         // the back, with the swing doors
+    outWall(sideNearB, [-OUT, D + OUT], [W + OUT, D + OUT], winsAt(WIN.front, x => x + OUT), 0, 1);
+    // the gables' outside, with the round window
+    for (const [x, face] of [[-OUT, -1], [W + OUT, 1]]) {
+      const shape = new THREE.Shape([[-OUT, H], [D + OUT, H], [MID, RIDGE + 0.2]].map(q => new THREE.Vector2(q[0], q[1]))), ring = new THREE.Path(); ring.absarc(MID, H + 1.25, 0.86, 0, Math.PI * 2, true); shape.holes.push(ring);
+      const sg = new THREE.ShapeGeometry(shape, 24), sp = sg.attributes.position, col = tint(face, 0, x, H + 1, MID);
+      for (let i = 0; i < sg.index.count; i += 3) for (const j of face < 0 ? [0, 1, 2] : [0, 2, 1]) { const q = sg.index.getX(i + j), z = sp.getX(q), y = sp.getY(q); sideB.vert(x, y, z, face, 0, 0, z / 2.4, y / 2.4, col); }
+      sg.dispose();
+      trimB.add(new THREE.TorusGeometry(0.86, 0.07, 6, 24), at(x + face * 0.02, H + 1.25, MID, 0, Math.PI / 2, 0), lit([0.86, 0.8, 0.68])); trimB.add(new THREE.CircleGeometry(0.82, 20), at(x - face * 0.03, H + 1.25, MID, 0, face * Math.PI / 2, 0), [1.35, 0.88, 0.42]);
+    }
+    // warm light in the windows, and light boards round them, at the corners and under the eaves
+    const TR = lit([0.86, 0.8, 0.68]), WARM = [1.35, 0.88, 0.42];
+    const paneOut = (B, x, z, along, nx, nz, w, y0, y1) => {
+      const P2 = (du, y, pw, ph, out, col) => along === 'z' ? B.box(x + nx * out, y, z + du, 0.04, ph, pw, col) : B.box(x + du, y, z + nz * out, pw, ph, 0.04, col);
+      // the glass: one sheet that faces out (from inside one looks through it, at the valley)
+      const gx = x - nx * 0.06, gz = z - nz * 0.06, rx = nz, rz = -nx, hw = w / 2;
+      B.quad([gx - rx * hw, y0, gz - rz * hw], [gx + rx * hw, y0, gz + rz * hw], [gx + rx * hw, y1, gz + rz * hw], [gx - rx * hw, y1, gz - rz * hw], WARM);
+      for (const s2 of [-1, 1]) P2(s2 * (w / 2 + 0.06), (y0 + y1) / 2, 0.12, y1 - y0 + 0.24, 0.03, TR);
+      P2(0, y1 + 0.08, w + 0.36, 0.14, 0.03, TR); P2(0, y0 - 0.07, w + 0.36, 0.12, 0.05, TR);
+    };
+    for (const z of WIN.ends) { paneOut(trimB, -OUT, z, 'z', -1, 0, WIN.w, WIN.y0, WIN.y1); paneOut(trimB, W + OUT, z, 'z', 1, 0, WIN.w, WIN.y0, WIN.y1); }
+    for (const x of WIN.front) paneOut(trimNearB, x, D + OUT, 'x', 0, 1, WIN.w, WIN.y0, WIN.y1);
+    trimB.box(bx + bw / 2, bh / 2, -OUT + 0.06, bw, bh, 0.04, [0.5, 0.36, 0.22]);               // behind the swing doors (seen from outside, when nobody is in the saloon)
+    for (const s2 of [-1, 1]) trimB.box(-OUT - 0.03, WD[3] / 2 + 0.03, WD[0] + WD[2] / 2 + s2 * (WD[2] / 2 + 0.07), 0.06, WD[3] + 0.06, 0.14, TR);
+    trimB.box(-OUT - 0.03, WD[3] + 0.1, WD[0] + WD[2] / 2, 0.06, 0.16, WD[2] + 0.42, TR);
+    for (const [x, z] of [[-OUT, -OUT], [W + OUT, -OUT]]) trimB.box(x, (GR + H) / 2, z, 0.2, H - GR, 0.2, TR);
+    for (const [x, z] of [[-OUT, D + OUT], [W + OUT, D + OUT]]) trimNearB.box(x, (GR + H) / 2, z, 0.2, H - GR, 0.2, TR);
+    // the roof: shingles from the eaves (out over the walls) to the ridge, a board along its edges and a cap on the ridge
+    const OH = 0.6, slope = (RIDGE - H) / MID, eave = -OUT - OH, yE = H + 0.22 - (OUT + OH) * slope, yR = RIDGE + 0.32, ex0 = -OUT - 0.45, ex1 = W + OUT + 0.45, runL = Math.hypot(MID - eave, yR - yE);
+    roofOut.quad([ex1, yE, eave], [ex0, yE, eave], [ex0, yR, MID], [ex1, yR, MID], tint(0, -1, W / 2, yE, 0), 0, 0, (ex1 - ex0) / 2.4, runL / 2.4);
+    roofOut.quad([ex0, yE, D - eave], [ex1, yE, D - eave], [ex1, yR, MID], [ex0, yR, MID], lit([1, 1, 1])(W / 2, yE, D, { x: 0, y: 0.8, z: 0.6 }), 0, 0, (ex1 - ex0) / 2.4, runL / 2.4);
+    for (const [z0, z1] of [[eave, MID], [D - eave, MID]]) for (const x of [ex0, ex1]) { const dz = z1 - z0, dy = yR - yE, l = Math.hypot(dz, dy); trimB.box(x, (yE + yR) / 2 - 0.1, (z0 + z1) / 2, 0.06, 0.24, l, TR, Math.atan2(-dy, dz), 0, 0); }
+    trimB.box(W / 2, yR + 0.05, MID, ex1 - ex0, 0.12, 0.34, lit([0.2, 0.19, 0.18]));
+    const shM = new THREE.MeshBasicMaterial({ vertexColors: true, map: siding }), roM = new THREE.MeshBasicMaterial({ vertexColors: true, map: shingles }), trM = new THREE.MeshBasicMaterial({ vertexColors: true });
+    meshes.push(sideB.mesh(shM, shell, 'shell'), sideNearB.mesh(shM, shellNear, 'shellNear'), trimB.mesh(trM, shell, 'trim'), trimNearB.mesh(trM, shellNear, 'trimNear'));
+    const roofMesh = roofOut.mesh(roM, shellUp, 'shellRoof'); meshes.push(roofMesh);
+    // the roof's own top: drawn last of the saloon's things, so that the valley does not show through where a lower
+    // thing stands in front of it (the outdoors are drawn after the room)
+    shell.userData.pics = [siding, shingles];
+  }
+  // the door to the cabins: a leaf of planks on two iron straps, the same from both sides (it swings in when somebody goes through)
+  const westLeaf = (() => {
+    const B = batch(), { w, h } = live.westDoor;
+    for (let i = 0; i < 6; i++) B.box(0, h / 2, (i + 0.5) * w / 6, 0.07, h - 0.02, w / 6 - 0.012, wood(tone(PINE, 0.7 + (i % 2) * 0.12), 0.15));
+    for (const y of [0.45, h - 0.45]) B.box(0, y, w / 2, 0.11, 0.12, w - 0.1, wood(DARK));
+    B.box(0, h / 2, w / 2, 0.1, h * 0.72, 0.1, wood(DARK), Math.atan2(w - 0.2, h - 0.9), 0, 0);
+    for (const y of [0.45, h - 0.45]) for (const sx of [-1, 1]) B.box(sx * 0.06, y, 0.3, 0.012, 0.07, 0.55, IRON);
+    for (const sx of [-1, 1]) { B.box(sx * 0.07, 1.05, w - 0.15, 0.04, 0.04, 0.14, IRON); B.ball(sx * 0.1, 1.05, w - 0.2, 0.035, IRON); }
+    const m = B.mesh(solidMat, shell, 'westDoor'); m.matrixAutoUpdate = true; m.position.set(live.westDoor.x, 0, live.westDoor.z); meshes.push(m);
+    return { m, a: 0, v: 0 };
+  })();
+
 
   // ---------- what changes: boards one writes on, screens, reels, the piano's roll ----------
   const screen = (w, h, x, y, z, sw, sh, face = 'z+', o = {}) => {
@@ -639,6 +732,25 @@ export function buildSaloon(THREE, kit, groupName = '') {
     const k = Math.min(1, 480 / Math.max(1, g.measureText(name || 'Saloonen').width));
     g.save(); g.translate(256, 44); g.scale(k, 1); g.lineWidth = 9; g.strokeStyle = 'rgba(40,20,8,.9)'; g.strokeText(name || 'Saloonen', 0, 2); g.fillStyle = '#3a2410'; g.fillText(name || 'Saloonen', 0, 0); g.restore();
     nameS.done();
+  }
+  // the board by the door: who is in their cabin
+  const cabinS = screen(512, 640, ...live.cabinBoard, 'x+');
+  function setCabins(list) {
+    const g = cabinS.g, W2 = 512, H2 = 640;
+    g.fillStyle = '#3b2412'; g.fillRect(0, 0, W2, H2);
+    for (let i = 0; i < 9; i++) { g.fillStyle = 'rgba(' + (i % 2 ? '255,210,150' : '0,0,0') + ',.06)'; g.fillRect(0, i * 72, W2, 70); }
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#f1d9a0'; g.font = '700 58px ' + FONT; g.fillText('I HYTTERNE', W2 / 2, 62);
+    g.fillStyle = 'rgba(241,217,160,.4)'; g.fillRect(40, 104, W2 - 80, 4);
+    const rows = list.slice(0, 7);
+    if (!rows.length) { g.fillStyle = '#a99579'; g.font = '500 38px ' + FONT; g.fillText('Ingen lige nu', W2 / 2, 330); }
+    rows.forEach((r, i) => {
+      const y = 160 + i * 66, n = r.name.length > 13 ? r.name.slice(0, 12) + '…' : r.name;
+      g.textAlign = 'left'; g.fillStyle = r.sleep ? '#a99579' : '#fff3d6'; g.font = '600 42px ' + FONT; g.fillText(n, 70, y);
+      g.fillStyle = r.sleep ? '#8f8bd9' : '#ffc94d'; g.beginPath(); g.arc(42, y, 9, 0, 6.3); g.fill();
+      if (r.sleep) { g.textAlign = 'right'; g.font = '600 30px ' + FONT; g.fillStyle = '#9d97e6'; g.fillText('sover', W2 - 40, y + 2); }
+    });
+    if (list.length > rows.length) { g.textAlign = 'center'; g.fillStyle = '#a99579'; g.font = '500 32px ' + FONT; g.fillText('og ' + (list.length - rows.length) + ' til', W2 / 2, 160 + 7 * 66); }
+    cabinS.done();
   }
   // the chalk board in the casino (who is up and down today), and the jackpot over the last machine
   const boardS = screen(256, 234, ...live.board.slice(0, 3), live.board[3], live.board[4]);
@@ -742,7 +854,9 @@ export function buildSaloon(THREE, kit, groupName = '') {
   setName(groupName); setCasino({}); paintArcade(0); for (const r of Object.values(reels)) paintReels(r, 0, false);
   let arcT = 0, music = false, keyT = 0, hold = 0;
   return {
-    root, upper, near: nearGroup, outside: outside.group, panes, picks, signs, lamps, notes: live.notes, setName, setCasino,
+    root, upper, near: nearGroup, outside: outside.group, panes, shell, shellNear, shellUp, picks, signs, lamps, notes: live.notes, setName, setCasino, setCabins,
+    // somebody goes through the door to the cabins: it swings in and closes again
+    swingWest() { westLeaf.v = 4.2; },
     setMusic(on) { music = !!on; if (!on) for (const m of down) m.visible = false; },
     // a machine turns for `secs` seconds
     spin(id, secs, t) { const r = reels[id]; if (r) { r.until = t + secs; r.shown++; } },
@@ -776,9 +890,11 @@ export function buildSaloon(THREE, kit, groupName = '') {
       // chairs are pulled out for whoever comes to sit, and pushed in again afterwards
       for (const c of chairs) if (c.pull !== c.want) { c.pull += (c.want - c.pull) * Math.min(1, dt * 7); if (Math.abs(c.want - c.pull) < 0.004) c.pull = c.want; placeChair(c); }
       outside.tick(dt, t);
+      // the door to the cabins swings in and falls shut again (it never opens outwards)
+      { const d = westLeaf; d.v += (-d.a * 14 - d.v * 3.2) * dt; d.a = Math.max(0, d.a + d.v * dt); if (d.a === 0 && d.v < 0) d.v = 0; d.m.rotation.y = d.a; }
       // the doors swing back by themselves (or out to where they are held)
       for (const d of doors) { d.v += ((-d.s * hold - d.a) * 30 - d.v * (hold ? 7 : 2.2)) * dt; d.a += d.v * dt; d.m.rotation.y = d.a; }
     },
-    dispose() { outside.dispose(); for (const m of chairSets) { m.geometry.dispose(); m.dispose(); } for (const m of meshes) { m.geometry.dispose(); if (m.material.map && m.material.map !== planks) m.material.map.dispose(); m.material.dispose(); } for (const t of [planks, carpet, paper, paper2, boards, sheet]) t.dispose(); },
+    dispose() { outside.dispose(); for (const t of shell.userData.pics || []) t.dispose(); for (const m of chairSets) { m.geometry.dispose(); m.dispose(); } for (const m of meshes) { m.geometry.dispose(); if (m.material.map && m.material.map !== planks) m.material.map.dispose(); m.material.dispose(); } for (const t of [planks, carpet, paper, paper2, boards, sheet]) t.dispose(); },
   };
 }

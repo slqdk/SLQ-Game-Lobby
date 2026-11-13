@@ -353,6 +353,10 @@ export class Renderer {
     // gather what is on screen
     const list = [], air = [];
     for (const b of scene.buildings) { if (b.dead || !inView(b.x + 1, b.y + 1, 5)) continue; const d = BD[b.t]; list.push({ key: b.y + d.h - 0.01, b, d }); }
+    // walls join up: each piece is drawn by which of its four neighbours are walls too (a row being laid out counts)
+    const wallAt = new Set(); for (const b of scene.buildings) if (!b.dead && !b.gone && BD[b.t].wall) wallAt.add(b.y * n + b.x);
+    if (scene.wallPlan) for (const q of scene.wallPlan) wallAt.add(q[1] * n + q[0]);
+    const wallFr = this.wallFr = (x, y) => (wallAt.has((y - 1) * n + x) ? 1 : 0) | (wallAt.has(y * n + x + 1) ? 2 : 0) | (wallAt.has((y + 1) * n + x) ? 4 : 0) | (wallAt.has(y * n + x - 1) ? 8 : 0);
     for (const u of scene.units) {
       if (u.dead || !inView(u.x, u.y)) continue;
       if (vis && !mine(u.o) && !vis[(u.y | 0) * n + (u.x | 0)]) continue;
@@ -397,7 +401,7 @@ export class Renderer {
     if (opt.shadows) {
       g.globalAlpha = 0.24;
       for (const it of list) {
-        if (it.b) { const b = it.b, o = colB(b), sp = sprite(b.t, S, { color: o.color, faction: o.faction }); if (sp.sh && !(b.an && (b.gone || time < b.an.t0 + b.an.dur))) g.drawImage(sp.sh.cv, X(b.x + it.d.w / 2) - sp.sh.ax * k, Y(b.y + it.d.h / 2) - sp.sh.ay * k, sp.sh.cv.width * k, sp.sh.cv.height * k); }
+        if (it.b) { const b = it.b, o = colB(b), sp = sprite(b.t, S, { color: o.color, faction: o.faction, frame: it.d.wall ? wallFr(b.x, b.y) : 0 }); if (sp.sh && !(b.an && (b.gone || time < b.an.t0 + b.an.dur))) g.drawImage(sp.sh.cv, X(b.x + it.d.w / 2) - sp.sh.ax * k, Y(b.y + it.d.h / 2) - sp.sh.ay * k, sp.sh.cv.width * k, sp.sh.cv.height * k); }
         else { const u = it.u, r = UD[u.t].r; g.fillStyle = '#000'; g.beginPath(); g.ellipse(X(u.x + r * 0.25), Y(u.y + r * 0.2), r * 1.15 * Z, r * 0.8 * Z, 0, 0, 7); g.fill(); }
       }
       g.globalAlpha = 1;
@@ -406,9 +410,9 @@ export class Renderer {
     for (const it of list) {
       if (it.b) {
         const b = it.b, d = it.d, o = colB(b);
-        const fr = !FRAMES[b.t] || !anim ? 0 : b.t === 'hq' ? (b.busy ? Math.floor(time * 7) % 8 : 0) : b.t === 'rad' ? (b.off ? 0 : Math.floor(time * 7) % 16) : b.t === 'coil' ? (tickNow - b.shot < 4 || (!b.off && Math.floor(time * 2 + b.id) % 5 === 0) ? 1 : 0) : Math.floor(time * 4 + b.id) % 2;
+        const fr = d.wall ? wallFr(b.x, b.y) : !FRAMES[b.t] || !anim ? 0 : b.t === 'hq' ? (b.busy ? Math.floor(time * 7) % 8 : 0) : b.t === 'rad' ? (b.off ? 0 : Math.floor(time * 7) % 16) : b.t === 'coil' ? (tickNow - b.shot < 4 || (!b.off && Math.floor(time * 2 + b.id) % 5 === 0) ? 1 : 0) : Math.floor(time * 4 + b.id) % 2;
         const px = X(b.x + d.w / 2), py = Y(b.y + d.h / 2), a = b.ghost ? 0.8 : 1, low = b.hp < b.mhp * 0.5, bad = b.hp < b.mhp * 0.25;
-        if (b.an) { const p = (time - b.an.t0) / b.an.dur; if (p < 1) { this.rise(b, d, o, px, py, Math.max(0, p), b.an.k === 'sell', X, Y, Z, k); continue; } if (b.gone) continue; }
+        if (b.an) { const p = (time - b.an.t0) / b.an.dur; if (p < 1) { this.rise(b, d, o, px, py, Math.max(0, p), b.an.k === 'sell', X, Y, Z, k, fr); continue; } if (b.gone) continue; }
         blit(sprite(b.t, S, { color: o.color, faction: o.faction, frame: fr, dmg: opt.damage && !b.ghost ? (bad ? 2 : low ? 1 : 0) : 0 }), px, py, a);
         const tr = TURRET[b.t]; if (tr) blit(sprite(tr, S, { dir: dir16(b.ax ?? 0.7, b.ay ?? 0.7), color: o.color, faction: o.faction }), px, py, a);
         if (b.off && Math.floor(time * 2) % 2 === 0) this.icon(px, py - d.h * Z * 0.5, '⚡', '#ffd23e');
@@ -471,8 +475,8 @@ export class Renderer {
     if (scene.overlay) scene.overlay(g, X, Y, Z, dpr);
   }
   // A building coming up out of the ground (or going back down when it is sold).
-  rise(b, d, o, px, py, p, sell, X, Y, Z, k) {
-    const g = this.g, sp = sprite(b.t, this.S, { color: o.color, faction: o.faction }), w = sp.cv.width * k, h = sp.cv.height * k, left = px - sp.ax * k, top = py - sp.ay * k;
+  rise(b, d, o, px, py, p, sell, X, Y, Z, k, fr = 0) {
+    const g = this.g, sp = sprite(b.t, this.S, { color: o.color, faction: o.faction, frame: d.wall ? fr : 0 }), w = sp.cv.width * k, h = sp.cv.height * k, left = px - sp.ax * k, top = py - sp.ay * k;
     const q = p - 1, r = sell ? 1 - p * p : Math.max(0, 1 + 1.9 * q * q * q + 0.9 * q * q);   // a small bounce at the top
     g.fillStyle = 'rgba(96,78,48,.5)'; g.beginPath(); g.roundRect(X(b.x) + 0.05 * Z, Y(b.y) + 0.05 * Z, (d.w - 0.1) * Z, (d.h - 0.1) * Z, 0.12 * Z); g.fill();
     g.save(); g.beginPath(); g.rect(left - 6, top - h * 0.15, w + 12, h * 1.15 + 1); g.clip();

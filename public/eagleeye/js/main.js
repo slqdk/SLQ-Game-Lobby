@@ -1,6 +1,6 @@
 // EagleEye Commander — the client: menu, lobby, base building, attack planning and battle playback.
 import { DEFS, isBase } from '../shared/defs.js';
-import { powerState, buildBlock, trainBlock, makeOcc, placeBlock, hasOn, harvCount, sellValue, repairCost, nukeState } from '../shared/engine.js';
+import { powerState, buildBlock, trainBlock, makeOcc, placeBlock, planCells, hasOn, harvCount, sellValue, repairCost, nukeState } from '../shared/engine.js';
 import { createSim, musterPositions, dockOf, assignGroups, bridgeAt } from '../shared/sim.js';
 import { generateMap } from '../shared/map.js';
 import { unpackBits, stamp } from '../shared/util.js';
@@ -358,6 +358,7 @@ function renderBanner() {
   if (st.mode === 'replay') { b.hidden = true; return; }
   if (v.phase === 'over') txt = 'Kampen er slut';
   else if (!m.alive) { txt = 'Du er slået ud. Du kan stadig se kampene.'; cls = 'warn'; }
+  else if (st.ed.mode === 'place' && st.ed.row) txt = TOUCH ? 'Tryk hvor muren skal begynde, så hvor den skal ende, og tryk Byg' : 'Træk en række ud, hvor muren skal stå · højreklik, når du er færdig';
   else if (st.ed.mode === 'place') txt = 'Vælg hvor ' + BD[st.ed.t].name.toLowerCase() + ' skal stå';
   else if (st.ed.mode === 'sell') { txt = 'SÆLG: klik på en bygning'; cls = 'warn'; }
   else if (st.ed.mode === 'repair') { txt = 'REPARÉR: klik på en beskadiget bygning'; cls = 'warn'; }
@@ -377,10 +378,12 @@ function renderSide() {
   $('#side').classList.toggle('off', st.mode !== 'plan' || !m.alive || v.phase !== 'play');
   $('#side').dataset.tab = st.tab;
   const mk = (kind, t, d, why, cnt, minus) => `<button class="cameo ${why ? 'locked' : ''} ${!why && m.money < d.cost ? 'poor' : ''}" data-k="${kind}:${t}"><img src="${cameoURL(t, m.faction, m.color)}" alt="" draggable="false"><span class="cost">${d.cost}</span>${cnt ? `<span class="cnt">${cnt}</span>` : ''}<span class="st"></span><i class="wipe"></i><span class="nm">${d.name}</span>${minus ? `<span class="minus" data-minus="${t}">−</span>` : ''}</button>`;
-  let hb = '', hu = '';
+  // what can be built or trained now comes first, in its usual order; what is still locked follows
+  const open = [[], []], shut = [[], []];
   const hq = m.buildings.some(b => b.t === 'hq');
-  for (const t in BD) { const d = BD[t]; if (!d.f.includes(m.faction)) continue; if (d.only === 'nohq' && hq) continue; if (d.only !== 'nohq' && !hq) continue; hb += mk('b', t, d, buildBlock(m, t, ps), d.mine ? m.buildings.filter(b => b.t === t).length : 0); }
-  for (const t in UD) { const d = UD[t]; if (!d.f.includes(m.faction)) continue; hu += mk('u', t, d, trainBlock(m, t, ps), m.army[t] | 0, (m.trained[t] | 0) > 0); }
+  for (const t in BD) { const d = BD[t]; if (!d.f.includes(m.faction)) continue; if (d.only === 'nohq' && hq) continue; if (d.only !== 'nohq' && !hq) continue; const why = buildBlock(m, t, ps); (why ? shut : open)[0].push(mk('b', t, d, why, d.mine ? m.buildings.filter(b => b.t === t).length : 0)); }
+  for (const t in UD) { const d = UD[t]; if (!d.f.includes(m.faction)) continue; const why = trainBlock(m, t, ps); (why ? shut : open)[1].push(mk('u', t, d, why, m.army[t] | 0, (m.trained[t] | 0) > 0)); }
+  const hb = open[0].join('') + shut[0].join(''), hu = open[1].join('') + shut[1].join('');
   $('#colB').innerHTML = hb; $('#colU').innerHTML = hu;
   camEls.clear(); for (const el of $$('.cameo')) camEls.set(el.dataset.k, el);
   const max = Math.max(ps.prod, ps.use, 100) * 1.15;
@@ -393,12 +396,13 @@ function renderSide() {
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) { st.tab = b.dataset.tab; renderSide(); } };
 function pendingCost(now) {
   let c = 0; const b = st.prod.b;
-  if (b) c += BD[b.t].cost * (b.ready ? 1 : Math.min(1, (now - b.t0) / b.dur));
+  if (b && !b.row) c += BD[b.t].cost * (b.ready ? 1 : Math.min(1, (now - b.t0) / b.dur));
   st.prod.u.forEach((u, i) => { c += UD[u.t].cost * (i === 0 ? Math.min(1, (now - u.t0) / u.dur) : 0); });
   return c;
 }
 function updateProd(now) {
-  const b = st.prod.b;
+  let b = st.prod.b;
+  if (b && b.row && now - b.t0 >= b.dur) { b = st.prod.b = null; sfx('ready', 0.6); }      // the row of walls stands
   if (b && !b.ready && now - b.t0 >= b.dur) { b.ready = true; sfx('ready'); say('ready'); startPlace(b.t); }
   if (b && !b.ready && Math.floor(now * 14) !== Math.floor((now - 0.017) * 14)) sfx('tick', 0.6);
   const q = st.prod.u;
@@ -423,6 +427,13 @@ function clickCameo(el, ev) {
   if (kind === 'b') {
     const why = buildBlock(m, t, st.ps); if (why) return toast(why, true);
     const b = st.prod.b;
+    if (BD[t].wall) {
+      // a wall is laid out first, as a whole row, and built afterwards
+      if (b && !b.row) return toast(b.ready ? BD[b.t].name + ' venter på at blive placeret.' : 'Der bygges allerede.', true);
+      if (m.money < BD[t].cost) { say('nomoney'); return toast('Utilstrækkelige midler.', true); }
+      if (st.ed.mode === 'place' && st.ed.t === t) return;
+      sfx('click'); return startPlace(t);
+    }
     if (b && b.t === t) { if (b.ready) startPlace(t); return; }
     if (b) return toast(b.ready ? BD[b.t].name + ' venter på at blive placeret.' : 'Der bygges allerede.', true);
     if (m.money < BD[t].cost) { say('nomoney'); return toast('Utilstrækkelige midler.', true); }
@@ -451,15 +462,49 @@ $('#build').addEventListener('pointerleave', () => $('#tip').hidden = true);
 
 // ---------- placing, selling, repairing ----------
 function cancelEdit() {
-  if (st.ed.mode === 'place' && st.ed.more) st.prod.b = null;      // walls and minefields: enough of them have been laid
+  if (st.ed.mode === 'place' && st.ed.more) st.prod.b = null;      // minefields: enough of them have been laid
+  if (st.scene) st.scene.wallPlan = null;
   st.ed = { mode: 'idle' }; $('#placebar').hidden = true; $('#map').className = ''; if (st.v && st.mode === 'plan') { renderBanner(); $('#mRepair').classList.remove('on'); $('#mSell').classList.remove('on'); } if (st.scene && st.mode === 'plan' && st.selU.size) renderInfo(); }
 function startPlace(t) {
   if (st.mode !== 'plan') return;
   st.sel = null; st.selU.clear(); for (const u of st.scene.units) u.sel = false; $('#info').hidden = true; $('#orders').hidden = true; st.editG = -1;
-  st.ed = { mode: 'place', t, x: null, y: null, ok: false, why: '' }; $('#map').className = 'place'; renderBanner();
+  st.ed = { mode: 'place', t, x: null, y: null, ok: false, why: '', row: !!BD[t].wall, from: null, to: null, cells: [], plan: [], held: false }; $('#map').className = 'place'; renderBanner();
   const pb = $('#placebar'); pb.hidden = false;
-  pb.innerHTML = `<span>${BD[t].name}</span><button class="btn go small" id="pbOk">Placér</button><button class="btn small" id="pbNo">Annullér</button>`;
-  $('#pbOk').onclick = () => confirmPlace(); $('#pbNo').onclick = () => { cancelEdit(); };
+  pb.innerHTML = `<span id="pbName">${BD[t].name}</span><button class="btn go small" id="pbOk">${BD[t].wall ? 'Byg' : 'Placér'}</button><button class="btn small" id="pbNo">${BD[t].wall ? 'Færdig' : 'Annullér'}</button>`;
+  $('#pbOk').onclick = () => st.ed.row ? confirmRow() : confirmPlace(); $('#pbNo').onclick = () => { cancelEdit(); renderSide(); };
+}
+// ---------- a row of walls: laid out from one cell to another, then built for as long as the money lasts ----------
+function rowCells(a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], across = Math.abs(dx) >= Math.abs(dy), len = Math.min(DEFS.wallRow, (across ? Math.abs(dx) : Math.abs(dy)) + 1), out = [];
+  for (let i = 0; i < len; i++) out.push(across ? [a[0] + Math.sign(dx) * i, a[1]] : [a[0], a[1] + Math.sign(dy) * i]);
+  return out;
+}
+function planRow() {
+  const e = st.ed, m = me();
+  e.cells = e.from ? rowCells(e.from, e.to || e.from) : [];
+  e.plan = planCells(st.occ, st.v.map.n, m.buildings, e.t, e.cells, m.money);
+  const n = e.plan.order ? e.plan.order.length : 0;
+  st.scene.wallPlan = e.cells.filter((q, i) => e.plan[i] === '');
+  const nm = $('#pbName'); if (nm) nm.textContent = BD[e.t].name + (e.cells.length ? ' × ' + n + ' · ' + n * BD[e.t].cost : '');
+}
+function rowAt(cx, cy, start) { const e = st.ed; if (start || !e.from) e.from = [cx, cy]; e.to = [cx, cy]; planRow(); }
+function clearRow() { const e = st.ed; e.from = e.to = null; e.cells = []; e.plan = []; e.held = false; if (st.scene) st.scene.wallPlan = null; const nm = $('#pbName'); if (nm && e.t) nm.textContent = BD[e.t].name; }
+async function confirmRow() {
+  const e = st.ed; if (e.mode !== 'place' || !e.row) return;
+  if (!e.cells.length) return toast(TOUCH ? 'Tryk hvor muren skal begynde, og så hvor den skal ende.' : 'Træk en række ud på kortet.');
+  const t = e.t, d = BD[t], cells = e.cells, plan = e.plan, n = plan.order.length;
+  if (!n) { const why = plan.includes('poor') ? 'Utilstrækkelige midler.' : plan.find(w => w) || 'Kan ikke placeres her.'; if (plan.includes('poor')) say('nomoney'); else say('cant'); clearRow(); return toast(why, true); }
+  const before = new Set(me().buildings.map(b => b.id));
+  clearRow();
+  if (!await doAct({ a: 'build', t, cells })) return;
+  // the pieces rise one after the other along the row
+  const fresh = me().buildings.filter(b => !before.has(b.id) && b.t === t).sort((a, b) => a.id - b.id), now = performance.now() / 1000, gap = Math.min(0.1, 1.6 / Math.max(1, fresh.length));
+  fresh.forEach((nb, i) => { const an = { k: 'build', t0: now + i * gap, dur: 0.35 }; st.bAnim.set(nb.id, an); const sb = st.scene.buildings.find(q => q.id === nb.id); if (sb) sb.an = an; });
+  const total = Math.max(0.5, (fresh.length - 1) * gap + 0.35);
+  st.prod.b = { t, t0: now, dur: total, ready: false, row: true }; sfx('construct', total); say('building');
+  if (fresh.length < cells.length && plan.includes('poor')) toast('Pengene rakte til ' + fresh.length + ' af ' + cells.length + ' stykker mur.');
+  if (st.ed.mode === 'place' && st.ed.t === t && me().money < d.cost) cancelEdit();      // no money for more: enough for now
+  renderSide();
 }
 function ghostAt(wx, wy) {
   const e = st.ed, d = BD[e.t], n = st.v.map.n;
@@ -475,7 +520,7 @@ async function confirmPlace() {
   st.bAnim.set(nb.id, an); const sb = st.scene.buildings.find(q => q.id === nb.id); if (sb) sb.an = an;
   sfx(small ? 'place' : 'construct', an.dur);
   if (st.ps.use > st.ps.prod && !wasLow) say('lowpower'); else if (t === 'rad') say('radar');
-  if (small && me().money >= d.cost && !buildBlock(me(), t, st.ps)) { st.ed.x = null; st.ed.more = true; return; }   // walls and minefields: keep placing
+  if (small && me().money >= d.cost && !buildBlock(me(), t, st.ps)) { st.ed.x = null; st.ed.more = true; return; }   // minefields: keep placing
   st.prod.b = null; cancelEdit(); renderSide();
 }
 function setTool(mode) { unlock(); if (st.mode !== 'plan') return; const on = st.ed.mode === mode; cancelEdit(); if (!on) { st.ed = { mode }; $('#map').className = mode; st.sel = null; st.selU.clear(); rebuild(); } renderSide(); renderBanner(); sfx('click'); }
@@ -807,6 +852,17 @@ function planOverlay(g, X, Y, Z, dpr) {
     for (const [w, c] of [[6, OUT], [3, '#fff']]) { g.lineWidth = w * dpr; g.strokeStyle = c; g.beginPath(); for (const [x, y, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) { g.moveTo(x + sx * L, y); g.lineTo(x, y); g.lineTo(x, y + sy * L); } g.stroke(); }
     if (d.weapon) ring(b.x + d.w / 2, b.y + d.h / 2, d.weapon.range);
   }
+  // a row of walls being laid out: green where it will be built, amber where the money has run out, red where it cannot stand
+  if (e.mode === 'place' && e.row && e.cells.length) {
+    e.cells.forEach(([x, y], i) => {
+      const w = e.plan[i], ok = w === '', poor = w === 'poor';
+      g.fillStyle = ok ? 'rgba(90,230,80,.34)' : poor ? 'rgba(255,196,60,.4)' : 'rgba(255,70,50,.42)'; g.fillRect(X(x), Y(y), Z, Z);
+      g.lineWidth = 2 * dpr; g.strokeStyle = ok ? '#b6ffa8' : poor ? '#ffe08a' : '#ffb0a4'; g.strokeRect(X(x), Y(y), Z, Z);
+      if (!ok) return;
+      const sp = sprite(e.t, R.S, { color: m.color, faction: m.faction, frame: R.wallFr ? R.wallFr(x, y) : 0 });
+      g.globalAlpha = 0.8; g.drawImage(sp.cv, X(x + 0.5) - sp.ax * k, Y(y + 0.5) - sp.ay * k, sp.cv.width * k, sp.cv.height * k); g.globalAlpha = 1;
+    });
+  }
   // building about to be placed
   if (e.mode === 'place' && e.x != null) {
     const d = BD[e.t];
@@ -831,8 +887,10 @@ cv.addEventListener('pointerdown', e => {
     // mouse: the left button drags a selection box while planning (as in the 90s); right or middle button moves the map.
     // With the setting "the left button moves the map", the box needs Shift instead.
     const m = st.v && st.v.me, [lx, ly] = local(e), pan = cfg.leftDrag === 'pan';
+    const row = e.pointerType === 'mouse' && e.button === 0 && st.mode === 'plan' && st.ed.mode === 'place' && st.ed.row;      // the left button lays out a row of walls
+    if (row) { const [wx, wy] = R.toCell(lx, ly); st.ed.held = true; rowAt(Math.floor(wx), Math.floor(wy), true); }
     drag = { x: e.clientX, y: e.clientY, cx: R.cam.x, cy: R.cam.y, moved: false, btn: e.button, lx, ly, pan,
-      box: e.pointerType === 'mouse' && e.button === 0 && pan === e.shiftKey && st.mode === 'plan' && st.ed.mode === 'idle' && m && m.alive && st.v.phase === 'play' };
+      row, box: e.pointerType === 'mouse' && e.button === 0 && pan === e.shiftKey && st.mode === 'plan' && st.ed.mode === 'idle' && m && m.alive && st.v.phase === 'play' };
   }
   else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: R.cam.z }; if (drag) drag.moved = true; }
 });
@@ -841,18 +899,20 @@ cv.addEventListener('pointermove', e => {
   if (pinch && ptrs.size === 2) { const [a, b] = [...ptrs.values()]; R.cam.z = pinch.z * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d; return; }
   if (drag && ptrs.size === 1) {
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 7) drag.moved = true;
-    if (drag.moved && drag.box) { const [px, py] = local(e); st.box = { x0: drag.lx, y0: drag.ly, x1: px, y1: py }; }
+    if (drag.row) { if (st.ed.row && st.ed.held) { const [px, py] = local(e), [wx, wy] = R.toCell(px, py); rowAt(Math.floor(wx), Math.floor(wy)); } }
+    else if (drag.moved && drag.box) { const [px, py] = local(e); st.box = { x0: drag.lx, y0: drag.ly, x1: px, y1: py }; }
     else if (drag.moved) { R.cam.x = drag.cx - dx / R.cam.z; R.cam.y = drag.cy - dy / R.cam.z; }
   }
   if (e.pointerType === 'mouse' && st.mode === 'plan' && !drag) { const [hx, hy] = local(e); st.hoverG = flagAt(hx, hy); cv.style.cursor = st.hoverG >= 0 && st.ed.mode === 'idle' ? 'pointer' : ''; }
-  if (e.pointerType === 'mouse' && st.ed.mode === 'place' && st.mode === 'plan') { const [px, py] = local(e), [wx, wy] = R.toCell(px, py); ghostAt(wx, wy); }
+  if (e.pointerType === 'mouse' && st.ed.mode === 'place' && st.mode === 'plan') { const [px, py] = local(e), [wx, wy] = R.toCell(px, py); if (!st.ed.row) ghostAt(wx, wy); else if (!drag) rowAt(Math.floor(wx), Math.floor(wy), true); }
 });
 let edge = null;   // where the mouse is over the map
 cv.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') edge = local(e); });
 cv.addEventListener('pointerleave', () => edge = null);
 const up = e => {
   ptrs.delete(e.pointerId);
-  if (drag && drag.box && drag.moved) { if (e.type === 'pointerup') finishBox(drag.pan ? e.ctrlKey || e.metaKey : e.shiftKey); else st.box = null; }
+  if (drag && drag.row) { if (e.type === 'pointerup' && st.ed.row && st.ed.held) confirmRow(); else if (st.ed.row) clearRow(); }
+  else if (drag && drag.box && drag.moved) { if (e.type === 'pointerup') finishBox(drag.pan ? e.ctrlKey || e.metaKey : e.shiftKey); else st.box = null; }
   else if (drag && !drag.moved && ptrs.size === 0 && e.type === 'pointerup') { if (drag.btn === 2) rightClick(); else if (drag.btn === 0) click(e); }
   if (ptrs.size < 2) pinch = null; if (ptrs.size === 0) drag = null;
 };
@@ -868,6 +928,7 @@ function click(e) {
   if (st.mode !== 'plan' || !st.scene) return;
   const [px, py] = local(e), [wx, wy] = R.toCell(px, py), cx = Math.floor(wx), cy = Math.floor(wy), ed = st.ed, m = me(), n = st.v.map.n;
   if (cx < 0 || cy < 0 || cx >= n || cy >= n) return;
+  if (ed.mode === 'place' && ed.row) { if (e.pointerType !== 'mouse') rowAt(cx, cy, !ed.from || ed.cells.length > 1); return; }      // a finger: the first press is where it begins, the next where it ends
   if (ed.mode === 'place') {
     const had = ed.x; const ox = ed.x, oy = ed.y; ghostAt(wx, wy);
     if (e.pointerType === 'mouse' || (had != null && ox === ed.x && oy === ed.y)) confirmPlace();
@@ -1073,6 +1134,7 @@ function showOver() {
 function showHelp() {
   modal(`<h2>Sådan spiller du</h2>
     <ul><li><b>Byg:</b> klik på et billede i sidebaren, vent til det er klar, og placér bygningen tæt på dine andre. Start med kraftværk, raffinaderi og kaserne.</li>
+    <li><b>Mure:</b> klik på Betonmur, og træk en hel række ud på kortet. Muren bygges stykke for stykke, så langt pengene rækker.</li>
     <li><b>Malm er penge:</b> høsterne kører selv malm hjem, mens runden afvikles. Flere raffinaderier og høstere giver flere penge.</li>
     <li><b>Strøm:</b> den lodrette bjælke viser strømmen. Mangler der strøm, slukker de nyeste bygninger.</li>
     <li><b>Radar og spionage:</b> byg en radarstation. Under <b>Angreb</b> står fjendens generaler: <b>Spionér</b> finder en lejr og viser dens bygninger og hær, som de er lige nu (minefelter ses ikke). En fundet lejr får et mærke på radaren.</li>

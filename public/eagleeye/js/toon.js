@@ -814,9 +814,19 @@ M.tech = (k, c, f) => {
   k.tube([0.28, 0.2, 0.8], [0.28, 0.6, 0.8], 0.04, c.metal, { ol: 0.45, n: 6 });
 };
 
-M.wall = (k, c) => {
-  k.box(0, 0, 0, 1.0, 1.0, 0.4, c.conc, { ol: 0.9, mat: k.hi ? 'conc' : null });
-  k.box(0, 0, 0.4, 0.7, 0.7, 0.05, shade(c.conc, -0.14), { ol: 0.4 });
+// A concrete wall, a third of a cell thick. frame: which of the four neighbours are walls too (1 north, 2 east,
+// 4 south, 8 west). It reaches out to those; where it ends, turns or branches there is a post, and a piece in the
+// middle of a straight run is one plain slab from edge to edge.
+M.wall = (k, c, faction, frame = 0) => {
+  const T = 0.34, H = 0.44, PT = 0.46, lid = shade(c.conc, -0.14), o = { ol: 0.9, mat: k.hi ? 'conc' : null }, lo = { ol: 0.35 };
+  if (frame === 10) { k.box(0, 0, 0, 1.0, T, H, c.conc, o); k.box(0, 0, H, 1.0, T - 0.12, 0.04, lid, lo); return; }
+  if (frame === 5) { k.box(0, 0, 0, T, 1.0, H, c.conc, o); k.box(0, 0, H, T - 0.12, 1.0, 0.04, lid, lo); return; }
+  const a = 0.5 - PT / 2, m = PT / 2 + a / 2;          // an arm from the post to the edge: how long, and where its middle is
+  if (frame & 1) { k.box(0, -m, 0, T, a, H, c.conc, o); k.box(0, -m, H, T - 0.12, a, 0.04, lid, lo); }
+  if (frame & 8) { k.box(-m, 0, 0, a, T, H, c.conc, o); k.box(-m, 0, H, a, T - 0.12, 0.04, lid, lo); }
+  if (frame & 2) { k.box(m, 0, 0, a, T, H, c.conc, o); k.box(m, 0, H, a, T - 0.12, 0.04, lid, lo); }
+  k.box(0, 0, 0, PT, PT, H + 0.08, c.conc, o); k.box(0, 0, H + 0.08, PT - 0.16, PT - 0.16, 0.04, lid, lo);
+  if (frame & 4) { k.box(0, m, 0, T, a, H, c.conc, o); k.box(0, m, H, T - 0.12, a, 0.04, lid, lo); }
 };
 
 // A minefield as its owner sees it: three plates half buried in turned earth, and a marker stake with a pennant.
@@ -1347,7 +1357,10 @@ export function cameo(type, faction, color, w = 128, h = 96) {
   else { grad.addColorStop(0, '#39506a'); grad.addColorStop(0.62, '#5d7a93'); grad.addColorStop(0.63, '#6f8f52'); grad.addColorStop(1, '#4f6d3a'); }
   g.fillStyle = grad; g.fillRect(0, 0, w, h);
   const draw = (sp, x, y, k) => g.drawImage(sp.cv, x - sp.ax * k, y - sp.ay * k, sp.cv.width * k, sp.cv.height * k);
-  if (bd) {
+  if (bd && bd.wall) {      // a short piece of wall: an end, a slab, an end
+    const S = 64, k = Math.min((w - 14) / (S * 3), 1.2);
+    [[-1, 2], [0, 10], [1, 8]].forEach(([i, f]) => draw(sprite(type, S, { color, faction, frame: f }), w / 2 + i * S * k, h / 2 + S * k * 0.22, k));
+  } else if (bd) {
     const S = 64, sp = sprite(type, S, { color, faction }), tr = TURRET[type];
     const k = Math.min((w - 10) / sp.cv.width, (h - 8) / sp.cv.height, 1.5);
     const x = w / 2 - (sp.cv.width / 2 - sp.ax) * k, y = h / 2 - (sp.cv.height / 2 - sp.ay) * k + 2;

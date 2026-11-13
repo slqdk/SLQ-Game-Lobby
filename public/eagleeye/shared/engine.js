@@ -158,6 +158,29 @@ export function placeBlock(occ, n, own, t, x, y) {
   }
   return near ? '' : d.mine ? 'For langt fra din base.' : 'For langt fra dine bygninger.';
 }
+// A row of walls (or one building) on these cells, one after the other, with this much money: for each cell '' when
+// it will be built, 'poor' when the money has run out before it, otherwise the reason it cannot stand there. A cell
+// that is too far from everything is tried again once others have been built, so a row may begin at its far end.
+// `occ` and `own` are left as they were.
+export function planCells(occ0, n, own0, t, cells, money) {
+  const d = BD[t], occ = occ0.slice(), own = own0.slice(), out = cells.map(() => ''), order = [];
+  let left = cells.map((q, i) => i), built = true;
+  while (left.length && built) {
+    built = false; const rest = [];
+    for (const i of left) {
+      const x = cells[i][0] | 0, y = cells[i][1] | 0, why = placeBlock(occ, n, own, t, x, y);
+      if (why) { out[i] = why; rest.push(i); continue; }
+      // (a cell the money does not reach is reckoned as standing all the same, so that the cells beyond it are
+      // told "no money" and not "too far")
+      if (money < d.cost) out[i] = 'poor'; else { money -= d.cost; out[i] = ''; order.push(i); }
+      built = true;
+      own.push({ t, x, y }); for (let yy = y; yy < y + d.h; yy++) for (let xx = x; xx < x + d.w; xx++) occ[yy * n + xx] = 2;
+    }
+    left = rest;
+  }
+  out.order = order;      // the cells that will be built, in the order they are built
+  return out;
+}
 const allBuildings = game => game.players.flatMap(p => p.alive ? p.buildings : []);
 // What stands in the way when p builds. A hostile minefield does not: nobody can see it, and whoever builds on it clears it.
 const occOf = (game, p) => makeOcc(game.map, game.ore, game.players.flatMap(q => !q.alive ? [] : q !== p && !allied(p, q) ? q.buildings.filter(b => !BD[b.t].mine) : q.buildings), game.neut);
@@ -230,19 +253,18 @@ export function act(game, pid, a, now = 0) {
   switch (a.a) {
     case 'build': {
       const why = buildBlock(p, a.t, ps); if (why) fail(why);
-      const d = BD[a.t], cells = d.wall && Array.isArray(a.cells) ? a.cells.slice(0, 40) : [[a.x, a.y]];
-      const occ = occOf(game, p), n = game.map.n; let placed = 0;
-      for (const [x, y] of cells) {
-        if (p.money < d.cost) { if (!placed) fail('Utilstrækkelige midler.'); break; }
-        const r = placeBlock(occ, n, p.buildings, a.t, x | 0, y | 0); if (r) { if (cells.length === 1) fail(r); continue; }
+      // a wall may be ordered as a whole row: it is built cell by cell for as long as the money lasts
+      const d = BD[a.t], cells = d.wall && Array.isArray(a.cells) ? a.cells.slice(0, DEFS.wallRow).map(q => [q[0] | 0, q[1] | 0]) : [[a.x | 0, a.y | 0]];
+      const occ = occOf(game, p), n = game.map.n, plan = planCells(occ, n, p.buildings, a.t, cells, p.money), placed = plan.order.length;
+      if (!placed) fail(plan.includes('poor') ? 'Utilstrækkelige midler.' : cells.length === 1 ? plan[0] : 'Kan ikke placeres her.');
+      for (const i of plan.order) {
+        const [x, y] = cells[i];
         p.money -= d.cost;
-        const b = { id: game.nextId++, t: a.t, x: x | 0, y: y | 0, hp: d.hp }; p.buildings.push(b); placed++;
-        for (let yy = b.y; yy < b.y + d.h; yy++) for (let xx = b.x; xx < b.x + d.w; xx++) occ[yy * n + xx] = 2;
+        const b = { id: game.nextId++, t: a.t, x, y, hp: d.hp }; p.buildings.push(b);
         clearMines(game, p, b);
         if (!d.mine) reveal(game, p, b.x + d.w / 2, b.y + d.h / 2, d.sight);
         if (a.t === 'silo' && !p.nukeAt) p.nukeAt = game.round + DEFS.nuke.prep;      // the first silo starts the preparation
       }
-      if (!placed) fail('Kan ikke placeres her.');
       break;
     }
     case 'sell': {

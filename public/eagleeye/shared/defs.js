@@ -14,6 +14,7 @@ export const DEFS = {
   unitCap: 60,
   padsPerAirfield: 4,
   buildGap: 2,           // new buildings must be this close to one of your own
+  wallRow: 40,           // how many cells of wall one order may lay
   sellRate: 0.5,
   repairRate: 0.4,       // repairing full health costs this share of the price
   guardRange: 11,        // home units engage enemies this close to their post …

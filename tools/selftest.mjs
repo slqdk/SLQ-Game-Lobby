@@ -494,6 +494,44 @@ section('kodeord og dagens jetoner');
   A.send({ t: 'enter', g: GID });
 }
 
+section('EagleEye Commander: mure i en hel række');
+{
+  // the game's own engine, without the lobby around it: a general with a power plant and a barracks lays walls
+  const E = await import('../public/eagleeye/shared/engine.js'), { DEFS: ED } = await import('../public/eagleeye/shared/defs.js');
+  const game = E.newGame({ name: 'Mur', seed: 4711, now: 0 });
+  E.addPlayer(game, { name: 'Søren', now: 0 }); E.addBot(game, 'P'); game.host = game.players[0].id;
+  E.startGame(game, 0);
+  const p = game.players[0], n = game.map.n, cost = ED.buildings.wall.cost;
+  const occ = () => E.makeOcc(game.map, game.ore, game.players.flatMap(q => q.buildings), game.neut);
+  const spot = t => { const o = occ(); for (let y = 1; y < n - 1; y++) for (let x = 1; x < n - 1; x++) if (!E.placeBlock(o, n, p.buildings, t, x, y)) return [x, y]; return null; };
+  p.money = 5000;
+  for (const t of ['pow', 'bar']) { const q = spot(t); E.act(game, p.id, { a: 'build', t, x: q[0], y: q[1] }, 0); }
+  check('uden kaserne ingen mur; med kaserne kan der bygges', E.buildBlock(p, 'wall') === '' && p.buildings.some(b => b.t === 'bar'));
+  // a free row of ten cells whose first cell is near the base and whose last is far from it
+  let row = null;
+  { const o = occ(); find: for (let y = 2; y < n - 2; y++) for (let x = 2; x < n - 12; x++) { const c = Array.from({ length: 10 }, (q, i) => [x + i, y]), pl = E.planCells(o, n, p.buildings, 'wall', c, 1e6); if (pl.every(w => w === '') && E.placeBlock(o, n, p.buildings, 'wall', x + 9, y) && E.placeBlock(o, n, p.buildings, 'wall', x + 5, y)) { row = c; break find; } } }
+  check('der findes en fri række, der begynder ved basen og ender langt fra den', !!row);
+  const o0 = occ(), own0 = p.buildings.length;
+  const all = E.planCells(o0, n, p.buildings, 'wall', row, 1e6), some = E.planCells(o0, n, p.buildings, 'wall', row, cost * 3 + 10), back = E.planCells(o0, n, p.buildings, 'wall', row.slice().reverse(), 1e6);
+  check('planen: hele rækken kan bygges, når pengene rækker', all.every(w => w === '') && all.order.join() === '0,1,2,3,4,5,6,7,8,9');
+  check('planen: pengene rækker til tre, resten mangler penge', some.filter(w => w === '').length === 3 && some.filter(w => w === 'poor').length === 7 && some.order.join() === '0,1,2');
+  check('planen: en række, der er trukket fra den fjerne ende, bygges alligevel (fra basen og ud)', back.every(w => w === '') && back.order.length === 10 && back.order[0] >= 7, back.order.join());
+  check('planen rører hverken kortet eller bygningerne', o0.join() === occ().join() && p.buildings.length === own0);
+  // the order itself: money for four of the ten
+  p.money = cost * 4 + 20;
+  E.act(game, p.id, { a: 'build', t: 'wall', cells: row }, 0);
+  const walls = () => p.buildings.filter(b => b.t === 'wall');
+  check('en række på ti med penge til fire: fire stykker står, fra basen og ud, og pengene er trukket', walls().length === 4 && walls().every((b, i) => b.x === row[i][0] && b.y === row[i][1]) && p.money === 20, walls().length + ' mure, ' + p.money + ' tilbage');
+  check('uden penge: ingen mur og en klar besked', throws(() => E.act(game, p.id, { a: 'build', t: 'wall', cells: row.slice(4) }, 0)) === 'Utilstrækkelige midler.' && walls().length === 4);
+  // the rest of the row, ordered over the pieces that stand: those are skipped, the others built
+  p.money = 5000;
+  E.act(game, p.id, { a: 'build', t: 'wall', cells: row }, 0);
+  check('resten af rækken bygges, de stykker der står, springes over', walls().length === 10 && p.money === 5000 - 6 * cost);
+  check('en række helt oven i noget andet afvises', throws(() => E.act(game, p.id, { a: 'build', t: 'wall', cells: row }, 0)) === 'Kan ikke placeres her.');
+  const long = Array.from({ length: 60 }, (q, i) => [row[0][0] + i % 2, row[0][1]]);
+  check('en ordre lægger højst ' + ED.wallRow + ' felter, og ét felt får stadig sin egen begrundelse', E.planCells(occ(), n, p.buildings, 'wall', long.slice(0, ED.wallRow), 1e6).length === ED.wallRow && throws(() => E.act(game, p.id, { a: 'build', t: 'wall', x: 0, y: 0 }, 0)) === 'Uden for kortet.');
+}
+
 section('EagleEye Commander');
 let EE;
 {

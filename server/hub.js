@@ -736,7 +736,9 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     },
 
     emote(conn, m) {
-      if (!presOf(conn) || !pick(EMOTES, m.k) || now() - conn.emoAt < 600) return;
+      const p = presOf(conn);
+      // 'sip': a mouthful of what one holds (the glass empties by the clock all the same)
+      if (!p || !(pick(EMOTES, m.k) || (m.k === 'sip' && p.drink && p.drink[1] > now())) || now() - conn.emoAt < 600) return;
       conn.emoAt = now();
       cast(conn.gid, { t: 'emo', u: conn.user.id, k: m.k });
     },

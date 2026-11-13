@@ -1,0 +1,538 @@
+// SLQ Game Lobby — the clubhouse as a saloon in three dimensions: the room and everything that stands in it.
+// Every piece of furniture stands exactly where shared/room.js says (the server's paths go round those footprints):
+// the room's x is x here, its depth (0 at the back wall) is z, and y is up. The walls and the ceiling only show
+// their inside, so a camera outside the room looks straight in, as into a doll's house.
+//
+// A western saloon with a casino wing: a long bar with a brass rail and the house robot behind it, a general store,
+// a wardrobe, a notice board, a shooting-gallery cabinet (the arcade), a self-playing piano (the music box), swing
+// doors, tables for board games, dice, cards and the map, a sofa, a dance floor, and to the right the casino with
+// three one-armed bandits, the chalk board and the blackjack table.
+import { ROOM, CASINO_X, STATION, STATIONS } from '../../shared/room.js';
+
+export const WALL_H = 4.4;
+export const SEAT_H = { low: 0.52, high: 0.86, sofa: 0.5 };       // how high one sits on a chair, a bar stool, the sofa
+
+const OAK = [0.34, 0.19, 0.09], DARK = [0.17, 0.085, 0.04], PINE = [0.56, 0.37, 0.19], BRASS = [0.82, 0.58, 0.18], IRON = [0.06, 0.06, 0.07], FELT = [0.05, 0.27, 0.13],
+  WINE = [0.36, 0.05, 0.06], CREAM = [0.86, 0.79, 0.62], LEATHER = [0.33, 0.12, 0.06], STEEL = [0.45, 0.48, 0.52], PAPER = [0.9, 0.86, 0.74], GLASS = [0.35, 0.5, 0.56];
+
+export function buildSaloon(THREE, kit, groupName = '') {
+  const { batch, at, along, picture, tone, wood } = kit;
+  const root = new THREE.Group(), upper = new THREE.Group();     // `upper`: the ceiling and what hangs from it (hidden when one looks in from above)
+  root.add(upper);
+  const solid = batch(), glow = batch(), high = batch(), highGlow = batch(), near = batch(), nearGlow = batch(), floorB = batch(), carpetB = batch(), paperB = batch(), paper2B = batch(), wainB = batch();
+  const W = ROOM.w, D = ROOM.d, CX = CASINO_X, H = WALL_H;
+  const picks = [], signs = [];          // what one can click: { id, box }; where each sign hangs: station id -> [x, y, z]
+  const live = {};                       // what moves: filled in below
+  const texts = [];                      // painted words: { x, y, z, w, h, face, text, ink }
+  const word = (text, x, y, z, w, h, face = 'z+', ink = '#f1d9a0', up = false) => texts.push({ text, x, y, z, w, h, face, ink, up });
+  const rnd = (() => { let s = 20261113; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })();
+
+  // ---------- pictures ----------
+  const planks = picture(512, 512, (g, w, h) => {
+    g.fillStyle = '#7a4f2c'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 8; i++) {
+      const y = i * 64, k = 0.82 + rnd() * 0.36;
+      g.fillStyle = 'rgb(' + (122 * k | 0) + ',' + (79 * k | 0) + ',' + (44 * k | 0) + ')'; g.fillRect(0, y, w, 62);
+      g.fillStyle = 'rgba(40,20,8,.55)'; g.fillRect(0, y + 62, w, 2);
+      for (let j = 0; j < 26; j++) { g.fillStyle = 'rgba(' + (rnd() < 0.5 ? '50,26,10' : '170,120,70') + ',' + (0.05 + rnd() * 0.1).toFixed(2) + ')'; g.fillRect(rnd() * w, y + 4 + rnd() * 54, 30 + rnd() * 140, 1 + rnd() * 1.5); }
+      const sx = (i * 197 + 60) % w; g.fillStyle = 'rgba(40,20,8,.6)'; g.fillRect(sx, y, 2, 62);                       // where two boards meet
+      if (i % 3 === 1) { g.fillStyle = 'rgba(50,26,10,.5)'; g.beginPath(); g.ellipse((sx + 230) % w, y + 30, 9, 5, 0, 0, 6.3); g.fill(); }
+    }
+  }, true);
+  const carpet = picture(256, 256, (g, w, h) => {
+    g.fillStyle = '#7a1a26'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#8f2531'; for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) if ((x + y) % 2) g.fillRect(x * 64, y * 64, 64, 64);
+    g.fillStyle = '#d9a441';
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { const cx = x * 64 + 32, cy = y * 64 + 32; g.beginPath(); g.moveTo(cx, cy - 10); g.lineTo(cx + 7, cy); g.lineTo(cx, cy + 10); g.lineTo(cx - 7, cy); g.fill(); }
+    g.fillStyle = 'rgba(217,164,65,.5)'; for (let y = 0; y <= 4; y++) for (let x = 0; x <= 4; x++) { g.beginPath(); g.arc(x * 64, y * 64, 3, 0, 6.3); g.fill(); }
+  }, true);
+  const paperPic = (base, fig) => picture(256, 256, (g, w, h) => {
+    g.fillStyle = base; g.fillRect(0, 0, w, h);
+    g.fillStyle = fig;
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+      const cx = x * 64 + (y % 2 ? 32 : 0), cy = y * 64 + 32;
+      for (const dx of [0, w]) { g.beginPath(); g.ellipse(cx + dx - (cx > w ? w : 0), cy - 9, 5, 12, 0, 0, 6.3); g.fill(); g.beginPath(); g.ellipse(cx + dx - 9, cy + 6, 4, 9, -0.7, 0, 6.3); g.fill(); g.beginPath(); g.ellipse(cx + dx + 9, cy + 6, 4, 9, 0.7, 0, 6.3); g.fill(); g.fillRect(cx + dx - 1.5, cy + 2, 3, 18); }
+    }
+    g.fillStyle = 'rgba(0,0,0,.08)'; for (let x = 0; x < w; x += 4) g.fillRect(x, 0, 1, h);
+  }, true);
+  const paper = paperPic('#5d2a2e', '#74383a'), paper2 = paperPic('#1f4a3a', '#2d6450');
+  const boards = picture(256, 256, (g, w, h) => {
+    for (let i = 0; i < 8; i++) { const k = 0.8 + rnd() * 0.4; g.fillStyle = 'rgb(' + (92 * k | 0) + ',' + (52 * k | 0) + ',' + (26 * k | 0) + ')'; g.fillRect(i * 32, 0, 31, h); g.fillStyle = 'rgba(30,14,6,.7)'; g.fillRect(i * 32 + 31, 0, 1, h); }
+    g.fillStyle = 'rgba(30,14,6,.5)'; g.fillRect(0, 0, w, 10); g.fillStyle = 'rgba(255,220,170,.12)'; g.fillRect(0, 10, w, 4);
+  }, true);
+
+  // ---------- the room itself: floor, walls that show their inside only, ceiling with beams ----------
+  const WAIN = 1.15;
+  floorB.quad([0, 0, D], [CX, 0, D], [CX, 0, 0], [0, 0, 0], [1, 1, 1], 0, D / 4, CX / 4, 0);
+  carpetB.quad([CX, 0, D], [W, 0, D], [W, 0, 0], [CX, 0, 0], [1, 1, 1], 0, D / 2, (W - CX) / 2, 0);
+  const wall = (a, b, len, B2) => {                                // a, b: the two bottom corners, seen from inside from left to right
+    wainB.quad([a[0], 0, a[1]], [b[0], 0, b[1]], [b[0], WAIN, b[1]], [a[0], WAIN, a[1]], [1, 1, 1], 0, 0, len / 1.6, 1);
+    B2.quad([a[0], WAIN, a[1]], [b[0], WAIN, b[1]], [b[0], H, b[1]], [a[0], H, a[1]], [1, 1, 1], 0, 0, len / 2, (H - WAIN) / 2);
+  };
+  wall([0, 0], [CX, 0], CX, paperB); wall([CX, 0], [W, 0], W - CX, paper2B);                    // the back wall
+  wall([0, D], [0, 0], D, paperB); wall([W, 0], [W, D], D, paper2B);                              // the two ends
+  wall([CX, D], [0, D], CX, paperB); wall([W, D], [CX, D], W - CX, paper2B);                      // the front wall (only seen from inside)
+  // the rail between boards and paper, and a skirting board
+  for (const [x0, z0, x1, z1] of [[0, 0, W, 0], [0, 0, 0, D], [W, 0, W, D], [0, D, W, D]]) {
+    const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz), inx = z0 === 0 && z1 === 0 ? 0 : x0 === 0 && x1 === 0 ? 0.04 : x0 === W && x1 === W ? -0.04 : 0, inz = z0 === 0 && z1 === 0 ? 0.04 : z0 === D && z1 === D ? -0.04 : 0;
+    solid.box((x0 + x1) / 2 + inx, WAIN, (z0 + z1) / 2 + inz, dx ? len : 0.08, 0.09, dz ? len : 0.08, DARK);
+    solid.box((x0 + x1) / 2 + inx, 0.09, (z0 + z1) / 2 + inz, dx ? len : 0.07, 0.18, dz ? len : 0.07, DARK);
+  }
+  // the ceiling and its beams (in `upper`)
+  high.quad([0, H, 0], [W, H, 0], [W, H, D], [0, H, D], tone(PINE, 0.5));
+  for (let x = 2; x < W; x += 4) high.box(x, H - 0.14, D / 2, 0.3, 0.28, D, DARK);
+  high.box(W / 2, H - 0.3, D / 2, W, 0.12, 0.36, DARK);
+  // the opening to the casino: two posts and a beam with a sign
+  solid.box(CX, H / 2, 0.2, 0.36, H, 0.36, wood(OAK)); near.box(CX, H / 2, D - 0.2, 0.36, H, 0.36, wood(OAK));
+  high.box(CX, H - 0.55, D / 2, 0.3, 0.5, D, wood(OAK));
+
+  // windows in the two ends and in the front wall: a frame, panes full of daylight
+  const windowAt = (x, z, facing) => {                                // facing: 'x+' on the left wall, 'x-' on the right, 'z-' on the front
+    const along2 = facing === 'z-', w = 1.9, h = 1.9, y = 1.5 + h / 2, e = facing === 'x+' ? 0.03 : facing === 'x-' ? -0.03 : 0, ez = along2 ? -0.03 : 0;
+    const pane = (du, dv, pw, ph, col, B2, out) => B2.box(x + e * out + (along2 ? du : 0), y + dv, z + ez * out + (along2 ? 0 : du), along2 ? pw : 0.02, ph, along2 ? 0.02 : pw, col);
+    const G2 = along2 ? nearGlow : glow, S2 = along2 ? near : solid;
+    pane(0, 0, w, h, [2.2, 2.0, 1.55], G2, 1);
+    for (const du of [-w / 2, 0, w / 2]) pane(du, 0, 0.09, h + 0.1, DARK, S2, 2);
+    for (const dv of [-h / 2, 0, h / 2]) pane(0, dv, w + 0.1, 0.09, DARK, S2, 2);
+    pane(0, -h / 2 - 0.07, w + 0.3, 0.07, DARK, S2, 3);
+  };
+  for (const z of [3.2, 9.6]) { windowAt(0, z, 'x+'); windowAt(W, z, 'x-'); }
+  for (const x of [5, 12, 19, 28]) windowAt(x, D, 'z-');
+
+  // lamps: wagon wheels with lanterns over the room, and a fine one over the casino
+  const lamps = [];
+  const wheelLamp = (x, z, y, r, fine) => {
+    high.add(new THREE.TorusGeometry(r, 0.05, 6, 28), at(x, y, z, Math.PI / 2, 0, 0), fine ? BRASS : wood(OAK));
+    for (let k = 0; k < 6; k++) { const a = k / 6 * 6.283; high.rod(x, y, z, x + Math.cos(a) * r, y, z + Math.sin(a) * r, 0.03, fine ? BRASS : DARK); high.cyl(x + Math.cos(a) * r, y + 0.03, z + Math.sin(a) * r, 0.07, 0.2, fine ? BRASS : IRON, 8); highGlow.ball(x + Math.cos(a) * r, y + 0.3, z + Math.sin(a) * r, 0.055, [2.6, 1.5, 0.5], 1, 1.7, 1, 8); high.cyl(x + Math.cos(a) * r, y + 0.22, z + Math.sin(a) * r, 0.045, 0.2, [0.9, 0.86, 0.7], 8, 0.05); }
+    for (let k = 0; k < 3; k++) { const a = k / 3 * 6.283; high.rod(x + Math.cos(a) * r * 0.6, y, z + Math.sin(a) * r * 0.6, x, H - 0.3, z, 0.015, IRON, 4); }
+    high.cyl(x, y - 0.08, z, 0.12, 0.16, fine ? BRASS : DARK, 8);
+    lamps.push([x, y, z]);
+  };
+  wheelLamp(7, 6.6, 3.15, 1.1); wheelLamp(16.5, 6.6, 3.15, 1.1); wheelLamp(28.2, 6.8, 3.2, 0.9, true);
+
+  // ---------- small things used many times ----------
+  const leg = (x, z, h, r = 0.045, col = DARK) => solid.cyl(x, 0, z, r, h, col, 6);
+  const stool = (x, z, hi) => {
+    const sh = hi ? SEAT_H.high : SEAT_H.low;
+    solid.cyl(x, sh - 0.07, z, 0.27, 0.07, hi ? WINE : wood(PINE), 14);
+    for (let k = 0; k < 4; k++) { const a = k / 4 * 6.283 + 0.785; solid.rod(x + Math.cos(a) * 0.2, sh - 0.07, z + Math.sin(a) * 0.2, x + Math.cos(a) * 0.27, 0, z + Math.sin(a) * 0.27, 0.028, hi ? BRASS : DARK); }
+    if (hi) solid.add(new THREE.TorusGeometry(0.23, 0.014, 5, 16), at(x, 0.3, z, Math.PI / 2, 0, 0), BRASS);
+  };
+  const pickBox = (id, x0, y0, z0, x1, y1, z1) => picks.push({ id, box: new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1)) });
+  const bottle = (x, y, z, col, s = 1) => { solid.cyl(x, y, z, 0.045 * s, 0.17 * s, col, 7); solid.cyl(x, y + 0.17 * s, z, 0.045 * s, 0.05 * s, col, 7, 0.018 * s); solid.cyl(x, y + 0.22 * s, z, 0.018 * s, 0.07 * s, col, 6); };
+  const BOTTLES = [[0.1, 0.32, 0.12], [0.45, 0.2, 0.06], [0.5, 0.36, 0.1], [0.08, 0.14, 0.3], [0.5, 0.06, 0.06], [0.6, 0.55, 0.4], [0.2, 0.1, 0.05]];
+
+  for (const st of STATIONS) {
+    const b = st.box, r = st.round;
+    if (st.seats && !st.on) for (const q of st.seats) stool(q[0], q[1], !!st.high);
+    if (b) pickBox(st.id, b[0], 0, b[1], b[0] + b[2], st.h, b[1] + b[3]);
+    else if (r) pickBox(st.id, r[0] - r[2], 0, r[1] - r[3], r[0] + r[2], st.h, r[1] + r[3]);
+    else if (st.wall) pickBox(st.id, st.wall[0], st.wall[1], 0, st.wall[0] + st.wall[2], st.wall[1] + st.wall[3], 0.25);
+    else if (st.floor) pickBox(st.id, st.floor[0] - st.floor[2], 0, st.floor[1] - st.floor[2], st.floor[0] + st.floor[2], 0.06, st.floor[1] + st.floor[2]);
+    if (st.name) signs.push([st.id, b ? b[0] + b[2] / 2 : r ? r[0] : st.wall ? st.wall[0] + st.wall[2] / 2 : st.floor[0], st.wall ? st.wall[1] + st.wall[3] + 0.15 : (st.h || 0.1) + 0.35, b ? b[1] + b[3] / 2 : r ? r[1] : st.wall ? 0.1 : st.floor[1]]);
+  }
+
+  // ---------- the wardrobe: a big cupboard with a looking glass ----------
+  { const [x, z, w, d] = STATION.wardrobe.box, h = 2.5, cx = x + w / 2;
+    solid.box(cx, h / 2, z + d / 2, w, h, d, wood(OAK));
+    solid.box(cx, h + 0.06, z + d / 2 + 0.04, w + 0.16, 0.12, d + 0.12, DARK); solid.box(cx, 0.06, z + d / 2 + 0.03, w + 0.1, 0.12, d + 0.08, DARK);
+    for (const s of [-1, 1]) {
+      solid.box(cx + s * w / 4, h / 2 + 0.05, z + d + 0.02, w / 2 - 0.08, h - 0.4, 0.04, wood(tone(OAK, 1.2)));
+      solid.ball(cx + s * 0.09, h / 2, z + d + 0.07, 0.04, BRASS);
+    }
+    glow.box(cx - w / 4, h / 2 + 0.1, z + d + 0.045, w / 2 - 0.3, h - 0.85, 0.01, [0.5, 0.62, 0.68]);                       // the looking glass
+    solid.box(cx + w / 4, h / 2 + 0.5, z + d + 0.045, w / 2 - 0.3, 0.7, 0.012, wood(tone(OAK, 0.8))); solid.box(cx + w / 4, h / 2 - 0.45, z + d + 0.045, w / 2 - 0.3, 0.7, 0.012, wood(tone(OAK, 0.8)));
+    // a hat and a hat box on top
+    solid.cyl(cx - 0.45, h + 0.12, z + 0.45, 0.36, 0.03, LEATHER, 16); solid.cyl(cx - 0.45, h + 0.15, z + 0.45, 0.17, 0.2, LEATHER, 12, 0.15);
+    solid.cyl(cx + 0.5, h + 0.12, z + 0.45, 0.3, 0.28, [0.6, 0.2, 0.25], 14); solid.cyl(cx + 0.5, h + 0.4, z + 0.45, 0.32, 0.05, CREAM, 14);
+  }
+
+  // ---------- the general store (the kiosk): a counter, a till, shelves with goods ----------
+  { const [x, z, w, d] = STATION.kiosk.box, h = STATION.kiosk.h, cx = x + w / 2;
+    solid.box(cx, h / 2, z + d - 0.3, w, h, 0.6, wood(PINE)); solid.box(cx, h + 0.03, z + d - 0.28, w + 0.12, 0.06, 0.72, wood(DARK));
+    for (let i = 0; i < 4; i++) solid.box(x + 0.4 + i * (w - 0.8) / 3, h / 2, z + d + 0.01, 0.62, h - 0.3, 0.02, wood(tone(PINE, 0.8)));
+    // the till
+    solid.box(cx + 0.9, h + 0.2, z + d - 0.3, 0.42, 0.28, 0.36, BRASS); solid.box(cx + 0.9, h + 0.42, z + d - 0.4, 0.36, 0.18, 0.14, BRASS); glow.box(cx + 0.9, h + 0.43, z + d - 0.32, 0.26, 0.09, 0.01, [0.9, 0.9, 0.8]);
+    // on the counter: a jar of sweets, a pair of glasses, a hat
+    solid.cyl(cx - 1.0, h + 0.06, z + d - 0.3, 0.12, 0.24, GLASS, 10); for (let i = 0; i < 7; i++) solid.ball(cx - 1.0 + (rnd() - 0.5) * 0.14, h + 0.1 + rnd() * 0.12, z + d - 0.3 + (rnd() - 0.5) * 0.14, 0.035, [[0.8, 0.15, 0.2], [0.9, 0.7, 0.1], [0.2, 0.6, 0.3]][i % 3], 1, 1, 1, 6);
+    solid.cyl(cx - 0.2, h + 0.06, z + d - 0.25, 0.3, 0.025, [0.5, 0.33, 0.16], 16); solid.cyl(cx - 0.2, h + 0.085, z + d - 0.25, 0.15, 0.17, [0.5, 0.33, 0.16], 12, 0.13);
+    // shelves on the wall behind, full of things
+    for (let s = 0; s < 3; s++) {
+      const y = 1.5 + s * 0.6;
+      solid.box(cx, y, z + 0.12, w - 0.2, 0.05, 0.3, wood(DARK));
+      for (let i = 0; i < 9; i++) {
+        const px = x + 0.3 + i * (w - 0.6) / 8, k = (i + s * 2) % 4;
+        if (k === 0) solid.cyl(px, y + 0.025, z + 0.14, 0.09, 0.2, [[0.7, 0.2, 0.15], [0.2, 0.4, 0.6], [0.8, 0.65, 0.2]][(i + s) % 3], 8);
+        else if (k === 1) solid.box(px, y + 0.14, z + 0.14, 0.2, 0.23, 0.18, [[0.7, 0.55, 0.3], [0.35, 0.5, 0.3], [0.6, 0.3, 0.3]][(i + s) % 3]);
+        else if (k === 2) bottle(px, y + 0.025, z + 0.14, BOTTLES[(i + s) % BOTTLES.length], 1.1);
+        else { solid.cyl(px, y + 0.025, z + 0.14, 0.13, 0.02, LEATHER, 12); solid.cyl(px, y + 0.045, z + 0.14, 0.07, 0.1, [[0.2, 0.2, 0.22], [0.6, 0.5, 0.35], LEATHER][(i + s) % 3], 10); }
+      }
+    }
+    for (const s of [-1, 1]) solid.box(cx + s * (w / 2 - 0.08), 2.0, z + 0.12, 0.08, 1.9, 0.3, wood(DARK));
+    // its name on a board
+    solid.box(cx, 3.42, z + 0.1, 2.3, 0.5, 0.06, wood(PINE)); word('KIOSK', cx, 3.42, z + 0.135, 2.2, 0.42);
+  }
+
+  // ---------- the bar ----------
+  { const [x, z, w, d] = STATION.bar.box, h = 1.22, cx = x + w / 2, fz = z + d;            // fz: the front of the counter
+    solid.box(cx, h / 2, fz - 0.28, w, h, 0.56, wood(OAK)); solid.box(cx, h + 0.035, fz - 0.24, w + 0.2, 0.07, 0.74, wood(DARK, 0.06));
+    for (let i = 0; i < 7; i++) { const px = x + 0.42 + i * (w - 0.84) / 6; solid.box(px, h / 2 + 0.02, fz + 0.012, 0.6, h - 0.34, 0.024, wood(tone(OAK, 0.78))); solid.box(px, h / 2 + 0.02, fz + 0.026, 0.44, h - 0.5, 0.012, wood(tone(OAK, 1.12))); }
+    solid.rod(x + 0.1, 0.24, fz + 0.2, x + w - 0.1, 0.24, fz + 0.2, 0.03, BRASS, 8);                                           // the foot rail
+    for (let i = 0; i < 5; i++) solid.rod(x + 0.3 + i * (w - 0.6) / 4, 0.24, fz + 0.2, x + 0.3 + i * (w - 0.6) / 4, 0.24, fz + 0.01, 0.018, BRASS, 5);
+    // taps, a row of glasses, a bowl of nuts
+    for (let i = 0; i < 3; i++) { const px = cx - 0.9 + i * 0.22; solid.cyl(px, h + 0.07, fz - 0.42, 0.028, 0.34, BRASS, 6); solid.rod(px, h + 0.4, fz - 0.42, px, h + 0.36, fz - 0.3, 0.02, BRASS, 5); solid.cyl(px, h + 0.41, fz - 0.42, 0.03, 0.12, [[0.7, 0.1, 0.1], [0.1, 0.1, 0.1], [0.85, 0.8, 0.7]][i], 6); }
+    solid.box(cx - 0.68, h + 0.09, fz - 0.42, 0.72, 0.04, 0.2, BRASS);
+    for (let i = 0; i < 5; i++) solid.cyl(cx + 0.5 + i * 0.16, h + 0.07, fz - 0.4, 0.05, 0.14, GLASS, 8, 0.06);
+    solid.cyl(cx + 1.9, h + 0.07, fz - 0.2, 0.13, 0.07, [0.5, 0.3, 0.15], 10, 0.16);
+    // the wall behind: a big mirror in a carved frame, shelves of bottles on either side, the name over it all
+    solid.box(cx, 2.42, z - 0.12, 2.5, 1.5, 0.08, wood(DARK)); glow.box(cx, 2.42, z - 0.07, 2.2, 1.2, 0.01, [0.42, 0.5, 0.52]);
+    solid.box(cx, 3.24, z - 0.1, 2.9, 0.16, 0.12, wood(OAK)); for (const s of [-1, 1]) solid.cyl(cx + s * 1.34, 1.62, z - 0.1, 0.08, 1.7, wood(OAK), 8);
+    for (const s of [-1, 1]) for (let sh = 0; sh < 3; sh++) {
+      const y = 1.72 + sh * 0.52, sx = cx + s * 2.02;
+      solid.box(sx, y, z - 0.04, 1.3, 0.045, 0.24, wood(DARK));
+      for (let i = 0; i < 7; i++) bottle(sx - 0.54 + i * 0.18, y + 0.022, z - 0.03, BOTTLES[(i * 3 + sh + (s > 0 ? 2 : 0)) % BOTTLES.length], 1.15);
+    }
+    solid.box(cx, 3.72, z - 0.08, 2.0, 0.6, 0.07, wood(DARK)); word('BAR', cx, 3.72, z - 0.04, 1.9, 0.52, 'z+', '#ffcf6a');
+    // a barrel at the end, and a spittoon by the rail
+    solid.cyl(x + w + 0.42, 0, z + 0.45, 0.36, 0.95, wood(PINE), 14, 0.3); for (const y of [0.18, 0.76]) solid.add(new THREE.TorusGeometry(0.37, 0.022, 5, 16), at(x + w + 0.42, y, z + 0.45, Math.PI / 2, 0, 0), IRON);
+    solid.cyl(x - 0.2, 0, fz + 0.5, 0.1, 0.16, BRASS, 10, 0.15);
+    live.bartender = [cx + 0.1, 0, z + 0.34];
+  }
+
+  // ---------- the notice board, with the group's name on a board over it ----------
+  { const [x, y, w, h] = STATION.board.wall, cx = x + w / 2;
+    solid.box(cx, y + h / 2, 0.05, w, h, 0.07, wood(DARK)); solid.box(cx, y + h / 2, 0.09, w - 0.2, h - 0.2, 0.02, [0.6, 0.45, 0.28]);
+    for (const [px, py, pw, ph, rot, col] of [[-0.6, 0.3, 0.6, 0.78, 0.04, PAPER], [0.28, 0.35, 0.5, 0.42, -0.06, [0.95, 0.9, 0.6]], [0.42, -0.28, 0.7, 0.5, 0.03, PAPER], [-0.3, -0.42, 0.5, 0.36, -0.1, [0.8, 0.86, 0.9]]]) {
+      solid.box(cx + px, y + h / 2 + py, 0.105, pw, ph, 0.006, col, 0, 0, rot); solid.ball(cx + px, y + h / 2 + py + ph / 2 - 0.05, 0.115, 0.022, [0.7, 0.1, 0.1], 1, 1, 1, 6);
+    }
+    // a cup for the best, drawn large on the middle paper
+    solid.cyl(cx - 0.6, y + h / 2 + 0.1, 0.11, 0.05, 0.03, BRASS, 8); solid.cyl(cx - 0.6, y + h / 2 + 0.16, 0.11, 0.07, 0.16, BRASS, 10, 0.12);
+    live.nameSign = [cx, y + h + 0.5, 0.12, 3.0, 0.5];
+    solid.box(cx, y + h + 0.5, 0.08, 3.1, 0.56, 0.06, wood(PINE)); for (const s of [-1, 1]) solid.rod(cx + s * 1.3, y + h + 0.78, 0.08, cx + s * 1.3, y + h + 1.2, 0.08, 0.012, IRON, 4);
+  }
+
+  // ---------- the arcade: a shooting gallery in a cabinet ----------
+  { const [x, z, w, d] = STATION.arcade.box, h = 2.5, cx = x + w / 2;
+    solid.box(cx, h / 2, z + d / 2 - 0.1, w, h, d - 0.2, wood(tone(WINE, 0.8))); solid.box(cx, 1.0, z + d - 0.1, w, 0.16, 0.5, wood(DARK));
+    solid.box(cx, 0.5, z + d - 0.06, w - 0.1, 1.0, 0.12, wood(tone(WINE, 0.6)));
+    glow.box(cx, 1.62, z + d - 0.19, w - 0.3, 0.86, 0.01, [0.1, 0.2, 0.16]); live.arcade = [cx, 1.62, z + d - 0.18, w - 0.34, 0.8];
+    solid.box(cx, 2.24, z + d - 0.12, w, 0.4, 0.2, wood(DARK)); word('ARKADE', cx, 2.24, z + d - 0.015, w - 0.14, 0.3, 'z+', '#ffcf6a');
+    for (const s of [-1, 1]) solid.box(cx + s * (w / 2 - 0.04), 1.55, z + d - 0.12, 0.08, 1.1, 0.24, wood(DARK));
+    solid.cyl(cx - 0.3, 1.08, z + d + 0.0, 0.02, 0.16, IRON, 6); solid.ball(cx - 0.3, 1.27, z + d, 0.05, [0.8, 0.1, 0.1], 1, 1, 1, 8);
+    for (let i = 0; i < 3; i++) solid.cyl(cx + 0.05 + i * 0.16, 1.08, z + d + 0.02, 0.045, 0.03, [[0.9, 0.7, 0.1], [0.2, 0.5, 0.8], [0.8, 0.2, 0.2]][i], 8);
+  }
+
+  // ---------- the music box: a piano that plays by itself, with a horn on top ----------
+  { const [x, z, w, d] = STATION.jukebox.box, cx = x + w / 2, bz = z + 0.32;
+    solid.box(cx, 0.66, bz, w, 1.32, 0.5, wood(DARK, 0.08)); solid.box(cx, 1.35, bz, w + 0.08, 0.06, 0.56, wood(OAK));
+    solid.box(cx, 0.78, bz + 0.36, w, 0.09, 0.3, wood(DARK, 0.08));                                                       // the key bed
+    for (const s of [-1, 1]) { solid.box(cx + s * (w / 2 - 0.04), 0.38, bz + 0.38, 0.08, 0.76, 0.1, wood(DARK)); }
+    glow.box(cx, 1.08, bz + 0.256, w - 0.3, 0.24, 0.01, [0.85, 0.8, 0.62]);                                               // the paper roll behind its little window
+    live.roll = [cx, 1.08, bz + 0.262, w - 0.3, 0.24]; live.keys = [cx, 0.835, bz + 0.4, w - 0.12];
+    for (const s of [-1, 1]) solid.box(cx + s * 0.36, 0.3, bz + 0.26, 0.2, 0.3, 0.02, BRASS);                               // the pedals' brass plates
+    // the horn
+    solid.cyl(cx + 0.2, 1.38, bz, 0.05, 0.3, BRASS, 8);
+    solid.add(new THREE.CylinderGeometry(0.34, 0.05, 0.6, 16, 1, true), at(cx + 0.02, 1.86, bz + 0.2, 0.9, 0, 0.35), (px, py, pz, n) => tone(BRASS, 0.9 + 0.2 * n.y));
+    solid.cyl(cx - 0.3, 1.38, bz - 0.05, 0.06, 0.2, [0.6, 0.12, 0.12], 8); solid.ball(cx - 0.3, 1.63, bz - 0.05, 0.08, [3, 2.2, 1], 1, 1.4, 1, 8);          // a lamp in a red glass
+    live.notes = [cx, 2.1, bz + 0.3];
+  }
+
+  // ---------- the way out: swing doors, daylight behind them ----------
+  { const [x, , w, h] = STATION.door.wall, cx = x + w / 2;
+    glow.box(cx, h / 2, 0.012, w - 0.1, h, 0.01, [2.4, 2.1, 1.5]);
+    for (const s of [-1, 1]) solid.box(cx + s * (w / 2), h / 2, 0.08, 0.14, h, 0.16, wood(DARK));
+    solid.box(cx, h + 0.07, 0.08, w + 0.28, 0.14, 0.16, wood(DARK));
+    live.doors = [-1, 1].map(s => ({ x: cx + s * (w / 2 - 0.07), s, w: w / 2 - 0.1 }));
+    solid.box(cx, h + 0.42, 0.07, 0.9, 0.36, 0.05, wood(PINE)); word('UD', cx, h + 0.42, 0.1, 0.84, 0.3);
+  }
+
+  // ---------- tables ----------
+  // the board-game table: four in a row standing up, the ludo board lying down
+  { const [x, z, w, d] = STATION.games.box, h = STATION.games.h, cx = x + w / 2, cz = z + d / 2;
+    solid.box(cx, h - 0.04, cz, w, 0.08, d, wood(PINE)); for (const sx of [-1, 1]) for (const sz of [-1, 1]) leg(cx + sx * (w / 2 - 0.14), cz + sz * (d / 2 - 0.14), h - 0.08, 0.06, wood(OAK));
+    solid.box(cx - 0.55, h + 0.36, cz - 0.1, 1.0, 0.72, 0.07, [0.1, 0.24, 0.6]);
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 5; j++) solid.add(new THREE.CylinderGeometry(0.055, 0.055, 0.078, 10), at(cx - 0.97 + i * 0.168, h + 0.09 + j * 0.135, cz - 0.1, Math.PI / 2, 0, 0), (i * 7 + j * 3) % 5 < 2 ? [0.85, 0.12, 0.1] : (i + j * 2) % 3 ? [0.92, 0.75, 0.1] : [0.03, 0.05, 0.15]);
+    solid.box(cx + 0.75, h + 0.012, cz + 0.05, 0.86, 0.02, 0.86, CREAM);
+    for (const [px, pz, col] of [[-1, -1, [0.8, 0.15, 0.12]], [1, -1, [0.15, 0.5, 0.2]], [1, 1, [0.9, 0.75, 0.1]], [-1, 1, [0.15, 0.35, 0.75]]]) solid.box(cx + 0.75 + px * 0.27, h + 0.026, cz + 0.05 + pz * 0.27, 0.28, 0.008, 0.28, col);
+    solid.box(cx, 0.012, cz, w + 2.0, 0.02, d + 1.9, [0.42, 0.09, 0.08]); solid.box(cx, 0.016, cz, w + 1.6, 0.02, d + 1.5, [0.55, 0.14, 0.1]);        // the rug it stands on
+  }
+  // the dice table: a leather cup and dice
+  { const [cx, cz, rx] = STATION.dice.round, h = STATION.dice.h;
+    solid.cyl(cx, h - 0.07, cz, rx, 0.07, wood(PINE), 28); solid.cyl(cx, h - 0.012, cz, rx - 0.12, 0.015, FELT, 28); solid.cyl(cx, 0.06, cz, 0.16, h - 0.13, wood(OAK), 10); solid.cyl(cx, 0, cz, 0.55, 0.07, wood(OAK), 14, 0.2);
+    solid.cyl(cx - 0.25, h, cz + 0.1, 0.1, 0.2, LEATHER, 10, 0.12);
+    for (const [px, pz, a] of [[0.18, -0.12, 0.3], [0.34, 0.14, 1.1], [0.02, 0.3, 0.7]]) solid.box(cx + px, h + 0.05, cz + pz, 0.09, 0.09, 0.09, CREAM, 0, a, 0);
+  }
+  // the card table: green cloth in a padded rim, cards and chips
+  { const [cx, cz, rx, rz] = STATION.cards.round, h = STATION.cards.h, k = rz / rx;
+    solid.add(new THREE.CylinderGeometry(rx, rx, 0.09, 36), at(cx, h - 0.045, cz, 0, 0, 0, 1, 1, k), wood(DARK)); solid.add(new THREE.CylinderGeometry(rx - 0.14, rx - 0.14, 0.02, 36), at(cx, h + 0.006, cz, 0, 0, 0, 1, 1, (rz - 0.14) / (rx - 0.14)), FELT);
+    solid.add(new THREE.TorusGeometry(rx - 0.07, 0.055, 6, 36), at(cx, h, cz, Math.PI / 2, 0, 0, 1, k, 1), LEATHER);
+    for (const sx of [-1, 1]) { solid.cyl(cx + sx * rx * 0.5, 0.06, cz, 0.13, h - 0.15, wood(OAK), 10); solid.cyl(cx + sx * rx * 0.5, 0, cz, 0.4, 0.07, wood(OAK), 12, 0.18); }
+    for (let i = 0; i < 5; i++) solid.box(cx - 0.36 + i * 0.18, h + 0.02, cz - 0.05, 0.14, 0.004, 0.2, i < 3 ? PAPER : [0.55, 0.1, 0.12], 0, (i - 2) * 0.06, 0);
+    for (const [px, pz, col, n] of [[0.7, 0.3, [0.8, 0.12, 0.1], 5], [0.84, 0.22, [0.1, 0.3, 0.7], 3], [-0.8, 0.26, [0.08, 0.08, 0.08], 4], [-0.66, 0.36, [0.9, 0.85, 0.75], 6], [0.1, 0.42, [0.1, 0.5, 0.2], 3]]) solid.cyl(cx + px, h + 0.016, cz + pz, 0.055, 0.018 * n, (x2, y2) => (Math.floor((y2 - h - 0.016) / 0.018) % 2 ? tone(col, 1.25) : col), 10);
+  }
+  // the command table: the map with its flags
+  { const [x, z, w, d] = STATION.command.box, h = STATION.command.h, cx = x + w / 2, cz = z + d / 2;
+    solid.box(cx, h - 0.05, cz, w, 0.1, d, wood(OAK)); for (const sx of [-1, 1]) for (const sz of [-1, 1]) leg(cx + sx * (w / 2 - 0.16), cz + sz * (d / 2 - 0.16), h - 0.1, 0.07, wood(DARK));
+    solid.box(cx, h + 0.008, cz, w - 0.3, 0.012, d - 0.3, [0.2, 0.42, 0.62]);
+    for (const [px, pz, sx, sz] of [[-0.6, -0.1, 0.7, 0.42], [0.5, 0.2, 0.62, 0.36], [0.0, -0.36, 0.3, 0.16], [-0.1, 0.34, 0.4, 0.15]]) solid.add(new THREE.SphereGeometry(1, 10, 6, 0, 6.283, 0, 1.57), at(cx + px, h + 0.014, cz + pz, 0, 0, 0, sx, 0.05, sz), [0.36, 0.55, 0.25]);
+    for (const [px, pz, col] of [[-0.7, -0.15, [0.85, 0.15, 0.12]], [-0.4, 0.0, [0.85, 0.15, 0.12]], [0.5, 0.25, [0.15, 0.35, 0.8]], [0.7, 0.1, [0.15, 0.35, 0.8]]]) { solid.cyl(cx + px, h + 0.03, cz + pz, 0.008, 0.24, IRON, 4); solid.box(cx + px + 0.06, h + 0.23, cz + pz, 0.12, 0.08, 0.005, col); }
+    solid.rod(cx - 1.0, h + 0.03, cz + 0.5, cx - 0.6, h + 0.03, cz + 0.56, 0.02, BRASS, 6);                                // a spy-glass
+  }
+  // the sofa: buttoned leather, its back to the room's back wall
+  { const [x, z, w, d] = STATION.sofa.box, cx = x + w / 2;
+    solid.box(cx, 0.26, z + d / 2 + 0.1, w - 0.3, 0.3, d - 0.2, WINE); solid.box(cx, 0.08, z + d / 2, w - 0.1, 0.16, d, wood(DARK));
+    solid.box(cx, 0.78, z + 0.2, w - 0.3, 0.86, 0.3, WINE, -0.1, 0, 0);
+    for (const s of [-1, 1]) { solid.box(cx + s * (w / 2 - 0.16), 0.5, z + d / 2, 0.32, 0.64, d, WINE); solid.add(new THREE.CylinderGeometry(0.17, 0.17, d, 10), at(cx + s * (w / 2 - 0.16), 0.84, z + d / 2, Math.PI / 2, 0, 0), WINE); }
+    for (let i = 0; i < 3; i++) solid.box(x + 0.95 + i * 1.15, 0.45, z + d / 2 + 0.12, 1.08, 0.12, d - 0.34, tone(WINE, 1.25));
+    for (let i = 0; i < 7; i++) for (let j = 0; j < 2; j++) solid.ball(x + 0.6 + i * 0.5, 0.62 + j * 0.34, z + 0.37 - j * 0.035, 0.03, BRASS, 1, 1, 1, 6);
+    solid.box(cx + 1.2, 0.5, z + d / 2 + 0.15, 0.4, 0.3, 0.36, [0.85, 0.6, 0.15], 0.2, 0.4, 0.1);                           // a cushion
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) solid.cyl(cx + sx * (w / 2 - 0.2), 0, z + d / 2 + sz * (d / 2 - 0.1), 0.06, 0.1, BRASS, 8);
+  }
+  // the dance floor: a round of light boards with a star, and lights at its rim
+  { const [cx, cz, r] = STATION.dance.floor;
+    solid.cyl(cx, 0.0, cz, r, 0.03, wood(tone(PINE, 1.25)), 40); solid.add(new THREE.TorusGeometry(r, 0.035, 5, 44), at(cx, 0.03, cz, Math.PI / 2, 0, 0), BRASS);
+    const star = new THREE.Shape(); for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283 + 0.314, q = i % 2 ? 0.5 : 1.25; if (i) star.lineTo(Math.cos(a) * q, Math.sin(a) * q); else star.moveTo(Math.cos(a) * q, Math.sin(a) * q); }
+    solid.add(new THREE.ShapeGeometry(star), at(cx, 0.034, cz, -Math.PI / 2, 0, 0), [0.7, 0.2, 0.15]);
+    live.dance = []; for (let k = 0; k < 10; k++) { const a = k / 10 * 6.283; live.dance.push([cx + Math.cos(a) * (r + 0.02), 0.07, cz + Math.sin(a) * (r + 0.02)]); }
+  }
+
+  // ---------- green things and a lamp ----------
+  const cactus = (x, z, s = 1) => {
+    solid.cyl(x, 0, z, 0.3 * s, 0.4 * s, [0.6, 0.3, 0.18], 12, 0.36 * s); solid.cyl(x, 0.38 * s, z, 0.33 * s, 0.03, [0.2, 0.12, 0.06], 12);
+    const green = (px, py, pz, n) => tone([0.16, 0.42, 0.18], 0.85 + 0.3 * Math.abs(Math.sin(Math.atan2(n.z, n.x) * 5)));
+    solid.cyl(x, 0.4 * s, z, 0.15 * s, 1.15 * s, green, 10); solid.ball(x, 1.55 * s, z, 0.15 * s, green, 1, 1, 1, 10);
+    for (const [sx, y0, hh] of [[-1, 0.9, 0.42], [1, 0.7, 0.55]]) { solid.rod(x, y0 * s, z, x + sx * 0.3 * s, y0 * s, z, 0.085 * s, green, 8); solid.cyl(x + sx * 0.3 * s, y0 * s - 0.04, z, 0.085 * s, hh * s, green, 8); solid.ball(x + sx * 0.3 * s, (y0 + hh) * s - 0.04, z, 0.085 * s, green, 1, 1, 1, 8); }
+    solid.ball(x + 0.05, 1.7 * s, z + 0.02, 0.07 * s, [0.9, 0.35, 0.5], 1, 0.7, 1, 8);
+  };
+  cactus(STATION.plant1.round[0], STATION.plant1.round[1], 1); cactus(STATION.plant2.round[0], STATION.plant2.round[1], 0.9); cactus(STATION.plant3.round[0], STATION.plant3.round[1], 1);
+  { const [x, z] = STATION.lamp.round;
+    solid.cyl(x, 0, z, 0.22, 0.05, BRASS, 12); solid.cyl(x, 0.05, z, 0.025, 1.85, BRASS, 6);
+    solid.add(new THREE.CylinderGeometry(0.16, 0.36, 0.42, 14, 1, true), at(x, 2.1, z), (px, py, pz, n) => [2.4, 1.7, 0.8]); glow.ball(x, 2.02, z, 0.08, [4, 3.2, 1.6]);
+  }
+
+  // ---------- the casino wing ----------
+  STATIONS.filter(st => st.kind === 'slot').forEach((st, i) => {
+    const [x, z, w, d] = st.box, cx = x + w / 2, col = [[0.75, 0.1, 0.12], [0.12, 0.35, 0.7], [0.85, 0.4, 0.55]][i], fz = z + d;
+    solid.box(cx, 0.55, z + d / 2, w, 1.1, d, wood(DARK)); solid.box(cx, 1.6, z + d / 2 - 0.08, w - 0.08, 1.0, d - 0.16, col);
+    solid.add(new THREE.CylinderGeometry(w / 2 - 0.04, w / 2 - 0.04, d - 0.16, 16, 1, false, -Math.PI / 2, Math.PI), at(cx, 2.1, z + d / 2 - 0.08, Math.PI / 2, 0, 0), col);
+    solid.box(cx, 1.62, fz - 0.14, w - 0.3, 0.5, 0.04, BRASS); glow.box(cx, 1.62, fz - 0.115, w - 0.4, 0.4, 0.01, [0.95, 0.93, 0.85]);
+    solid.box(cx, 1.12, fz - 0.06, w - 0.2, 0.08, 0.3, BRASS); solid.box(cx, 0.72, fz - 0.02, w - 0.5, 0.2, 0.1, [0.02, 0.02, 0.02]); solid.box(cx, 0.6, fz + 0.06, w - 0.36, 0.05, 0.22, BRASS);
+    solid.rod(cx + w / 2 - 0.02, 1.3, fz - 0.3, cx + w / 2 + 0.16, 1.3, fz - 0.3, 0.03, STEEL, 6);
+    (live.slots = live.slots || {})[st.id] = { reels: [cx, 1.62, fz - 0.108, w - 0.42, 0.38], arm: [cx + w / 2 + 0.16, 1.3, fz - 0.3], col, bulbs: [] };
+    word(['KIRSEBÆR', 'ROBOT', 'GRISEN'][i], cx, 2.2, fz - 0.135, w - 0.3, 0.24, 'z+', '#fff3c4');
+    for (let k = 0; k < 7; k++) { const a = Math.PI * (k / 6), bx = cx - Math.cos(a) * (w / 2 - 0.1), by = 2.1 + Math.sin(a) * (w / 2 - 0.1); live.slots[st.id].bulbs.push([bx, by, fz - 0.15]); }
+  });
+  { const [x, y, w, h] = STATION.casino.wall, cx = x + w / 2;
+    solid.box(cx, y + h / 2, 0.05, w + 0.16, h + 0.16, 0.07, wood(OAK)); live.board = [cx, y + h / 2, 0.092, w, h];
+    solid.box(cx, y - 0.1, 0.1, w * 0.7, 0.04, 0.1, wood(OAK)); solid.box(cx - 0.3, y - 0.06, 0.12, 0.12, 0.03, 0.03, CREAM);
+  }
+  // the blackjack table: half a round, the house's side straight
+  { const [cx, cz, rx, rz] = STATION.blackjack.round, h = STATION.blackjack.h, z0 = cz - rz * 0.55;
+    const half = (r, hh, y, col, sz) => solid.add(new THREE.CylinderGeometry(r, r, hh, 30, 1, false, -Math.PI / 2, Math.PI), at(cx, y, z0, 0, 0, 0, 1, 1, sz), col);
+    half(rx, 0.09, h - 0.045, wood(DARK), (rz * 1.55) / rx); half(rx - 0.16, 0.02, h + 0.006, FELT, (rz * 1.55 - 0.16) / (rx - 0.16));
+    solid.box(cx, h - 0.045, z0 - 0.1, rx * 2, 0.09, 0.22, wood(DARK));
+    for (const sx of [-1, 1]) { solid.cyl(cx + sx * rx * 0.55, 0.06, z0 + 0.5, 0.12, h - 0.15, wood(OAK), 10); solid.cyl(cx + sx * rx * 0.55, 0, z0 + 0.5, 0.38, 0.07, wood(OAK), 12, 0.16); }
+    for (let i = 0; i < 5; i++) { const a = Math.PI * (0.14 + i * 0.18), px = cx - Math.cos(a) * (rx - 0.62), pz = z0 + Math.sin(a) * (rz * 1.55 - 0.62) * 0.92; solid.box(px, h + 0.018, pz, 0.26, 0.004, 0.34, [0.09, 0.36, 0.19], 0, Math.PI / 2 - a, 0); }
+    solid.box(cx + rx - 0.75, h + 0.08, z0 + 0.12, 0.3, 0.14, 0.2, [0.05, 0.05, 0.06]); solid.box(cx, h + 0.02, z0 + 0.14, 0.5, 0.01, 0.2, PAPER);
+    for (const [px, col] of [[-0.9, [0.8, 0.12, 0.1]], [-0.74, [0.1, 0.3, 0.7]], [-0.58, [0.08, 0.08, 0.08]]]) solid.cyl(cx + px, h + 0.016, z0 + 0.14, 0.055, 0.08, col, 10);
+    live.dealer = [cx, 0, cz - rz + 0.2];                          // inside the table's footprint, so that nobody walks through the dealer
+  }
+  // the casino's name over the opening
+  high.box(CX + 0.02, H - 1.2, D / 2, 0.08, 0.7, 3.4, wood(DARK)); word('KASINO', CX - 0.03, H - 1.2, D / 2, 3.2, 0.58, 'x-', '#ffcf6a', true);
+  // wanted bills on the walls: the house robot, for cheating at dice
+  live.bills = [[0.02, 1.9, 6.4, 'x+'], [W - 0.02, 1.9, 6.4, 'x-'], [23.3, 2.6, 0.03, 'z+']];
+
+  // ---------- painted words and bills: one sheet for all of them ----------
+  const AT = 1024, ROW = 64, quads = batch(), quadsHigh = batch();
+  const sheet = picture(AT, AT, g => {
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    texts.forEach((t, i) => {
+      const cw = Math.min(AT, Math.round(ROW * t.w / t.h)), cy = i * (ROW + 4);
+      g.font = '700 ' + Math.round(ROW * 0.8) + 'px Fredoka, system-ui, sans-serif';
+      const k = Math.min(1.25, (cw - 14) / Math.max(1, g.measureText(t.text).width));
+      g.save(); g.translate(cw / 2, cy + ROW / 2 + 2); g.scale(k, 1);
+      g.lineWidth = 11; g.strokeStyle = 'rgba(28,12,5,.92)'; g.strokeText(t.text, 0, 3); g.fillStyle = t.ink; g.fillText(t.text, 0, 0);
+      g.restore();
+      t.cell = [0, cy, cw, ROW];
+    });
+    // a wanted bill: the house robot, for cheating at dice
+    const bx = 760, by = 700, bw = 240, bh = 310;
+    g.fillStyle = '#e6d5a8'; g.fillRect(bx, by, bw, bh); g.strokeStyle = '#5a3a1a'; g.lineWidth = 5; g.strokeRect(bx + 8, by + 8, bw - 16, bh - 16);
+    g.fillStyle = '#3a2410'; g.font = '700 38px Fredoka, system-ui, sans-serif'; g.fillText('EFTERLYST', bx + bw / 2, by + 44);
+    g.fillStyle = '#b9c8d8'; g.beginPath(); g.roundRect(bx + 60, by + 86, 120, 92, 22); g.fill(); g.strokeStyle = '#3a2410'; g.lineWidth = 4; g.stroke();
+    g.fillStyle = '#1d2b3a'; g.beginPath(); g.roundRect(bx + 74, by + 100, 92, 60, 12); g.fill();
+    g.fillStyle = '#7fe0ff'; for (const sx of [-1, 1]) { g.beginPath(); g.ellipse(bx + bw / 2 + sx * 22, by + 124, 9, 11, 0, 0, 6.3); g.fill(); }
+    g.strokeStyle = '#7fe0ff'; g.lineWidth = 4; g.beginPath(); g.arc(bx + bw / 2, by + 132, 16, 0.2 * Math.PI, 0.8 * Math.PI); g.stroke();
+    g.strokeStyle = '#3a2410'; g.beginPath(); g.moveTo(bx + bw / 2, by + 86); g.lineTo(bx + bw / 2, by + 66); g.stroke(); g.fillStyle = '#e2403a'; g.beginPath(); g.arc(bx + bw / 2, by + 62, 7, 0, 6.3); g.fill();
+    g.fillStyle = '#3a2410'; g.font = '600 24px Fredoka, system-ui, sans-serif'; g.fillText('for snyd i Meyer', bx + bw / 2, by + 214);
+    g.font = '700 30px Fredoka, system-ui, sans-serif'; g.fillText('DUSØR: 1 JETON', bx + bw / 2, by + 262);
+    live.billCell = [bx, by, bw, bh];
+  });
+  const facing = (x, y, z, w, h, face, e = 0) => face === 'x-' ? [[x - e, y - h / 2, z - w / 2], [x - e, y - h / 2, z + w / 2], [x - e, y + h / 2, z + w / 2], [x - e, y + h / 2, z - w / 2]]
+    : face === 'x+' ? [[x + e, y - h / 2, z + w / 2], [x + e, y - h / 2, z - w / 2], [x + e, y + h / 2, z - w / 2], [x + e, y + h / 2, z + w / 2]]
+      : [[x - w / 2, y - h / 2, z + e], [x + w / 2, y - h / 2, z + e], [x + w / 2, y + h / 2, z + e], [x - w / 2, y + h / 2, z + e]];
+  const onSheet = (B, c, x, y, z, w, h, face) => { const q = facing(x, y, z, w, h, face); B.quad(q[0], q[1], q[2], q[3], [1, 1, 1], c[0] / AT, 1 - (c[1] + c[3]) / AT, (c[0] + c[2]) / AT, 1 - c[1] / AT); };
+  for (const t of texts) onSheet(t.up ? quadsHigh : quads, t.cell, t.x, t.y, t.z, t.w, t.h, t.face);
+  for (const [x, y, z, face] of live.bills) onSheet(quads, live.billCell, x, y, z, 0.62, 0.8, face);
+
+  // ---------- into meshes ----------
+  const lambert = o => new THREE.MeshLambertMaterial(Object.assign({ vertexColors: true }, o)), basic = o => new THREE.MeshBasicMaterial(Object.assign({ vertexColors: true }, o));
+  const solidMat = lambert(), glowMat = basic();
+  const meshes = [solid.mesh(solidMat, root, 'solid'), glow.mesh(glowMat, root, 'glow'), floorB.mesh(lambert({ map: planks }), root, 'floor'), carpetB.mesh(lambert({ map: carpet }), root, 'carpet'),
+    paperB.mesh(lambert({ map: paper }), root, 'paper'), paper2B.mesh(lambert({ map: paper2 }), root, 'paper2'), wainB.mesh(lambert({ map: boards }), root, 'boards'),
+    quads.mesh(basic({ map: sheet, transparent: true, depthWrite: false }), root, 'words')];
+  const nearGroup = new THREE.Group(); root.add(nearGroup);                       // what is on the front wall (hidden when one looks in through it)
+  meshes.push(high.mesh(solidMat, upper, 'high'), highGlow.mesh(glowMat, upper, 'highGlow'), near.mesh(solidMat, nearGroup, 'near'), nearGlow.mesh(glowMat, nearGroup, 'nearGlow'), quadsHigh.mesh(meshes[7].material, upper, 'wordsHigh'));
+
+  // ---------- what changes: boards one writes on, screens, reels, the piano's roll ----------
+  const screen = (w, h, x, y, z, sw, sh, face = 'z+', o = {}) => {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const B = batch(), q = facing(x, y, z, sw, sh, face); B.quad(q[0], q[1], q[2], q[3], [1, 1, 1]);
+    const m = B.mesh(new THREE.MeshBasicMaterial(Object.assign({ map: tex }, o)), root); meshes.push(m);
+    return { g: c.getContext('2d'), w, h, tex, mesh: m, done() { tex.needsUpdate = true; } };
+  };
+  const FONT = 'Fredoka, system-ui, sans-serif';
+  // the group's name over the notice board
+  const nameS = screen(512, 84, ...live.nameSign.slice(0, 3), live.nameSign[3], live.nameSign[4], 'z+', { transparent: true, depthWrite: false });
+  function setName(name) {
+    const g = nameS.g; g.clearRect(0, 0, 512, 84);
+    g.font = '700 54px ' + FONT; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    const k = Math.min(1, 480 / Math.max(1, g.measureText(name || 'Saloonen').width));
+    g.save(); g.translate(256, 44); g.scale(k, 1); g.lineWidth = 9; g.strokeStyle = 'rgba(40,20,8,.9)'; g.strokeText(name || 'Saloonen', 0, 2); g.fillStyle = '#3a2410'; g.fillText(name || 'Saloonen', 0, 0); g.restore();
+    nameS.done();
+  }
+  // the chalk board in the casino (who is up and down today), and the jackpot over the last machine
+  const boardS = screen(256, 234, ...live.board.slice(0, 3), live.board[3], live.board[4]);
+  const jp = STATION.slot3.box, potS = screen(256, 96, jp[0] + jp[2] / 2, 3.1, 0.2, 1.5, 0.56);
+  function setCasino(o) {
+    let g = boardS.g;
+    g.fillStyle = '#20302a'; g.fillRect(0, 0, 256, 234); g.textBaseline = 'middle';
+    g.font = '700 30px ' + FONT; g.textAlign = 'center'; g.fillStyle = '#ffcf6a'; g.fillText('I DAG', 128, 28);
+    const rows = (o.lines || []).slice(0, 4);
+    g.font = '600 24px ' + FONT;
+    if (!rows.length) { g.fillStyle = '#9fb3a8'; g.fillText('Ingen har spillet', 128, 124); }
+    rows.forEach(([name, net], i) => { const y = 78 + i * 42; g.textAlign = 'left'; g.fillStyle = '#eef3ee'; g.fillText(name.length > 9 ? name.slice(0, 8) + '…' : name, 16, y); g.textAlign = 'right'; g.fillStyle = net > 0 ? '#8fe89a' : net < 0 ? '#ff9a8c' : '#eef3ee'; g.fillText((net > 0 ? '+' : '') + net, 240, y); });
+    boardS.done();
+    g = potS.g; g.fillStyle = '#2a1830'; g.fillRect(0, 0, 256, 96); g.strokeStyle = '#d9a441'; g.lineWidth = 6; g.strokeRect(3, 3, 250, 90);
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 24px ' + FONT; g.fillStyle = '#ffb347'; g.fillText('JACKPOT', 128, 26);
+    g.font = '700 42px ' + FONT; g.fillStyle = '#ffe9a8'; g.fillText(String(o.pot || 0).replace(/\B(?=(\d{3})+$)/g, '.'), 128, 62);
+    potS.done();
+  }
+  // the arcade's screen: targets in a row and a sight
+  const arcS = screen(128, 128, live.arcade[0], live.arcade[1], live.arcade[2], live.arcade[3], live.arcade[4]);
+  function paintArcade(t) {
+    const g = arcS.g; g.fillStyle = '#10261c'; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#3d7a4a'; g.fillRect(0, 96, 128, 32);
+    for (let i = 0; i < 4; i++) { const x = ((i * 40 + t * 22) % 168) - 20, up = Math.sin(t * 2 + i) > -0.3; if (up) { g.fillStyle = '#f4ead0'; g.beginPath(); g.arc(x, 78, 11, 0, 6.3); g.fill(); g.fillStyle = '#d8343c'; g.beginPath(); g.arc(x, 78, 6, 0, 6.3); g.fill(); } g.fillStyle = '#7a5a2c'; g.fillRect(x - 2, 88, 4, 10); }
+    const sx = 64 + Math.sin(t * 0.9) * 34, sy = 66 + Math.cos(t * 1.3) * 12; g.strokeStyle = '#ffd45e'; g.lineWidth = 2; g.beginPath(); g.arc(sx, sy, 9, 0, 6.3); g.moveTo(sx - 14, sy); g.lineTo(sx + 14, sy); g.moveTo(sx, sy - 14); g.lineTo(sx, sy + 14); g.stroke();
+    arcS.done();
+  }
+  // the reels of the three machines
+  const SYM = [['7', '#e2403a'], ['★', '#f2c33f'], ['♦', '#3d8fe0'], ['♥', '#f25a8e'], ['●', '#58b85f']];
+  const reels = {};
+  for (const [id, m] of Object.entries(live.slots)) reels[id] = { s: screen(96, 36, m.reels[0], m.reels[1], m.reels[2], m.reels[3], m.reels[4]), until: 0, shown: -1, seed: id.charCodeAt(4) * 7 };
+  function paintReels(r, t, spinning) {
+    const g = r.s.g; g.fillStyle = '#f4efe2'; g.fillRect(0, 0, 96, 36);
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '700 26px ' + FONT;
+    for (let i = 0; i < 3; i++) {
+      if (spinning) { for (let k = 0; k < 5; k++) { g.fillStyle = SYM[(k + i + Math.floor(t * 20)) % SYM.length][1]; g.globalAlpha = 0.45; g.fillRect(i * 32 + 5, ((k * 9 + t * 160 + i * 5) % 44) - 6, 22, 5); } g.globalAlpha = 1; }
+      else { const q = SYM[(r.seed + i * 3 + r.shown * (i + 2)) % SYM.length]; g.fillStyle = q[1]; g.fillText(q[0], i * 32 + 16, 19); }
+      if (i) { g.fillStyle = '#b9b0a0'; g.fillRect(i * 32 - 1, 0, 2, 36); }
+    }
+    r.s.done();
+  }
+  // the piano's roll of paper with holes in it
+  const rollS = screen(64, 64, live.roll[0], live.roll[1], live.roll[2], live.roll[3], live.roll[4]);
+  { const g = rollS.g; g.fillStyle = '#e9dfc0'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#4a3a22'; for (let i = 0; i < 46; i++) g.fillRect(4 + (i * 13 % 56), (i * 29) % 64, 3, 3 + (i % 4) * 3); rollS.tex.wrapT = THREE.RepeatWrapping; rollS.done(); }
+  // its keys: white with black ones between, and a few that are down while it plays
+  const keyB = batch(), KW = live.keys[3], NK = 22;
+  for (let i = 0; i < NK; i++) keyB.box(live.keys[0] - KW / 2 + (i + 0.5) * KW / NK, live.keys[1], live.keys[2], KW / NK - 0.006, 0.02, 0.2, CREAM);
+  for (let i = 0; i < NK - 1; i++) if (![2, 6].includes(i % 7)) keyB.box(live.keys[0] - KW / 2 + (i + 1) * KW / NK, live.keys[1] + 0.016, live.keys[2] - 0.04, KW / NK * 0.55, 0.022, 0.12, IRON);
+  meshes.push(keyB.mesh(solidMat, root, 'keys'));
+  const down = []; for (let i = 0; i < 4; i++) { const B = batch(); B.box(0, 0, 0, KW / NK - 0.006, 0.006, 0.2, [0.55, 0.5, 0.4]); const m = B.mesh(solidMat, root); m.matrixAutoUpdate = true; m.visible = false; meshes.push(m); down.push(m); }
+
+  // the swing doors
+  const doors = live.doors.map(d => {
+    const B = batch(), w = d.w, dir = -d.s;                              // the leaf reaches from its hinge towards the middle
+    for (let i = 0; i < 5; i++) B.box(dir * (i + 0.5) * w / 5, 1.25 + (i === 0 || i === 4 ? -0.05 : 0.04), 0, w / 5 - 0.012, 0.9 - (i === 0 || i === 4 ? 0.1 : 0), 0.04, wood(tone(PINE, 0.85 + (i % 2) * 0.2)));
+    B.box(dir * w / 2, 0.82, 0, w, 0.07, 0.05, wood(DARK)); B.box(dir * w / 2, 1.62, 0, w, 0.07, 0.05, wood(DARK));
+    const m = B.mesh(solidMat, root, 'door'); m.matrixAutoUpdate = true; m.position.set(d.x, 0, 0.14); meshes.push(m);
+    return { m, s: d.s, a: 0, v: 0 };
+  });
+  // lights that take turns: round the machines, round the dance floor
+  const bulbs = [0, 1].map(k => {
+    const B = batch(); let n = 0;
+    for (const m of Object.values(live.slots)) for (const q of m.bulbs) if (n++ % 2 === k) B.ball(q[0], q[1], q[2], 0.04, [3, 2.4, 1], 1, 1, 1, 6);
+    for (const q of live.dance) if (n++ % 2 === k) B.ball(q[0], q[1], q[2], 0.05, [3, 1.6, 0.7], 1, 1, 1, 6);
+    const m = B.mesh(new THREE.MeshBasicMaterial({ vertexColors: true }), root, 'bulbs'); meshes.push(m);
+    return m;
+  });
+
+  // ---------- the house robots: one keeps the bar, one deals the cards ----------
+  function robot(x, z, face, o = {}) {
+    const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = face; root.add(g);
+    const steel = [0.5, 0.58, 0.66], B = batch();
+    B.cyl(0, 0.0, 0, 0.3, 0.5, [0.2, 0.22, 0.26], 12, 0.24); B.add(new THREE.CylinderGeometry(0.34, 0.3, 0.72, 14), at(0, 1.02, 0), steel); B.ball(0, 0.62, 0, 0.26, [0.3, 0.33, 0.38], 1, 0.5, 1);
+    for (const s of [-1, 1]) B.add(new THREE.ConeGeometry(0.07, 0.16, 4), at(s * 0.08, 1.3, 0.32, 0, 0, s * Math.PI / 2), [0.7, 0.1, 0.12]);
+    B.ball(0, 1.3, 0.33, 0.035, [0.5, 0.06, 0.08]);
+    if (o.apron) B.box(0, 0.9, 0.3, 0.44, 0.5, 0.03, [0.9, 0.88, 0.8]);
+    else B.box(0, 1.06, 0.31, 0.3, 0.4, 0.03, [0.1, 0.1, 0.12]);
+    meshes.push(B.mesh(solidMat, g));
+    const head = new THREE.Group(); head.position.y = 1.72; g.add(head);
+    const HB = batch();
+    HB.box(0, 0, 0, 0.74, 0.54, 0.5, [0.66, 0.74, 0.82]); HB.cyl(0, 0.27, 0, 0.012, 0.2, IRON, 4);
+    for (const s of [-1, 1]) HB.add(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 8), at(s * 0.4, 0, 0, 0, 0, Math.PI / 2), [0.35, 0.4, 0.46]);
+    if (o.hat === 'bowler') { HB.cyl(0, 0.27, 0, 0.36, 0.03, IRON, 14); HB.add(new THREE.SphereGeometry(0.25, 12, 8, 0, 6.283, 0, 1.57), at(0, 0.29, 0), IRON); }
+    else if (o.hat === 'visor') { HB.add(new THREE.CylinderGeometry(0.38, 0.38, 0.04, 14, 1, false, -1.2, 2.4), at(0, 0.2, 0.08), [0.1, 0.45, 0.25]); HB.add(new THREE.TorusGeometry(0.34, 0.03, 5, 16), at(0, 0.2, 0, Math.PI / 2, 0, 0), [0.1, 0.45, 0.25]); }
+    meshes.push(HB.mesh(solidMat, head));
+    const FB = batch(); FB.box(0, 0, 0.251, 0.58, 0.36, 0.01, [0.03, 0.06, 0.1]);
+    for (const s of [-1, 1]) FB.add(new THREE.CircleGeometry(0.055, 10), at(s * 0.14, 0.03, 0.26, 0, 0, 0, 1, 1.2, 1), [0.5, 1.9, 2.4]);
+    FB.add(new THREE.TorusGeometry(0.09, 0.012, 4, 10, Math.PI * 0.7), at(0, -0.03, 0.26, 0, 0, Math.PI * 1.15), [0.5, 1.9, 2.4]);
+    const face2 = FB.mesh(glowMat, head); meshes.push(face2);
+    const tipB = batch(); tipB.ball(0, 0.5, 0, 0.05, [3, 0.5, 0.3], 1, 1, 1, 8); const tip = tipB.mesh(new THREE.MeshBasicMaterial({ vertexColors: true }), head); meshes.push(tip);
+    const arms = [-1, 1].map(s => { const a = new THREE.Group(); a.position.set(s * 0.36, 1.26, 0.02); g.add(a); const AB = batch(); AB.rod(0, 0, 0, 0, -0.3, 0.12, 0.05, steel); AB.rod(0, -0.3, 0.12, 0, -0.34, 0.42, 0.045, steel); AB.ball(0, -0.34, 0.44, 0.07, [0.3, 0.33, 0.38]);
+      if (o.glass && s > 0) AB.cyl(0, -0.3, 0.44, 0.05, 0.14, GLASS, 8, 0.06);
+      if (o.glass && s < 0) AB.box(0, -0.3, 0.5, 0.16, 0.02, 0.14, [0.9, 0.9, 0.85]);
+      if (o.cards && s > 0) for (let i = 0; i < 3; i++) AB.box((i - 1) * 0.05, -0.26, 0.5, 0.09, 0.13, 0.004, PAPER, 0, 0, (i - 1) * -0.25);
+      meshes.push(AB.mesh(solidMat, a)); return a; });
+    return { g, head, arms, tip, x, z };
+  }
+  const keeper = robot(live.bartender[0], live.bartender[2], 0, { apron: true, hat: 'bowler', glass: true });
+  const dealer = robot(live.dealer[0], live.dealer[2], 0, { hat: 'visor', cards: true });
+
+  setName(groupName); setCasino({}); paintArcade(0); for (const r of Object.values(reels)) paintReels(r, 0, false);
+  let arcT = 0, music = false, keyT = 0;
+  return {
+    root, upper, near: nearGroup, picks, signs, lamps, notes: live.notes, setName, setCasino,
+    setMusic(on) { music = !!on; if (!on) for (const m of down) m.visible = false; },
+    // a machine turns for `secs` seconds
+    spin(id, secs, t) { const r = reels[id]; if (r) { r.until = t + secs; r.shown++; } },
+    swing() { for (const d of doors) d.v = 5 * d.s; },
+    // who the barkeeper looks at: [x, z] or null
+    tick(dt, t, look) {
+      // the robots: the keeper goes to and fro and polishes a glass, the dealer shuffles
+      const [bx, , bw] = STATION.bar.box;
+      keeper.g.position.x = bx + bw * 0.5 + Math.sin(t * 0.35) * 1.4;
+      keeper.arms[0].rotation.set(-0.2 + Math.sin(t * 7) * 0.12, 0.5, 0); keeper.arms[1].rotation.set(-0.25, -0.45, 0);
+      const want = look ? Math.atan2(look[0] - keeper.g.position.x, look[1] - keeper.z) : Math.sin(t * 0.5) * 0.4;
+      keeper.head.rotation.y += (Math.max(-1.1, Math.min(1.1, want)) - keeper.head.rotation.y) * Math.min(1, dt * 4);
+      keeper.g.position.y = Math.abs(Math.sin(t * 2.2)) * 0.02;
+      dealer.arms[0].rotation.set(-0.3, 0.4 + Math.sin(t * 3) * 0.1, 0); dealer.arms[1].rotation.set(-0.3 + Math.sin(t * 6) * 0.06, -0.4, 0); dealer.head.rotation.y = Math.sin(t * 0.6) * 0.5;
+      for (const r of [keeper, dealer]) r.tip.visible = Math.sin(t * 4 + r.x) > 0;
+      // lights in turn
+      const k = Math.floor(t * 2.5) % 2; bulbs[0].material.color.setScalar(k ? 1 : 0.22); bulbs[1].material.color.setScalar(k ? 0.22 : 1);
+      // the reels
+      for (const r of Object.values(reels)) { const on = t < r.until; if (on) paintReels(r, t, true); else if (r.was) paintReels(r, t, false); r.was = on; }
+      // the arcade's screen now and then, the piano while it plays
+      if ((arcT += dt) > 0.12) { arcT = 0; paintArcade(t); }
+      if (music) {
+        rollS.tex.offset.y = (t * 0.25) % 1;
+        if ((keyT += dt) > 0.13) { keyT = 0; for (const m of down) { m.visible = Math.random() < 0.7; m.position.set(live.keys[0] - KW / 2 + (Math.floor(Math.random() * NK) + 0.5) * KW / NK, live.keys[1] + 0.006, live.keys[2]); } }
+      }
+      // the doors swing back by themselves
+      for (const d of doors) { d.v += (-d.a * 30 - d.v * 2.2) * dt; d.a += d.v * dt; d.m.rotation.y = d.a; }
+    },
+    dispose() { for (const m of meshes) { m.geometry.dispose(); if (m.material.map && m.material.map !== planks) m.material.map.dispose(); m.material.dispose(); } for (const t of [planks, carpet, paper, paper2, boards, sheet]) t.dispose(); },
+  };
+}

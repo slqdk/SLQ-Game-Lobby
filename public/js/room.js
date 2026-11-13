@@ -113,6 +113,7 @@ export function createRoom(canvas, hooks) {
       const el = T - a.drink.t0, per = BAR.lasts / BAR.sips, n = Math.floor(el / per), u = el - n * per;
       drink = a.drink.k; fill = Math.max(0, 1 - n / BAR.sips);
       if (u > per - 1.6) sip = Math.sin((u - (per - 1.6)) / 1.6 * Math.PI) ** 0.6;
+      if (a.sipAt && T - a.sipAt < 1.6) sip = Math.max(sip, Math.sin((T - a.sipAt) / 1.6 * Math.PI) ** 0.6);      // a mouthful one asked for
     }
     if (!st && !fxs.banana) { c.beginPath(); c.ellipse(X(x), Y(y), s * 0.42, s * 0.13, 0, 0, TAU); c.fillStyle = 'rgba(30,15,30,.22)'; c.fill(); }
     c.save();
@@ -415,7 +416,12 @@ export function createRoom(canvas, hooks) {
       a.bubble = { text: (hen ? 'Gok gok! ' : '') + text, at: T, until: T + clamp(3.5 + text.length * 0.06, 4, 9) };
       a.talkUntil = T + clamp(text.length * 0.07, 0.8, 3);
     },
-    emote(id, k) { const a = actors.get(id); if (a && EMOTES[k] && a.fxs.chicken === undefined) { a.emote = k; a.emoteAt = T; if (id === me || k === 'cheers') play(k === 'cheers' ? 'clink' : 'pop'); } },
+    emote(id, k) {
+      const a = actors.get(id);
+      if (!a || a.fxs.chicken !== undefined) return;
+      if (k === 'sip') { if (a.drink) a.sipAt = T; return; }
+      if (EMOTES[k]) { a.emote = k; a.emoteAt = T; if (id === me || k === 'cheers') play(k === 'cheers' ? 'clink' : 'pop'); }
+    },
 
     prank(k, from, to) {
       const a = actors.get(from), b = actors.get(to);
@@ -440,6 +446,11 @@ export function createRoom(canvas, hooks) {
       });
       play(to.length > 1 ? 'cheers' : 'pour');
       if (to.length > 1) { const a = actors.get(from); if (a) { const [x, y, z] = place(a); word('SKÅL!', x, y, z + 2.4, '#ffd45e'); } }
+    },
+    // the members as they stand right now, in the shape the server sends them: for handing the room over to the other way of showing it (room3d.js)
+    snapshot() {
+      return [...actors.values()].map(a => ({ id: a.id, name: a.name, look: a.look, dnd: a.dnd, on: true, p: a.dist < a.len ? [[a.x, a.y], a.path[a.path.length - 1]] : [[a.x, a.y]], sit: a.sit,
+        fx: Object.keys(a.fxs).map(k => [k, Math.max(0, (PRANKS[k].dur - (T - a.fxs[k])) * 1000)]), drink: a.drink ? [a.drink.k, Math.max(0, (BAR.lasts - (T - a.drink.t0)) * 1000)] : null, buzz: buzzNow(a), busy: a.net !== null ? 'slot' : '', net: a.net || 0 }));
     },
     // where on the canvas an avatar's head is (for a menu next to it)
     screenOf(id) { const a = actors.get(id); if (!a) return null; const [x, y, z] = place(a); return [X(x), Y(y, z + topOf(a))]; },

@@ -172,7 +172,7 @@ public/js/games/      one module per game for the screen
 public/eagleeye/      EagleEye Commander 2.5.0 (its page, rules, graphics, voices), opened in a frame
 public/shooter/       the shooter: world.js (the arena and how one walks in it, used by the server too),
                       rules.js (weapons, game types, numbers), game.js (the game in the browser),
-                      scenery.js (what one only looks at: leaves, grass, roofs, lamps, flags, clouds),
+                      scenery.js (what one only looks at: leaves, grass, roofs, lamps, flags, the town, the sky),
                       weapons.js (the weapons as models), viewmodel.js (the weapon in one's own hands
                       and how it moves), figure.js (avatars in 3D), and three.js r160 in vendor/
 deploy/               installer, service file, Proxmox helper

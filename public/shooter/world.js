@@ -319,8 +319,7 @@ export function buildWorld(THREE, scene, texLib) {
 
   if (!HEADLESS) {
   /* ======================= MILJØ / BAGGRUND (kun pynt, ingen kollision) =====
-   * Blå himmel-kuppel, en by-silhuet hele vejen rundt bag murene, og et bælte af
-   * træer + hække på græs udenfor. */
+   * Græsset udenfor murene. (clubhouse) Himlen, byen og træerne udenfor laves i scenery.js. */
   // -- stor græsflade under alt (ses udenfor murene) --
   (function () {
     const grass = makeTex(function (g, w, h) {
@@ -335,39 +334,8 @@ export function buildWorld(THREE, scene, texLib) {
       m.rotation.x = -Math.PI / 2; m.position.set((r.minX + r.maxX) / 2, -0.05, (r.minZ + r.maxZ) / 2); m.receiveShadow = true; scene.add(m);
     });
   })();
-  // -- himmel-kuppel med lodret gradient --
-  (function () {
-    const skyTex = makeTex(function (g, w, h) {
-      const grd = g.createLinearGradient(0, 0, 0, h);
-      grd.addColorStop(0.0, '#3f78c4'); grd.addColorStop(0.55, '#84b3e2'); grd.addColorStop(1.0, '#d3e5f3');
-      g.fillStyle = grd; g.fillRect(0, 0, w, h);
-    });
-    skyTex.wrapS = skyTex.wrapT = THREE.ClampToEdgeWrapping;
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(300, 24, 16), new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false }));
-    sky.renderOrder = -2; scene.add(sky);
-  })();
-  // -- by-silhuet hele vejen rundt (tegnet på canvas) --
-  (function () {
-    const cw = 2048, ch = 512, c = document.createElement('canvas'); c.width = cw; c.height = ch;
-    const g = c.getContext('2d'); g.clearRect(0, 0, cw, ch);
-    const pal = ['#6b7480', '#7d8794', '#5f6a76', '#8a94a0', '#727c88', '#565f6b', '#94795e'];
-    let x = 0;
-    while (x < cw) {
-      const bw = 44 + rnd() * 96, bh = 120 + rnd() * 320, col = pal[(rnd() * pal.length) | 0];
-      g.fillStyle = col; g.fillRect(x, ch - bh, bw, bh);
-      g.fillStyle = 'rgba(0,0,0,0.16)'; g.fillRect(x, ch - bh, bw, 5);                   // tag-skygge
-      for (let wy = ch - bh + 14; wy < ch - 12; wy += 18) for (let wx = x + 7; wx < x + bw - 9; wx += 15) {
-        g.fillStyle = rnd() < 0.34 ? 'rgba(255,226,150,0.85)' : 'rgba(22,28,36,0.7)';
-        g.fillRect(wx, wy, 7, 10);                                                        // vinduer
-      }
-      x += bw + 5 + rnd() * 12;
-    }
-    const cityTex = new THREE.CanvasTexture(c); cityTex.colorSpace = THREE.SRGBColorSpace;
-    cityTex.wrapS = THREE.RepeatWrapping; cityTex.wrapT = THREE.ClampToEdgeWrapping; cityTex.repeat.set(3, 1);
-    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(116, 116, 44, 48, 1, true),
-      new THREE.MeshBasicMaterial({ map: cityTex, side: THREE.BackSide, transparent: true, fog: false, depthWrite: false }));
-    cyl.position.y = 20; cyl.renderOrder = -1; scene.add(cyl);
-  })();
+  // (clubhouse) the sky and the town around the arena are made in scenery.js (they were a painted dome and a
+  // painted ring here)
   // (clubhouse) the trees and bushes outside the arena are grown in scenery.js
   }
 

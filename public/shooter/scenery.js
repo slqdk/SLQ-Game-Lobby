@@ -2,7 +2,7 @@
 // stairs: boxes, because that is what one walks on and hides behind. This file dresses it up, in the browser
 // only: hedges and trees of leaves that move in the wind, a meadow with tufts, flowers and worn paths, paving in
 // the two teams' yards, houses with roof timbers, shutters, flower boxes and smoking chimneys, a vaulted tunnel
-// with lamps, flags on the towers, clouds, birds and butterflies.
+// with lamps, flags on the towers, a town around it all, a sky with clouds, birds and butterflies.
 //
 // Nothing here can be walked on, bumped into or hit: that is decided by world.js alone, and the server never
 // loads this file. world.js notes what there is to dress up in `world.decor` (and leaves out its own plain
@@ -23,7 +23,8 @@ export function noise(x, y, z) {
 }
 
 // world: buildWorld()'s answer (with `decor`). texLib: makeTextures(). opt: { anisotropy: the renderer's best
-// filtering for pictures seen at a slant }. Returns { tick(dt, t), setDetail(n), smokers, meshes }.
+// filtering for pictures seen at a slant }. Returns { tick(dt, t), setDetail(n), smokers, meshes, haze (the colour
+// of the horizon, for the fog) }.
 export function dressWorld(THREE, scene, world, texLib, opt = {}) {
   const D = world.decor, TEX = texLib.TEX, rnd = mulberry32(20261112), time = { value: 0 }, ANISO = Math.min(8, opt.anisotropy || 1);
   const V = new THREE.Vector3(), V2 = new THREE.Vector3(), Q = new THREE.Quaternion(), E = new THREE.Euler(), S3 = new THREE.Vector3(), M4 = new THREE.Matrix4(), UP = new THREE.Vector3(0, 1, 0);
@@ -684,22 +685,209 @@ export function dressWorld(THREE, scene, world, texLib, opt = {}) {
       transformed.y -= aSway * aSway * (0.16 + 0.1 * sin(uTime * 1.7 + position.z));`);
   }; }
 
-  // ---------- the sky ----------
-  // clouds that drift, a sun, birds that circle, and butterflies over the flowers
-  const clouds = makeBatch(), ICOC = new THREE.IcosahedronGeometry(1, 1), cp = ICOC.attributes.position;
-  for (let i = 0; i < 12; i++) {
-    const a = i / 12 * 6.283 + rnd() * 0.4, d = 165 + rnd() * 95, y = d * Math.tan(rad(23 + rnd() * 15)), size = 9 + rnd() * 9, n = 5 + (rnd() * 4 | 0), tx = -Math.sin(a), tz = Math.cos(a);
-    for (let k = 0; k < n; k++) {
-      const off = (k - (n - 1) / 2) * size * 0.62 + (rnd() - 0.5) * size * 0.3, r = size * (0.62 + rnd() * 0.5) * (1 - Math.abs(k - (n - 1) / 2) / n * 0.8), bx = d * Math.cos(a) + tx * off, by = y + (rnd() - 0.4) * size * 0.25, bz = d * Math.sin(a) + tz * off, s1 = rnd() * 30;
-      for (let v = 0; v < cp.count; v++) {
-        const x = cp.getX(v), yy = cp.getY(v), z = cp.getZ(v), f = 1 + 0.5 * (noise(x * 1.4 + s1, yy * 1.4, z * 1.4) - 0.5), k2 = 0.8 + 0.2 * Math.max(-0.4, yy) + 0.05;
-        clouds.vert(bx + x * r * f, by + Math.max(-0.35, yy) * r * 0.55 * f, bz + z * r * f, 0, 1, 0, 0, 0, [k2, k2, Math.min(1, k2 * 1.04)]);
+  // ---------- the town around the arena ----------
+  // Three rows of houses beyond the trees, the far ones taller and paler in the haze, all in one mesh with one
+  // picture of windows. Among them a church, a works with two smoking chimneys, a water tower, a building site with
+  // a crane that turns, a big wheel that turns, and two balloons that drift past. Lamps blink on the tall roofs.
+  const SUNV = new THREE.Vector3(34, 54, 26).normalize(), CELLS = 8;
+  const sunlit = n => 0.52 + 0.5 * Math.max(0, n.x * SUNV.x + n.y * SUNV.y + n.z * SUNV.z);
+  const tinted = c => (x, y, z, n) => { const k = sunlit(n); return [c[0] * k, c[1] * k, c[2] * k]; };
+  const townTex = picture((g, w) => {
+    const n = w / CELLS;
+    g.fillStyle = '#fff'; g.fillRect(0, 0, w, w);
+    for (let j = 0; j < CELLS; j++) for (let i = 0; i < CELLS; i++) {
+      const x = i * n, y = j * n, r = rnd(), wx = x + n * 0.22, wy = y + n * 0.18, ww = n * 0.56, wh = n * 0.6;
+      g.fillStyle = 'rgba(0,0,0,' + (rnd() * 0.07).toFixed(3) + ')'; g.fillRect(x, y, n, n);          // the wall is a little uneven
+      g.fillStyle = r < 0.1 ? '#ffe7a0' : r < 0.2 ? '#c9d3d8' : ['#33414f', '#3d4e60', '#465a6d'][rnd() * 3 | 0]; g.fillRect(wx, wy, ww, wh);
+      const sky = g.createLinearGradient(0, wy, 0, wy + wh); sky.addColorStop(0, 'rgba(200,226,246,.5)'); sky.addColorStop(0.7, 'rgba(200,226,246,0)');
+      g.fillStyle = sky; g.fillRect(wx, wy, ww, wh);                                                   // the sky in the glass
+      g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(wx + ww / 2 - n * 0.02, wy, n * 0.04, wh); g.fillRect(wx, wy + wh * 0.4, ww, n * 0.035);
+      g.fillStyle = 'rgba(0,0,0,.22)'; g.fillRect(wx - n * 0.03, wy + wh, ww + n * 0.06, n * 0.06);     // the sill and its shadow
+    }
+  });
+  const town = makeBatch(), spin = makeBatch(), ring = makeBatch(), balloons = makeBatch(), beacons = [[], []], farSmoke = [], crane = {}, wheel = {};
+  // a wall or roof with four corners, a..b along the bottom, the picture from (u0, v0) to (u1, v1)
+  const quad = (B, a, b, c, d, n, u0, v0, u1, v1, col, top = col) => {
+    for (const [p, u, v, cc] of [[a, u0, v0, col], [b, u1, v0, col], [c, u1, v1, top], [a, u0, v0, col], [c, u1, v1, top], [d, u0, v1, top]]) B.vert(p[0], p[1], p[2], n.x, n.y, n.z, u, v, cc);
+  };
+  const NV = new THREE.Vector3();
+  // A house: a box with windows on its four walls, standing at (cx, cz), turned `rot`, from y0 up to y1.
+  // o: { bay, floor: metres per window, roof: colour (a flat roof is laid on), gable: height of a pitched roof }
+  function house(cx, cz, w, d, y0, y1, rot, wall, o = {}) {
+    const c = Math.cos(rot), s = Math.sin(rot), P = (lx, y, lz) => [cx + lx * c + lz * s, y, cz - lx * s + lz * c], hw = w / 2, hd = d / 2, bay = o.bay || 3.3, fl = o.floor || 3.4;
+    for (const [x0, z0, x1, z1, nx, nz] of [[-hw, hd, hw, hd, 0, 1], [hw, hd, hw, -hd, 1, 0], [hw, -hd, -hw, -hd, 0, -1], [-hw, -hd, -hw, hd, -1, 0]]) {
+      NV.set(nx * c + nz * s, 0, -nx * s + nz * c);
+      const len = nx ? d : w, nb = Math.max(1, Math.round(len / bay)), nf = Math.max(1, Math.round((y1 - y0) / fl)), u0 = rnd() * CELLS | 0, v0 = rnd() * CELLS | 0, k = sunlit(NV);
+      quad(town, P(x0, y0, z0), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z0), NV, u0 / CELLS, v0 / CELLS, (u0 + nb) / CELLS, (v0 + nf) / CELLS, [wall[0] * k * 0.84, wall[1] * k * 0.84, wall[2] * k * 0.84], [wall[0] * k, wall[1] * k, wall[2] * k]);
+    }
+    const roof = o.roof || [0.36, 0.37, 0.4];
+    if (o.gable) {                                               // a pitched roof, the ridge along the house
+      const yr = y1 + o.gable, e = 0.5;
+      for (const sg of [1, -1]) {
+        NV.set(sg * o.gable * s, hd, sg * o.gable * c).normalize(); const k = sunlit(NV), cc = [roof[0] * k, roof[1] * k, roof[2] * k];
+        const a = P(-sg * (hw + e), y1 - 0.2, sg * (hd + e)), b = P(sg * (hw + e), y1 - 0.2, sg * (hd + e)), t1 = P(sg * (hw + e), yr, 0), t0 = P(-sg * (hw + e), yr, 0);
+        quad(town, a, b, t1, t0, NV, 0, 0, 0, 0, cc);
+        NV.set(sg * c, 0, -sg * s); const kk = sunlit(NV), wc = [wall[0] * kk, wall[1] * kk, wall[2] * kk], g0 = P(sg * hw, y1, sg * hd), g1 = P(sg * hw, y1, -sg * hd), g2 = P(sg * hw, yr, 0);
+        for (const p of [g0, g1, g2]) town.vert(p[0], p[1], p[2], NV.x, NV.y, NV.z, 0, 0, wc);
+      }
+    } else { NV.set(0, 1, 0); const k = sunlit(NV); quad(town, P(-hw, y1, hd), P(hw, y1, hd), P(hw, y1, -hd), P(-hw, y1, -hd), NV, 0, 0, 0, 0, [roof[0] * k, roof[1] * k, roof[2] * k]); }
+    return P;
+  }
+  // something without windows: any shape, one colour, lit by the sun
+  const plain = (B, geo, m, col) => { geo.deleteAttribute('uv'); B.add(geo, m, { col: tinted(col) }); };
+  const WALLS = [[0.68, 0.62, 0.54], [0.62, 0.36, 0.28], [0.72, 0.64, 0.46], [0.5, 0.56, 0.64], [0.76, 0.72, 0.66], [0.54, 0.5, 0.47], [0.68, 0.5, 0.34], [0.54, 0.6, 0.5], [0.44, 0.5, 0.6], [0.7, 0.36, 0.26], [0.74, 0.58, 0.26], [0.66, 0.44, 0.44], [0.34, 0.52, 0.52]];
+  const ROOFS = [[0.36, 0.37, 0.4], [0.5, 0.3, 0.24], [0.3, 0.32, 0.34], [0.46, 0.48, 0.5]], STEEL = [0.5, 0.52, 0.55], DARK = [0.2, 0.21, 0.23];
+  // where a row stands: an oval around the arena, `m` metres outside it; a is the angle seen from the middle
+  const oval = (m, a) => [(AW + m) * Math.cos(a), (AD + m) * Math.sin(a)], facing = (x, z) => Math.atan2(-x, -z);
+  const deg = Math.PI / 180;
+  // what stands out, by the angle it is seen at from the middle (0 is +x, 90 is +z): [angle, row, kind]
+  const SIGHTS = [[28, 0, 'church'], [112, 0, 'wheel'], [158, 1, 'tank'], [206, 0, 'works'], [262, 1, 'site'], [318, 0, 'tank']];
+  const mast = (x, y, z, h, lamp) => { plain(town, new THREE.CylinderGeometry(0.12, 0.2, h, 5), at(x, y + h / 2, z), STEEL); beacons[lamp].push(x, y + h + 0.3, z); };
+  [[60, 17, 36], [96, 26, 58], [134, 42, 96]].forEach(([m, h0, h1], row) => {
+    const per = 2 * Math.PI * Math.hypot(AW + m, AD + m) / Math.SQRT2;
+    for (let run = rnd() * 8; run < per;) {
+      const a = run / per * 2 * Math.PI, w = (row === 2 ? 11 : 13) + rnd() * (row === 2 ? 9 : 17), d = 11 + rnd() * 9, gap = rnd() < 0.18 ? 9 + rnd() * 16 : 1.5 + rnd() * 5;
+      run += w + gap;
+      if (SIGHTS.some(q => q[1] === row && Math.abs(((a / deg - q[0]) % 360 + 540) % 360 - 180) < (row ? 9 : 12))) continue;       // room for a sight
+      const [x, z] = oval(m + (rnd() - 0.5) * 12, a + (w / 2) / per * 2 * Math.PI), rot = facing(x, z) + (rnd() - 0.5) * 0.3, h = h0 + (h1 - h0) * Math.pow(rnd(), row === 2 ? 1.1 : 1.6);
+      const wall = WALLS[rnd() * WALLS.length | 0], roof = ROOFS[rnd() * ROOFS.length | 0], kind = rnd();
+      if (row === 2 || (row === 1 && kind < 0.45)) {
+        // a tall house that steps in towards the top, with a mast and a lamp
+        const glass = rnd() < 0.4, wl = glass ? [0.5, 0.62, 0.74] : wall, o = glass ? { bay: 2.2, floor: 3.1, roof } : { roof }, h2 = h * (0.62 + rnd() * 0.16);
+        house(x, z, w, d, 0, h2, rot, wl, o);
+        if (rnd() < 0.75) { house(x, z, w * 0.72, d * 0.72, h2, h, rot, wl, o); if (rnd() < 0.6) { const h3 = h + 4 + rnd() * 7; house(x, z, w * 0.4, d * 0.4, h, h3, rot, wl, o); mast(x, h3, z, 6 + rnd() * 8, row & 1); } else if (rnd() < 0.7) mast(x, h, z, 8 + rnd() * 10, row & 1); }
+        else { plain(town, new THREE.BoxGeometry(w * 0.3, 2.6, d * 0.3), at(x, h2 + 1.3, z, 0, rot, 0), roof); if (h2 > 40) mast(x, h2 + 2.6, z, 7, row & 1); }
+      } else if (kind < 0.78 || row === 1) {
+        // a block of flats with a flat roof and things on it: a stair house, a tank on legs, a row of chimneys
+        const P = house(x, z, w, d, 0, h, rot, wall, { roof });
+        const q = P((rnd() - 0.5) * w * 0.5, 0, (rnd() - 0.5) * d * 0.4); plain(town, new THREE.BoxGeometry(3.4, 2.6, 3), at(q[0], h + 1.3, q[2], 0, rot, 0), [wall[0] * 0.9, wall[1] * 0.9, wall[2] * 0.9]);
+        if (rnd() < 0.45) { const t = P(w * 0.28, 0, -d * 0.2); plain(town, new THREE.CylinderGeometry(1.5, 1.5, 2.6, 9), at(t[0], h + 3.1, t[2]), [0.5, 0.36, 0.26]); plain(town, new THREE.ConeGeometry(1.7, 1.1, 9), at(t[0], h + 4.95, t[2]), DARK); for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) plain(town, new THREE.BoxGeometry(0.2, 1.8, 0.2), at(t[0] + lx, h + 0.9, t[2] + lz), DARK); }
+        else for (let k = 0; k < 3; k++) { const t = P(-w * 0.3 + k * 1.6, 0, d * 0.25); plain(town, new THREE.BoxGeometry(0.8, 1.5 + (k % 2) * 0.5, 0.8), at(t[0], h + 0.8, t[2], 0, rot, 0), [0.5, 0.33, 0.27]); }
+      } else {
+        // an old house with a pitched roof of tiles
+        house(x, z, w, d * 0.8, 0, h * 0.8, rot, wall, { roof: [0.56, 0.3, 0.22], gable: 3.5 + rnd() * 3 });
+      }
+    }
+  });
+  for (const [ang, row, kind] of SIGHTS) {
+    const a = ang * deg, [x, z] = oval([60, 96, 134][row], a), rot = facing(x, z), c = Math.cos(rot), s = Math.sin(rot), L = (lx, lz) => [x + lx * c + lz * s, z - lx * s + lz * c];
+    if (kind === 'church') {
+      const stone = [0.82, 0.8, 0.74], tiles = [0.5, 0.28, 0.22];
+      house(x, z, 26, 11, 0, 15, rot, stone, { bay: 4.4, floor: 15, roof: tiles, gable: 7 });
+      const t = L(-16.5, 0); house(t[0], t[1], 8, 8, 0, 31, rot, stone, { bay: 4, floor: 7.5, roof: tiles });
+      plain(town, new THREE.ConeGeometry(6.1, 17, 4), at(t[0], 39.5, t[1], 0, rot + Math.PI / 4, 0), [0.3, 0.5, 0.44]);
+      plain(town, new THREE.SphereGeometry(0.7, 8, 6), at(t[0], 48.4, t[1]), [0.9, 0.72, 0.3]);
+    } else if (kind === 'tank') {
+      // a water tower: a round tank on a ring of legs
+      const y = 30 + row * 16;
+      plain(town, new THREE.CylinderGeometry(6.5, 5.2, 7, 14), at(x, y, z), [0.74, 0.78, 0.8]); plain(town, new THREE.ConeGeometry(6.9, 3, 14), at(x, y + 5, z), [0.46, 0.3, 0.26]);
+      plain(town, new THREE.CylinderGeometry(1, 1, y, 8), at(x, y / 2, z), STEEL);
+      for (let k = 0; k < 6; k++) { const q = k / 6 * 6.283; plain(town, new THREE.CylinderGeometry(0.3, 0.3, y + 1, 5), along(x + Math.cos(q) * 5.6, y / 2 - 1.5, z + Math.sin(q) * 5.6, -Math.cos(q) * 0.11, 1, -Math.sin(q) * 0.11), STEEL); }
+      beacons[1].push(x, y + 7.2, z);
+    } else if (kind === 'works') {
+      // a works: a long shed with a saw-toothed roof and two tall chimneys that smoke
+      const brick = [0.62, 0.38, 0.3];
+      house(x, z, 44, 17, 0, 15, rot, brick, { bay: 5.5, floor: 7.5, roof: DARK });
+      for (let k = 0; k < 6; k++) { const q = L(-18.3 + k * 7.3, 0), e = L(-14.9 + k * 7.3, 0); plain(town, new THREE.BoxGeometry(7.6, 0.3, 17.4), at(q[0], 16.2, q[1], 0, rot, 0.34), [0.4, 0.42, 0.45]); plain(town, new THREE.BoxGeometry(0.3, 2.6, 17.4), at(e[0], 16.2, e[1], 0, rot, 0), [0.62, 0.74, 0.82]); }
+      for (const [lx, hh] of [[-27, 52], [-33, 43]]) {
+        const q = L(lx, 3);
+        plain(town, new THREE.CylinderGeometry(1.5, 2.5, hh, 10), at(q[0], hh / 2, q[1]), brick); plain(town, new THREE.CylinderGeometry(1.75, 1.75, 1.4, 10), at(q[0], hh - 2.5, q[1]), [0.85, 0.84, 0.8]);
+        farSmoke.push([q[0], hh + 0.5, q[1]]); beacons[0].push(q[0] + 1.9, hh - 0.5, q[1]);
+      }
+    } else if (kind === 'site') {
+      // a building site: the frame of a house going up, and a crane whose arm turns
+      const con = [0.72, 0.71, 0.68];
+      for (let f = 0; f < 9; f++) plain(town, new THREE.BoxGeometry(22, 0.5, 16), at(x, 4.5 + f * 4.4, z, 0, rot, 0), con);
+      for (const lx of [-10.5, -3.5, 3.5, 10.5]) for (const lz of [-7.5, 0, 7.5]) { const q = L(lx, lz); plain(town, new THREE.BoxGeometry(0.7, 40, 0.7), at(q[0], 20, q[1], 0, rot, 0), con); }
+      const q = L(17, 2), H = 62, yel = [0.92, 0.7, 0.16];
+      for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) plain(town, new THREE.BoxGeometry(0.35, H, 0.35), at(q[0] + lx, H / 2, q[1] + lz), yel);
+      for (let y = 3; y < H; y += 3.2) for (const sg of [-1, 1]) { plain(town, new THREE.BoxGeometry(2.9, 0.22, 0.22), at(q[0], y, q[1] + sg, 0, 0, sg * 0.8), yel); plain(town, new THREE.BoxGeometry(0.22, 0.22, 2.9), at(q[0] + sg, y + 1.6, q[1], sg * 0.8, 0, 0), yel); }
+      // the arm: built around its own middle (the top of the mast), turned as a whole every frame
+      plain(spin, new THREE.BoxGeometry(46, 1.1, 1.1), at(13, 2.6, 0), yel); plain(spin, new THREE.BoxGeometry(46, 0.25, 0.25), at(13, 4.3, 0, 0, 0, 0), yel);
+      for (let k = -9; k <= 35; k += 4) plain(spin, new THREE.BoxGeometry(0.2, 1.9, 0.2), at(k, 3.45, 0, 0, 0, k % 8 ? 0.5 : -0.5), yel);
+      plain(spin, new THREE.BoxGeometry(4, 3, 2.6), at(-8.5, 1.9, 0), [0.6, 0.6, 0.6]); plain(spin, new THREE.BoxGeometry(2.4, 2.4, 2.4), at(0, 1.2, 1.9), [0.86, 0.88, 0.9]);
+      plain(spin, new THREE.BoxGeometry(0.35, 9, 0.35), at(0, 6.5, 0), yel); plain(spin, new THREE.BoxGeometry(0.1, 26, 0.1), at(27, -10.5, 0), DARK); plain(spin, new THREE.BoxGeometry(1.1, 0.9, 1.1), at(27, -23.6, 0), DARK);
+      crane.pos = [q[0], H, q[1]]; beacons[0].push(q[0], H + 11.4, q[1]);
+    } else {
+      // the big wheel: two legs on either side and a hub; the wheel itself turns (its own mesh)
+      const R = 23, hub = R + 5;
+      for (const sg of [-1, 1]) for (const lx of [-1, 1]) { const b = L(lx * 11, sg * 2.4), t = L(0, sg * 2.4); plain(town, new THREE.CylinderGeometry(0.5, 0.6, Math.hypot(11, hub), 6), along((b[0] + t[0]) / 2, hub / 2, (b[1] + t[1]) / 2, t[0] - b[0], hub, t[1] - b[1]), [0.88, 0.88, 0.9]); }
+      plain(town, new THREE.CylinderGeometry(1.1, 1.1, 6, 10), along(x, hub, z, s, 0, c), STEEL);
+      wheel.pos = [x, hub, z]; wheel.rot = rot;
+      // (built lying in its own plane: x across, y up; it is stood where it belongs and turned every frame)
+      const rim = [0.9, 0.3, 0.3];
+      for (const sg of [-1, 1]) { plain(ring, new THREE.TorusGeometry(R, 0.32, 5, 40), at(0, 0, sg * 1.6), rim); plain(ring, new THREE.TorusGeometry(R * 0.55, 0.2, 4, 28), at(0, 0, sg * 1.6), [0.92, 0.92, 0.94]); }
+      for (let k = 0; k < 16; k++) {
+        const q = k / 16 * 6.283, cx = Math.cos(q), cy = Math.sin(q);
+        for (const sg of [-1, 1]) plain(ring, new THREE.BoxGeometry(R, 0.16, 0.16), at(cx * R / 2, cy * R / 2, sg * 1.6, 0, 0, q), [0.92, 0.92, 0.94]);
+        plain(ring, new THREE.CylinderGeometry(0.12, 0.12, 3.2, 4), at(cx * R, cy * R, 0, Math.PI / 2, 0, 0), STEEL);
+        plain(ring, new THREE.SphereGeometry(1.5, 8, 6), at(cx * (R + 0.2), cy * (R + 0.2), 0, 0, 0, 0, 1, 0.9, 1), [[0.95, 0.76, 0.2], [0.3, 0.6, 0.86], [0.9, 0.36, 0.3], [0.4, 0.74, 0.5]][k % 4]);
       }
     }
   }
-  ICOC.dispose();
-  const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xfff0c4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true }));
-  sun.position.set(34, 54, 26).normalize().multiplyScalar(270); sun.scale.setScalar(95); sun.renderOrder = -1; scene.add(sun);
+  // two balloons: striped, each with a basket; they go round far out, slowly
+  for (const [a, r, y, c1, c2] of [[0.9, 118, 62, [0.9, 0.3, 0.26], [0.96, 0.9, 0.78]], [4.1, 150, 88, [0.2, 0.5, 0.8], [0.96, 0.8, 0.3]]]) {
+    const x = Math.cos(a) * r, z = Math.sin(a) * r, stripes = (px, py, pz, n) => { const k = sunlit(n) * 1.05, c = Math.floor((Math.atan2(n.z, n.x) / 6.2832 + 0.5) * 12) % 2 ? c1 : c2; return [c[0] * k, c[1] * k, c[2] * k]; };
+    const env = new THREE.SphereGeometry(7, 16, 12); env.deleteAttribute('uv'); balloons.add(env, at(x, y, z, 0, 0, 0, 1, 1.12, 1), { col: stripes });
+    const neck = new THREE.CylinderGeometry(4.6, 1.5, 5.5, 16, 1, true); neck.deleteAttribute('uv'); balloons.add(neck, at(x, y - 8.6, z), { col: stripes });
+    plain(balloons, new THREE.BoxGeometry(1.7, 1.3, 1.7), at(x, y - 13.6, z), [0.5, 0.36, 0.22]);
+    for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) plain(balloons, new THREE.CylinderGeometry(0.04, 0.04, 2.6, 3), along(x + lx * 0.95, y - 11.9, z + lz * 0.95, lx * 0.22, 1, lz * 0.22), DARK);
+  }
+
+  // ---------- the sky ----------
+  // One big dome that follows the eye: blue that pales towards the haze at the horizon, the sun with warmth around
+  // it, and clouds worked out for every point of the sky (soft heaps that drift, lit from the sun's side, with thin
+  // streaks high above). The far end of the arena and the town fade into the same haze (`haze` is also the fog).
+  const haze = new THREE.Color(0xc5d6e2);
+  const skyMat = new THREE.ShaderMaterial({
+    uniforms: { uTime: time, uSun: { value: SUNV }, uZen: { value: new THREE.Color(0x2f6fc0) }, uMid: { value: new THREE.Color(0x6fa6de) }, uHor: { value: haze } },
+    vertexShader: 'varying vec3 vDir;\nvoid main() {\n\tvDir = position;\n\tvec4 p = viewMatrix * vec4(position, 0.0);\n\tgl_Position = projectionMatrix * vec4(p.xyz, 1.0);\n\tgl_Position.z = gl_Position.w;\n}',
+    fragmentShader: [
+      'uniform float uTime; uniform vec3 uSun, uZen, uMid, uHor; varying vec3 vDir;',
+      'float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }',
+      'float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }',
+      'float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.03 + vec2(17.0, 9.2); a *= 0.5; } return s; }',
+      'void main() {',
+      '\tvec3 d = normalize(vDir); float h = max(d.y, 0.0), sd = max(dot(d, uSun), 0.0);',
+      '\tvec3 col = mix(uHor, uMid, smoothstep(0.0, 0.3, h)); col = mix(col, uZen, smoothstep(0.22, 0.95, h));',
+      '\tcol += vec3(1.0, 0.74, 0.46) * pow(sd, 5.0) * 0.16 * (1.0 - 0.5 * h);',            // warmth on the sun's side of the sky
+      '\tif (d.y > 0.012) {',
+      '\t\tvec2 p = d.xz / (d.y + 0.13), w = vec2(uTime * 0.007, uTime * 0.003);',
+      '\t\tfloat n = fbm(p * 0.8 + w), cov = smoothstep(0.47, 0.72, n + 0.1 * fbm(p * 3.3 - w * 2.0));',
+      '\t\tfloat lit = clamp((n - fbm((p + normalize(uSun.xz) * 0.16) * 0.8 + w)) * 3.2 + 0.6, 0.0, 1.0);',      // thinner towards the sun: bright
+      '\t\tvec3 cl = mix(vec3(0.52, 0.58, 0.69), vec3(1.0, 0.985, 0.96), lit) + vec3(1.0, 0.8, 0.55) * pow(sd, 8.0) * 0.2;',
+      '\t\tfloat far = smoothstep(0.012, 0.2, d.y);',
+      '\t\tfloat high = smoothstep(0.52, 0.86, fbm(p * vec2(0.3, 1.5) + vec2(7.0, 3.0) + w * 0.4)) * 0.3;',
+      '\t\tcol = mix(col, vec3(0.93, 0.95, 0.98), high * far * (1.0 - cov));',
+      '\t\tcol = mix(col, mix(uHor, cl, 0.4 + 0.6 * far), cov * far * 0.94);',
+      '\t}',
+      '\tcol += vec3(1.0, 0.9, 0.72) * pow(sd, 120.0) * 0.5 + vec3(1.0, 0.96, 0.86) * smoothstep(0.99935, 0.9997, sd) * 2.5;',      // the glow and the disc
+      '\tgl_FragColor = vec4(col, 1.0);',
+      '\t#include <tonemapping_fragment>',
+      '\t#include <colorspace_fragment>',
+      '}'].join('\n'),
+    side: THREE.BackSide, depthWrite: false, fog: false,
+  });
+  const skyGeo = new THREE.SphereGeometry(1, 32, 20); skyGeo.deleteAttribute('uv'); skyGeo.deleteAttribute('normal');
+  const sky = new THREE.Mesh(skyGeo, skyMat); sky.frustumCulled = false; sky.renderOrder = 900; sky.matrixAutoUpdate = false; scene.add(sky);       // drawn after the solid things: only where sky shows
+  // lamps that blink on the tall roofs, in two beats
+  const lamps = beacons.map((list, i) => {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(list, 3));
+    const p = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, color: 0xff3a2a, size: 7, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); p.frustumCulled = false; p.userData.beat = i; scene.add(p);
+    return p;
+  });
+  // the smoke of the works' chimneys: puffs that rise, drift with the wind and thin out. Each puff is a square that
+  // faces the eye; where it is in its life is worked out from the clock on the graphics card.
+  const smokeMat = new THREE.ShaderMaterial({
+    uniforms: { uTime: time, uHor: { value: haze } },
+    vertexShader: 'attribute vec2 aCorner; attribute float aPhase; uniform float uTime; varying float vA; varying vec2 vC;\nvoid main() {\n\tfloat k = fract(uTime * 0.04 + aPhase);\n\tvec3 p = position + vec3(k * 30.0 + sin(aPhase * 40.0 + k * 5.0) * 3.0 * k, k * 44.0, k * 13.0 + cos(aPhase * 31.0 + k * 4.0) * 3.0 * k);\n\tvec4 mv = modelViewMatrix * vec4(p, 1.0);\n\tmv.xy += aCorner * mix(2.2, 11.0, sqrt(k));\n\tgl_Position = projectionMatrix * mv;\n\tvA = smoothstep(0.0, 0.06, k) * (1.0 - k) * 0.5; vC = aCorner;\n}',
+    fragmentShader: 'uniform vec3 uHor; varying float vA; varying vec2 vC;\nvoid main() {\n\tfloat a = smoothstep(1.0, 0.25, length(vC)) * vA;\n\tif (a < 0.004) discard;\n\tgl_FragColor = vec4(mix(vec3(0.6, 0.6, 0.6), uHor, 0.3), a);\n\t#include <tonemapping_fragment>\n\t#include <colorspace_fragment>\n}',
+    transparent: true, depthWrite: false, fog: false,
+  });
+  { const P = [], Cn = [], Ph = [], N = 14;
+    for (const q of farSmoke) for (let i = 0; i < N; i++) for (const c of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) { P.push(q[0], q[1], q[2]); Cn.push(c[0], c[1]); Ph.push(i / N + q[0] * 0.013); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('aCorner', new THREE.Float32BufferAttribute(Cn, 2)); g.setAttribute('aPhase', new THREE.Float32BufferAttribute(Ph, 1));
+    const m = new THREE.Mesh(g, smokeMat); m.frustumCulled = false; m.renderOrder = 3; scene.add(m); }
   // what flaps: a few corners, each with its own beat (in the uv: where in the beat, how fast)
   const flapMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
   flapMat.onBeforeCompile = sh => { sh.uniforms.uTime = time; sh.vertexShader = 'uniform float uTime;\nattribute float aSway;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed.y += sin(uTime * uv.y + uv.x) * aSway;'); };
@@ -736,15 +924,24 @@ export function dressWorld(THREE, scene, world, texLib, opt = {}) {
   meshes.tunWall = tunWall.mesh(dimMat('brickTan'), { receive: false, name: 'tunWall' }); meshes.tunFloor = tunFloor.mesh(dimMat('concrete'), { receive: false, name: 'tunFloor' });
   meshes.shade = shade.mesh(shadeMat, { receive: false, name: 'shade', order: 1 });
   meshes.flags = flags.mesh(flagMat, { cast: true, name: 'flags' });
-  meshes.clouds = clouds.mesh(new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }), { receive: false, name: 'clouds' }); meshes.clouds.matrixAutoUpdate = true;
+  const townMat = new THREE.MeshBasicMaterial({ map: townTex, vertexColors: true });
+  meshes.town = town.mesh(townMat, { receive: false, name: 'town' });
+  // what turns or drifts out there: the crane's arm, the big wheel, the balloons
+  const craneArm = spin.mesh(townMat, { receive: false, name: 'crane' }), bigWheel = ring.mesh(townMat, { receive: false, name: 'wheel' }), drift = balloons.mesh(townMat, { receive: false, name: 'balloons' });
+  for (const m of [craneArm, bigWheel, drift]) { m.matrixAutoUpdate = true; m.frustumCulled = false; }
+  if (crane.pos) craneArm.position.fromArray(crane.pos);
+  if (wheel.pos) bigWheel.position.fromArray(wheel.pos);
   ICO.dispose(); ICO0.dispose(); ROCK.dispose();
 
   return {
-    meshes, smokers,
+    meshes, smokers, haze,
     // every frame. t: seconds, any clock that runs evenly
     tick(dt, t) {
       time.value = t;
-      meshes.clouds.rotation.y = t * 0.0035;
+      craneArm.rotation.y = 0.6 + 1.3 * Math.sin(t * 0.045);
+      bigWheel.rotation.set(0, wheel.rot || 0, t * 0.07, 'YXZ');
+      drift.rotation.y = t * 0.0045; drift.position.y = 2.5 * Math.sin(t * 0.11);
+      for (const p of lamps) p.material.opacity = (t * 0.55 + p.userData.beat * 0.5) % 1 < 0.28 ? 1 : 0.12;
       for (const b of birds) {
         const a = b.a + t * b.w, s = Math.sign(b.w);
         b.m.position.set(b.cx + Math.cos(a) * b.r, b.y + Math.sin(t * 0.3 + b.a) * 1.5, b.cz + Math.sin(a) * b.r);

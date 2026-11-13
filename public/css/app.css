@@ -188,8 +188,14 @@ label small { color: var(--mute); font-weight: 500; }
 .pushrow { display: grid; gap: 8px; justify-items: start; }
 
 /* wardrobe */
-.wardrobe { display: grid; grid-template-columns: 190px 1fr; gap: 16px; align-items: start; }
-.wardrobe .fig { background: radial-gradient(circle at 50% 60%, #4a3f63, #272036 70%); border-radius: 18px; border: 2px solid var(--ink); display: grid; place-items: center; padding: 8px; position: sticky; top: 50px; }
+.wardrobe { display: grid; grid-template-columns: 236px 1fr; gap: 16px; align-items: start; }
+.wardrobe > div { min-width: 0; }
+.wardrobe .figcol { position: sticky; top: 50px; }
+.wardrobe .fig { background: radial-gradient(circle at 50% 60%, #4a3f63, #272036 70%); border-radius: 18px; border: 2px solid var(--ink); display: grid; place-items: center; padding: 6px; min-height: 120px; }
+.wardrobe .fig canvas { display: block; }
+.wardrobe .fig canvas.three { width: 100%; height: min(300px, 46vh); }
+.wardrobe .seg { margin-bottom: 12px; }
+.wardrobe .opts > .btn { margin-top: 6px; }
 .opt { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .opt > span { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--mute); }
 .sw { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -270,8 +276,12 @@ label small { color: var(--mute); font-weight: 500; }
   #sheetWrap { place-items: end center; padding: 0; }
   #sheet { width: 100%; border-radius: 22px 22px 0 0; border-bottom: 0; max-height: 82vh; max-height: 82dvh; }      /* leaves the top free for toasts */
   #sheetBody { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0)); }
-  .wardrobe { grid-template-columns: 1fr; }
-  .wardrobe .fig { position: static; }
+  .wardrobe { display: block; }
+  .wardrobe .figcol { display: contents; }
+  .wardrobe .fig { position: sticky; top: 44px; z-index: 1; margin-bottom: 8px; }
+  .wardrobe .fig canvas.three { height: min(190px, 28vh); }
+  .wardrobe .fig canvas:not(.three) { height: 150px !important; width: 135px !important; }
+  .wardrobe .figcol > .hint { margin-bottom: 10px; }
   .lbl { display: none; }
   #top { padding: 4px 6px; }
 }

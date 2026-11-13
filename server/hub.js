@@ -62,7 +62,8 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   }
   function failed(ip) { const f = fails.get(ip) || { n: 0, at: now() }; f.n++; fails.set(ip, f); }
 
-  const mine = u => ({ id: u.id, name: u.name, chips: u.chips, items: u.items, look: u.look, stats: u.stats, dnd: !!u.dnd, creator: !!u.creator });
+  // fresh: the account has not made its figure yet (the browser shows the wardrobe's first page until it has)
+  const mine = u => ({ id: u.id, name: u.name, chips: u.chips, items: u.items, look: cleanLook(u.look, u.items), stats: u.stats, dnd: !!u.dnd, creator: !!u.creator, fresh: !!u.fresh });
   const groupsOf = uid => [...store.groups.values()].filter(g => g.members[uid]);
   const roleOf = (g, uid) => g.owner === uid ? 'owner' : g.members[uid] ? g.members[uid].role : '';
   const isAdmin = (g, uid) => roleOf(g, uid) === 'owner' || roleOf(g, uid) === 'admin';
@@ -96,7 +97,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (!m || now() - m.at >= HOUR) made.set(ip, { n: 1, at: now() }); else m.n++;
       const id = store.newUserId();
       const u = { id, name, ...hashPass(pass), gen: 1, created: now(), creator: !!creator, chips: ECON.start, items: [],
-        look: randomLook(hashText(name) + id * 7919), stats: {}, daily: today(), seen: now(), dnd: false };
+        look: randomLook(hashText(name) + id * 7919), stats: {}, daily: today(), seen: now(), dnd: false, fresh: true };
       store.users.set(id, u); byName.set(name.toLowerCase(), u); store.saveUsers();
       if (g) addMember(g, u);
       return { token: tokenFor(u), id, name };
@@ -180,7 +181,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
   function member(g, uid) {
     const u = store.users.get(uid), p = rooms.has(g.id) ? rooms.get(g.id).get(uid) : null;
-    const out = { id: uid, name: u.name, role: roleOf(g, uid), look: u.look, chips: u.chips, dnd: !!u.dnd, seen: u.seen, stats: u.stats, on: !!p, today: todayOf(u) };
+    const out = { id: uid, name: u.name, role: roleOf(g, uid), look: cleanLook(u.look, u.items), chips: u.chips, dnd: !!u.dnd, seen: u.seen, stats: u.stats, on: !!p, today: todayOf(u) };
     if (p) {
       out.p = pathFrom(p.path, (now() - p.t0) / 1000 * ROOM.speed); out.sit = p.sit; out.open = p.open; out.busy = p.busy;
       if (p.busy === 'slot') out.slot = p.slot;
@@ -775,6 +776,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     look(conn, m) {
       const u = conn.user;
       u.look = cleanLook(m.look, u.items);
+      if (m.done) delete u.fresh;                                   // the figure is made
       pushMe(u);
       if (conn.gid) cast(conn.gid, { t: 'mem', m: { id: u.id, look: u.look } });
     },

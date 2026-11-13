@@ -234,7 +234,7 @@ const PIECES = {
     box(c, x, y, w, d, h, '#f1d9a8', '#e0683f');
     c.save(); rrect(c, x, f, w, h, 0.07); c.clip(); c.fillStyle = 'rgba(255,255,255,.2)'; for (let i = 0; i < 9; i++) c.fillRect(x + 0.2 + i * 0.4, f, 0.2, h); c.restore();
     rrect(c, x + w / 2 - 0.8, f + 0.3, 1.6, 0.52, 0.12); paint(c, '#3a2433', 0.04);
-    text(c, 'KIOSK', x + w / 2, f + 0.57, 0.3, '#ffe9a8', 700);
+    text(c, 'TØJBUTIK', x + w / 2, f + 0.57, 0.21, '#ffe9a8', 700);
     // things on the counter: a hat on a stand, sunglasses, a till
     const ty = V(y + 0.55, h);
     line(c, x + 0.55, ty, x + 0.55, ty - 0.3, INK, 0.05); ell(c, x + 0.55, ty, 0.14, 0.05); paint(c, '#8a5a36', 0.03);

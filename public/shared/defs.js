@@ -96,10 +96,14 @@ export const LOOK = {
   bottom: ['pants', 'shorts', 'skirt'],
   bottomCol: ['#34496b', '#2f333b', '#6b4a34', '#8c939c', '#3f7a52', '#a8433c', '#c9b48a', '#5a4a8c'],
   shoeCol: ['#f4f1ea', '#2f333b', '#c5463d', '#3d8fe0', '#6b4a34', '#f2c33f'],
+  // the body (the first of each is what a look from before these existed gets)
+  sex: ['m', 'f'],
+  build: ['mid', 'slim', 'big'],
+  height: ['mid', 'short', 'tall'],
 };
 export const LOOK_NAMES = {
   skin: 'Hud', hair: 'Frisure', hairCol: 'Hårfarve', eyes: 'Øjne', beard: 'Skæg', top: 'Overdel', topCol: 'Farve på overdel',
-  bottom: 'Underdel', bottomCol: 'Farve på underdel', shoeCol: 'Sko',
+  bottom: 'Underdel', bottomCol: 'Farve på underdel', shoeCol: 'Sko', sex: 'Køn', build: 'Krop', height: 'Højde',
 };
 export const STYLE_NAMES = {
   hair: ['Skaldet', 'Kort', 'Strittende', 'Sideskilning', 'Langt', 'Hestehale', 'Krøller', 'Knold', 'Page'],
@@ -107,11 +111,14 @@ export const STYLE_NAMES = {
   beard: ['Intet', 'Skægstubbe', 'Overskæg', 'Fuldskæg'],
   top: ['T-shirt', 'Hættetrøje', 'Skjorte', 'Striber'],
   bottom: ['Bukser', 'Shorts', 'Nederdel'],
+  sex: ['Mand', 'Kvinde'], build: ['Almindelig', 'Slank', 'Kraftig'], height: ['Mellem', 'Lav', 'Høj'],
 };
-export const SLOTS = ['hat', 'glasses', 'neck', 'back'];
-export const SLOT_NAMES = { hat: 'Hovedbeklædning', glasses: 'Briller', neck: 'Om halsen', back: 'På ryggen' };
+// The pages of the wardrobe: which choices are made together. Everything here is free.
+export const LOOK_PAGES = [['Krop', ['sex', 'build', 'height', 'skin']], ['Hoved', ['hair', 'hairCol', 'eyes', 'beard']], ['Tøj', ['top', 'topCol', 'bottom', 'bottomCol', 'shoeCol']]];
+export const SLOTS = ['hat', 'glasses', 'neck', 'over', 'feet', 'back'];
+export const SLOT_NAMES = { hat: 'Hovedbeklædning', glasses: 'Briller', neck: 'Om halsen', over: 'Jakker og veste', feet: 'Fodtøj', back: 'På ryggen' };
 
-// The shop. Bought once with chips, worn as often as you like.
+// The clothes shop. Bought once with chips, worn as often as you like. (The plain clothes of the wardrobe are free.)
 export const ITEMS = {
   party: { slot: 'hat', name: 'Festhat', cost: 100 },
   cap: { slot: 'hat', name: 'Kasket', cost: 150 },
@@ -126,6 +133,8 @@ export const ITEMS = {
   wizard: { slot: 'hat', name: 'Troldmandshat', cost: 700 },
   halo: { slot: 'hat', name: 'Glorie', cost: 800 },
   crown: { slot: 'hat', name: 'Krone', cost: 1500 },
+  bowler: { slot: 'hat', name: 'Bowlerhat', cost: 300 },
+  gambler: { slot: 'hat', name: 'Spillerhat', cost: 450 },
   round: { slot: 'glasses', name: 'Runde briller', cost: 150 },
   shades: { slot: 'glasses', name: 'Solbriller', cost: 200 },
   patch: { slot: 'glasses', name: 'Klap for øjet', cost: 200 },
@@ -133,6 +142,17 @@ export const ITEMS = {
   scarf: { slot: 'neck', name: 'Halstørklæde', cost: 150 },
   bowtie: { slot: 'neck', name: 'Butterfly', cost: 150 },
   chain: { slot: 'neck', name: 'Guldkæde', cost: 600 },
+  bandana: { slot: 'neck', name: 'Tørklæde om halsen', cost: 150 },
+  bolo: { slot: 'neck', name: 'Snoreslips', cost: 250 },
+  vest: { slot: 'over', name: 'Lædervest', cost: 250 },
+  poncho: { slot: 'over', name: 'Poncho', cost: 350 },
+  leather: { slot: 'over', name: 'Læderjakke', cost: 450 },
+  sheriff: { slot: 'over', name: 'Sheriffvest', cost: 500 },
+  duster: { slot: 'over', name: 'Støvfrakke', cost: 600 },
+  tux: { slot: 'over', name: 'Smokingjakke', cost: 700 },
+  sneakers: { slot: 'feet', name: 'Kondisko', cost: 150 },
+  boots: { slot: 'feet', name: 'Cowboystøvler', cost: 250 },
+  spurs: { slot: 'feet', name: 'Støvler med sporer', cost: 400 },
   pack: { slot: 'back', name: 'Rygsæk', cost: 250 },
   cape: { slot: 'back', name: 'Kappe', cost: 500 },
   wings: { slot: 'back', name: 'Englevinger', cost: 1200 },
@@ -159,6 +179,7 @@ export function randomLook(seed) {
   out.hairCol = Math.floor(r() * 7);                 // the natural colours
   out.beard = r() < 0.75 ? 0 : 1 + Math.floor(r() * 3);
   out.bottom = r() < 0.8 ? 0 : 1 + Math.floor(r() * 2);
+  out.build = out.build < 2 ? (r() < 0.6 ? 0 : 1) : 2; out.height = r() < 0.5 ? 0 : out.height;
   for (const s of SLOTS) out[s] = '';
   return out;
 }

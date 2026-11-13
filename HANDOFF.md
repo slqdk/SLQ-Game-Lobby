@@ -1,6 +1,6 @@
 # SLQ Game Lobby — handoff
 
-Status (13 Nov 2026): `main` is v0.12.0 (the weapons as models, the living arena, roofs on all houses); the lobby runs in its container on his Proxmox since 12 Nov, and he plays the shooter there. Open: v0.12.1 to v0.12.6 (see "After playing v0.12.0" below) and v0.13.0, the clubhouse as a saloon in 3D (its own section). Still to build: the avatar builder at first login with the clothes shop, and what he decides about the old flat clubhouse (see "What comes next"). New work: a branch from the newest open branch (or from `main`), a pull request, he merges, then `lobby-update`. Read this first when continuing in a new chat.
+Status (13 Nov 2026): `main` is v0.12.0 (the weapons as models, the living arena, roofs on all houses); the lobby runs in its container on his Proxmox since 12 Nov, and he plays the shooter there. Open: v0.12.1 to v0.12.6 (see "After playing v0.12.0" below), v0.13.0, the clubhouse as a saloon in 3D, and v0.14.0, the figure builder and the clothes shop (each its own section). Still open: what he decides about the old flat clubhouse (see "What comes next"). New work: a branch from the newest open branch (or from `main`), a pull request, he merges, then `lobby-update`. Read this first when continuing in a new chat.
 
 - The code lives in **https://github.com/slqdk/SLQ-Game-Lobby** (public, branch `main`). Søren's server pulls from `main` with `lobby-update`, so `main` must always work; larger work goes on a branch and a pull request.
 - It runs in a Proxmox LXC behind Nginx Proxy Manager, which needs **Websockets Support** switched on (see the README).
@@ -67,7 +67,7 @@ From the browser:
 | `enter {g}` / `leave` | into a group's clubhouse / back to the group list |
 | `move {x,y}`, `sit {st}` | walk; sit on the sofa or at the bar |
 | `say {s}`, `emote {k}`, `prank {k,to}`, `drink {k,to}`, `juke {k}` | `to` of a drink: nothing (oneself), a user id, or `'all'` |
-| `look {look}`, `buy {k,wear}`, `dnd {on}`, `pass {old,pass}` | avatar, kiosk, do not disturb, new password |
+| `look {look,done}`, `buy {k,wear}`, `dnd {on}`, `pass {old,pass}` | avatar (`done`: the newcomer's figure is built), the clothes shop, do not disturb, new password |
 | `gnew {name,code}`, `gjoin {code}`, `grename`, `ginvite`, `gkick {u}`, `grole {u,role}`, `gleave`, `gdel` | groups; `role` is `member`, `admin` or `owner` (hands the group over) |
 | `tnew {game,stake,bot,invite}`, `tjoin {id}`, `tbot {id,level}`, `tinv {id,u}`, `tstart {id}` | tables |
 | `tact {id,a}`, `tagain {id}`, `tclaim {id}`, `tleave {id}`, `topen {id}`, `tclose` | `a` is the game's own action, or `{resign:true}` |
@@ -100,10 +100,31 @@ Søren, 13 Nov 2026: "Lobbyen skal være i 3D. Hyggelig Amerikansk Western / Kas
 
 **Decisions made without asking**
 - *The flat clubhouse was not repainted.* He asked for the flat one in the same theme. What he gets instead is **Oversigt**: the same saloon seen from the front, which is the flat clubhouse's view with the new theme, the same figures and everything else for free. The drawn clubhouse is still there under **Flad**, in its old look, as the fallback when 3D cannot start. To be asked: whether he still wants the drawn one repainted (about 500 lines of drawing in `roomart.js`), or whether it can go.
-- The names in menus are unchanged (Kiosken, Musikboksen); the piano is the music box. They are to change with the clothes shop.
+- The piano is the music box (still called Musikboksen in menus). The kiosk became the clothes shop in v0.14.0.
 - No shadows from lamps (a round shadow under each figure); three point lights under the lamps.
 
 **Not verified**: by people; on a real graphics card or a real phone (only software drawing here, where it runs at a few frames a second); how it feels to steer. Many members at once cost about 30 draw calls each (the figure is many small meshes): fine for a handful, to be joined into fewer if a group fills the room.
+
+### The figure builder and the clothes shop (v0.14.0)
+
+Søren, 13 Nov 2026: "Og så vil jeg gerne have avatar delen til at være meget mere avanceret... når man først logger ind. Vælge køn, vælge krop, farver, og standard tøj... og så skal man så kunne handle i tøjbutikken, for opgraderingeer".
+
+- **The look** (`shared/defs.js`): three new choices at the end of `LOOK`: `sex` (m, f), `build` (mid, slim, big) and `height` (mid, short, tall). `LOOK_PAGES` groups all choices into the builder's pages (Krop, Hoved, Tøj). Two new slots for things from the shop: `over` (vests, jackets, a poncho, a long coat) and `feet` (boots, spurs, sneakers), and 13 new `ITEMS` (36 in all). A look from before gets the ordinary body through `cleanLook`, and the server now sends every look through `cleanLook` (`mine()`, `member()`), so no client meets a look without the new fields. A new account's random look has a random body too.
+- **First login.** A new account is `fresh` (sent in `me`). On first entering a clubhouse the client opens the wardrobe as "Lav din figur" (`openWardrobe(true)`: the pages in order with "Næste", then "Færdig"). Closing it sends `look {look, done: true}`, which clears `fresh` for good. The room's first tips wait until then (`roomTips()`). Accounts from before are told once that there is more to choose (`slq-figure-tip`).
+- **The wardrobe** shows the figure in 3D, to be turned by dragging (`js/figview.js`: the saloon's figure on a small canvas). Its canvas and renderer are made once and kept for the page's life: a page only gets a handful of WebGL contexts, and the browser takes the oldest away when there are too many, which would be the saloon's. Where WebGL cannot start, the drawn figure is shown instead (and the viewer is not tried again).
+- **The clothes shop.** The station `kiosk` is called Tøjbutikken everywhere now (its id in the code is still `kiosk`). Clothes come first, and each thing is shown on the part of the figure it sits on (`drawPart` in `avatar.js`: body, neck, feet; hats and glasses on the face as before).
+- **The 3D figure** (`shooter/figure.js`). The torso is one of three shapes: the cylinder of old, or a body turned from an outline (`OUTLINE.waist` for a woman, `OUTLINE.belly` for a sturdy build). `girth(shape, t)` gives the girth at a height, so buttons, stripes, the pocket, what hangs at the neck and what is worn over it all follow the body (`rim(y)`, `front(y)` in `make`). `wide`, `deep` and `limb` scale body and limbs by build; `tall` scales the whole figure (`f.tall`; the saloon uses it for seat height, the name tag and the eyes). The shooter passes `even: true`: everybody is the same height there, and the hit zones are the same for every body, as before. The poncho is a pile of cone bands (`G.band`), the coats are open cylinders (`G.vest`, `G.coat`).
+- **The drawn figure** (`avatar.js`) shows the same choices more simply: `P.bw` (the body's width), `P.fem`, the height as a scale, `COATS` for what is worn over.
+- `tools/selftest.mjs`: a section that builds every body with every thing from the shop in 3D, and one for `fresh`, the free choices and the shop.
+
+**Decisions made without asking**
+- Sex, build and height are free and can be changed at any time in the wardrobe, like everything else that is not from the shop.
+- Everything in the shop costs chips as before; the new clothes cost 150 to 700. A newcomer's 500 chips buy one jacket, or a vest and boots.
+- A new account starts with a random figure (also a random sex and build) rather than an empty one; the builder opens at once.
+- In the shooter the build shows but the height does not, and nobody is easier or harder to hit.
+- Closing the builder early counts as done; a note says where to finish it.
+
+**Not verified**: by people; on a real graphics card or a real phone. It was run in a headless browser from the welcome screen (new account, all pages, the shop, the saloon, the flat clubhouse, a phone-sized window, and once with WebGL switched off).
 
 ### EagleEye Commander in the lobby (v0.2.0)
 
@@ -287,11 +308,11 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 
 ### Changing the bar, the shop, the prices
 
-`public/shared/defs.js`: `DRINKS`, `ITEMS`, `PRANKS`, `ECON`, `BAR`. A new drink needs no drawing code as long as it uses one of the glass shapes in `drawGlass` (`avatar.js`). A new thing to wear needs a few lines in `drawHat` / `drawGlasses` / `drawNeck` / `drawBack`.
+`public/shared/defs.js`: `DRINKS`, `ITEMS`, `PRANKS`, `ECON`, `BAR`. A new drink needs no drawing code as long as it uses one of the glass shapes in `drawGlass` (`avatar.js`). A new thing to wear needs a few lines in two places: the drawn figure (`avatar.js`: `drawHat` / `drawGlasses` / `drawNeck` / `drawBack`, `COATS` and the feet) and the 3D figure (`shooter/figure.js`: `hat()`, and the `OVER`, feet, neck and back lines in `make`); the self test builds every thing on every body.
 
 ## What comes next
 
-- **Asked for on 13 Nov 2026 and not built yet: the avatar builder.** "Og så vil jeg gerne have avatar delen til at være meget mere avanceret... når man først logger ind. Vælge køn, vælge krop, farver, og standard tøj... og så skal man så kunne handle i tøjbutikken, for opgraderingeer". Plan: the look gets a sex and a build (and perhaps a height); a screen at first login with the figure in 3D to turn and dress in standard clothes; the kiosk becomes the clothes shop, where better clothes (western ones too) cost chips. The figure is `shooter/figure.js` (used by the shooter and the 3D saloon); the flat clubhouse and the little faces in menus are drawn by `avatar.js` and must show the same choices, or be given pictures taken of the 3D figure.
+- ~~The avatar builder at first login and the clothes shop~~ done in v0.14.0 (see "The figure builder and the clothes shop"). Left to do there: whatever he says after seeing it; more clothes are a few lines each (see "Changing the bar, the shop, the prices").
 - **To ask him:** whether the drawn flat clubhouse is to be repainted as a saloon too, or whether "Oversigt" is enough (see the 3D section).
 - ~~Blackjack~~ done in v0.10.0 (see "Blackjack"). Left to do there: whatever real play shows (the stakes, the seconds); insurance and surrender are not in. Roulette was offered together with it and not chosen.
 - ~~Milestone 2: poker, Yatzy, Meyer and Ludo~~ done in v0.4.0 to v0.7.0. The tables handle more than two seats, robots with names, leaving in the middle and a clock (see "Poker"). Left to do there: whatever real play shows, and what was decided without asking (listed under each game). Poker itself could get a loose table (sit down with one's own chips, leave at will) and a second prize.

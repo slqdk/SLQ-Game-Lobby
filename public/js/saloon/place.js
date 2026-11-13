@@ -148,12 +148,17 @@ export function buildSaloon(THREE, kit, groupName = '') {
     solid.cyl(cx + 0.5, h + 0.12, z + 0.45, 0.3, 0.28, [0.6, 0.2, 0.25], 14); solid.cyl(cx + 0.5, h + 0.4, z + 0.45, 0.32, 0.05, CREAM, 14);
   }
 
-  // ---------- the general store (the kiosk): a counter, a till, shelves with goods ----------
+  // ---------- the clothes shop (the 'kiosk' of the code): a counter, a till, shelves with goods, a dummy in a vest ----------
   { const [x, z, w, d] = STATION.kiosk.box, h = STATION.kiosk.h, cx = x + w / 2;
     solid.box(cx, h / 2, z + d - 0.3, w, h, 0.6, wood(PINE)); solid.box(cx, h + 0.03, z + d - 0.28, w + 0.12, 0.06, 0.72, wood(DARK));
     for (let i = 0; i < 4; i++) solid.box(x + 0.4 + i * (w - 0.8) / 3, h / 2, z + d + 0.01, 0.62, h - 0.3, 0.02, wood(tone(PINE, 0.8)));
     // the till
     solid.box(cx + 0.9, h + 0.2, z + d - 0.3, 0.42, 0.28, 0.36, BRASS); solid.box(cx + 0.9, h + 0.42, z + d - 0.4, 0.36, 0.18, 0.14, BRASS); glow.box(cx + 0.9, h + 0.43, z + d - 0.32, 0.26, 0.09, 0.01, [0.9, 0.9, 0.8]);
+    // a tailor's dummy in a leather vest on the counter
+    { const px = cx + 0.36, pz = z + d - 0.3, y0 = h + 0.06;
+      solid.cyl(px, y0, pz, 0.1, 0.03, DARK, 10); solid.cyl(px, y0 + 0.03, pz, 0.02, 0.1, DARK, 6);
+      solid.add(new THREE.CylinderGeometry(0.15, 0.11, 0.36, 12), at(px, y0 + 0.31, pz), CREAM); solid.ball(px, y0 + 0.5, pz, 0.15, CREAM, 1, 0.4, 0.8);
+      solid.add(new THREE.CylinderGeometry(0.162, 0.125, 0.3, 12, 1, true, 0.4, Math.PI * 2 - 0.8), at(px, y0 + 0.32, pz), LEATHER); }
     // on the counter: a jar of sweets, a pair of glasses, a hat
     solid.cyl(cx - 1.0, h + 0.06, z + d - 0.3, 0.12, 0.24, GLASS, 10); for (let i = 0; i < 7; i++) solid.ball(cx - 1.0 + (rnd() - 0.5) * 0.14, h + 0.1 + rnd() * 0.12, z + d - 0.3 + (rnd() - 0.5) * 0.14, 0.035, [[0.8, 0.15, 0.2], [0.9, 0.7, 0.1], [0.2, 0.6, 0.3]][i % 3], 1, 1, 1, 6);
     solid.cyl(cx - 0.2, h + 0.06, z + d - 0.25, 0.3, 0.025, [0.5, 0.33, 0.16], 16); solid.cyl(cx - 0.2, h + 0.085, z + d - 0.25, 0.15, 0.17, [0.5, 0.33, 0.16], 12, 0.13);
@@ -171,7 +176,7 @@ export function buildSaloon(THREE, kit, groupName = '') {
     }
     for (const s of [-1, 1]) solid.box(cx + s * (w / 2 - 0.08), 2.0, z + 0.12, 0.08, 1.9, 0.3, wood(DARK));
     // its name on a board
-    solid.box(cx, 3.42, z + 0.1, 2.3, 0.5, 0.06, wood(PINE)); word('KIOSK', cx, 3.42, z + 0.135, 2.2, 0.42);
+    solid.box(cx, 3.42, z + 0.1, 2.3, 0.5, 0.06, wood(PINE)); word('TØJBUTIK', cx, 3.42, z + 0.135, 2.2, 0.42);
   }
 
   // ---------- the bar ----------

@@ -124,16 +124,19 @@ function drawBack(c, look, K, P) {
 function drawLegs(c, look, K, P, sit) {
   const bottom = LOOK.bottom[look.bottom], legCol = bottom === 'skirt' ? K.skin : K.bottom;
   for (const s of [-1, 1]) {
-    const lift = s < 0 ? P.liftL : P.liftR, hx = s * 7.5, hy = -27;
+    const lift = s < 0 ? P.liftL : P.liftR, hx = s * 7.5 * (P.bw || 1), hy = -27, feet = look.feet;
     let fx = s * 8, fy = -4 - lift;
     if (sit) { fx = s * 9.5; fy = -9; }                 // sitting: the legs hang down in front of the seat
     limb(c, hx, hy, fx, fy, 8.5, legCol);
     if (bottom === 'shorts') limb(c, hx + (fx - hx) * 0.52, hy + (fy - hy) * 0.52, fx, fy, 6.5, K.skin);
     // shoe
     c.save(); c.translate(fx, fy + 1);
+    const boot = feet === 'boots' || feet === 'spurs';
+    if (boot) { rrect(c, -4.8, -13, 9.6, 12, 2); paint(c, '#7a4a24', 1.8); }                      // the leg of the boot
     c.beginPath(); c.moveTo(-6.5, 4.5); c.quadraticCurveTo(-7.5, -3.5, -1, -4); c.quadraticCurveTo(s * 6 + 1.5, -4, s * 6 + 2, 1.5); c.quadraticCurveTo(s * 6 + 2, 4.5, s * 3, 4.5); c.closePath();
-    paint(c, K.shoe);
-    c.beginPath(); c.moveTo(-6, 3.2); c.lineTo(s * 6 + 1.5, 3.2); c.lineWidth = 1.5; c.strokeStyle = 'rgba(255,255,255,.55)'; c.stroke();
+    paint(c, boot ? '#7a4a24' : feet === 'sneakers' ? '#fbfaf5' : K.shoe);
+    c.beginPath(); c.moveTo(-6, 3.2); c.lineTo(s * 6 + 1.5, 3.2); c.lineWidth = 1.5; c.strokeStyle = feet === 'sneakers' ? '#d8443c' : 'rgba(255,255,255,.55)'; c.stroke();
+    if (feet === 'spurs') { star(c, -s * 7.5, 1, 2.6, 6); paint(c, '#f5c542', 0.9); }
     c.restore();
   }
   if (bottom === 'skirt') {
@@ -144,8 +147,11 @@ function drawLegs(c, look, K, P, sit) {
 
 function drawTorso(c, look, K, P) {
   const top = LOOK.top[look.top];
+  c.save(); c.scale(P.bw || 1, 1);
   c.beginPath(); c.moveTo(-14.5, -46); c.quadraticCurveTo(-14.5, -54.5, -6, -54.5); c.lineTo(6, -54.5); c.quadraticCurveTo(14.5, -54.5, 14.5, -46);
-  c.lineTo(13.5, -28); c.quadraticCurveTo(13.5, -24, 9, -24); c.lineTo(-9, -24); c.quadraticCurveTo(-13.5, -24, -13.5, -28); c.closePath();
+  if (P.fem) { c.quadraticCurveTo(9.5, -37.5, 13.8, -28); c.quadraticCurveTo(13.8, -24, 9, -24); c.lineTo(-9, -24); c.quadraticCurveTo(-13.8, -24, -13.8, -28); c.quadraticCurveTo(-9.5, -37.5, -14.5, -46); }
+  else { c.lineTo(13.5, -28); c.quadraticCurveTo(13.5, -24, 9, -24); c.lineTo(-9, -24); c.quadraticCurveTo(-13.5, -24, -13.5, -28); }
+  c.closePath();
   paint(c, K.top);
   c.save(); c.clip();
   if (top === 'stripes') { c.fillStyle = lighter(K.top, 0.62); for (const y of [-47, -39.5, -32]) c.fillRect(-16, y, 32, 3.4); }
@@ -160,14 +166,29 @@ function drawTorso(c, look, K, P) {
   c.restore();
   if (top === 'shirt') { for (const s of [-1, 1]) { poly(c, [[0, -50], [s * 8.5, -55.5], [s * 6.5, -47]]); paint(c, lighter(K.top, 0.35), 1.6); } }
   if (look.back === 'pack') { for (const s of [-1, 1]) { c.beginPath(); c.moveTo(s * 9, -54); c.lineTo(s * 11, -30); c.lineWidth = 3.4; c.strokeStyle = INK; c.stroke(); c.lineWidth = 1.8; c.strokeStyle = '#3a63ad'; c.stroke(); } }
+  // from the clothes shop, worn over it
+  const over = look.over, cloth = { vest: '#7a4a24', sheriff: '#2a2630', ...COATS }[over];
+  if (cloth) {
+    if (over === 'tux') { poly(c, [[-4.5, -54], [4.5, -54], [3, -27], [-3, -27]]); paint(c, '#fbfaf5', 1.2); for (const s of [-1, 1]) { poly(c, [[0, -52], [s * 5, -54.5], [s * 5, -49.5]]); paint(c, INK, 0); } }
+    for (const s of [-1, 1]) { poly(c, [[s * 3.6, -54.5], [s * 13.6, -53.5], [s * 14.3, -46], [s * 13.2, -26.5], [s * 5.2, -26.5]]); paint(c, cloth, 1.8); }
+    if (over === 'duster') for (const s of [-1, 1]) { poly(c, [[s * 5.5, -27.5], [s * 13.5, -27.5], [s * 16, -9.5], [s * 7.5, -9.5]]); paint(c, cloth, 1.8); }
+    if (over === 'sheriff') { star(c, 8.5, -44.5, 3.4); paint(c, '#f5c542', 1.1); }
+    if (over === 'leather') { c.beginPath(); c.moveTo(-5, -50); c.lineTo(-5, -28); c.moveTo(5, -50); c.lineTo(5, -28); c.lineWidth = 1.2; c.strokeStyle = '#2e1a0e'; c.stroke(); }
+  } else if (over === 'poncho') {
+    poly(c, [[-7, -55.5], [7, -55.5], [22, -33], [0, -21], [-22, -33]]); paint(c, '#d8743a');
+    c.save(); c.clip(); c.lineWidth = 2.6; for (const [d, col] of [[7, '#f5c542'], [13, '#3a7fd0'], [19, '#fbfaf5']]) { c.beginPath(); c.moveTo(-22 - d, -33 + d * 0.3); c.lineTo(0, -21 - d); c.lineTo(22 + d, -33 + d * 0.3); c.strokeStyle = col; c.stroke(); } c.restore();
+  }
+  c.restore();
 }
 
 function hands(P) {
-  const hl = P.hl || [-14.5 - Math.sin(P.al) * 21, -49 + Math.cos(P.al) * 21], hr = P.hr || [14.5 + Math.sin(P.ar) * 21, -49 + Math.cos(P.ar) * 21];
+  const w = 14.5 * (P.bw || 1), hl = P.hl || [-w - Math.sin(P.al) * 21, -49 + Math.cos(P.al) * 21], hr = P.hr || [w + Math.sin(P.ar) * 21, -49 + Math.cos(P.ar) * 21];
   return [hl, hr];
 }
-function drawArm(c, look, K, s, hand) {
-  const top = LOOK.top[look.top], sx = s * 14, sy = -49.5, long = top === 'hoodie' || top === 'shirt';
+const COATS = { leather: '#5a3620', duster: '#c2aa80', tux: '#2a2630' };          // what has sleeves, and its colour
+function drawArm(c, look, K, s, hand, bw = 1) {
+  const top = LOOK.top[look.top], sx = s * 14 * bw, sy = -49.5, coat = COATS[look.over], long = !!coat || top === 'hoodie' || top === 'shirt';
+  if (coat) K = { ...K, top: coat };
   limb(c, sx, sy, hand[0], hand[1], 7, long ? K.top : K.skin);
   if (!long) limb(c, sx, sy, sx + (hand[0] - sx) * 0.42, sy + (hand[1] - sy) * 0.42, 8, K.top);
   ell(c, hand[0], hand[1], 4.4, 4.4); paint(c, K.skin, 2);
@@ -184,6 +205,12 @@ function drawNeck(c, look) {
   } else if (look.neck === 'chain') {
     c.beginPath(); c.moveTo(-10, -54); c.quadraticCurveTo(0, -38, 10, -54); c.lineWidth = 4.2; c.strokeStyle = INK; c.stroke(); c.lineWidth = 2.2; c.strokeStyle = '#f5c542'; c.stroke();
     ell(c, 0, -44.5, 3.4, 3.4); paint(c, '#f5c542', 1.6);
+  } else if (look.neck === 'bandana') {
+    rrect(c, -12, -57.5, 24, 6, 3); paint(c, '#c8323c'); poly(c, [[-9, -53], [9, -53], [0, -42]]); paint(c, '#c8323c');
+    c.fillStyle = '#fbfaf5'; for (const [x, y] of [[-3, -50], [3, -50], [0, -46.5]]) { ell(c, x, y, 0.9, 0.9); c.fill(); }
+  } else if (look.neck === 'bolo') {
+    c.beginPath(); c.moveTo(-5, -55); c.lineTo(-1.5, -50); c.lineTo(-2.5, -37); c.moveTo(5, -55); c.lineTo(1.5, -50); c.lineTo(2.5, -37); c.lineWidth = 1.5; c.strokeStyle = INK; c.stroke();
+    ell(c, 0, -50, 2.8, 3.2); paint(c, '#2fb8a8', 1.4);
   } else if (look.back === 'cape') { ell(c, 0, -53, 3.2, 3.2); paint(c, '#f5c542', 1.6); }
 }
 
@@ -213,6 +240,7 @@ function drawFace(c, look, K, P, st) {
       ell(c, x, y + 0.6, 3, 2.8); c.fill();
       c.beginPath(); c.moveTo(x - 4.4, y - 0.6); c.lineTo(x + 4.4, y - 0.6); c.lineWidth = 2.4; c.stroke(); c.lineWidth = 2.1;
     } else { ell(c, x, y, 2.7, 3); c.fill(); ell(c, x + 0.9, y - 1, 0.8, 0.8); c.fillStyle = '#fff'; c.fill(); c.fillStyle = INK; }
+    if (P.fem && face !== 'laugh' && face !== 'cry') { c.beginPath(); c.moveTo(x + s * 3.2, y - 2.2); c.lineTo(x + s * 5.6, y - 3.8); c.lineWidth = 1.5; c.stroke(); c.lineWidth = 2.1; }      // lashes
     // brows
     const by = y - 7.4 - (face === 'shock' ? 1.8 : 0), slope = face === 'sad' || face === 'cry' || face === 'shy' ? -1.8 : face === 'dizzy' ? 1.2 : 0;
     c.beginPath(); c.moveTo(x - 3.6 * s, by - slope); c.lineTo(x + 3.2 * s, by + slope * 0.4);
@@ -347,6 +375,11 @@ function drawHat(c, hat, t) {
     rrect(c, -17.8, -15.5, 35.6, 6, 1.5); paint(c, '#e0a81e', 1.6);
     for (const [x, col] of [[-10, '#e2403a'], [0, '#3fb6e0'], [10, '#58b85f']]) { ell(c, x, -12.5, 2.1, 2.1); paint(c, col, 1.2); }
     for (const x of [-19, -5, 5, 19]) { ell(c, x, x * x > 100 ? -33.5 : -37.5, 2, 2); paint(c, '#fbfaf5', 1.2); }
+  } else if (hat === 'bowler') {
+    c.beginPath(); c.moveTo(-15, -13); c.quadraticCurveTo(-15, -33, 0, -33); c.quadraticCurveTo(15, -33, 15, -13); c.closePath(); paint(c, '#2a2630');
+    rrect(c, -24, -15, 48, 5.5, 2.7); paint(c, '#2a2630'); c.fillStyle = '#6b5a48'; c.fillRect(-14.4, -17.5, 28.8, 3);
+  } else if (hat === 'gambler') {
+    rrect(c, -14, -27, 28, 14, 2); paint(c, '#2a2630'); rrect(c, -27, -15, 54, 5, 2.5); paint(c, '#2a2630'); c.fillStyle = '#c8323c'; c.fillRect(-13, -18.5, 26, 3.4);
   }
 }
 
@@ -534,6 +567,9 @@ export function drawAvatar(c, look, st = {}) {
   }
   const K = colours(look), P = pose(st);
   P.t = st.t || 0;
+  // the body one chose: how wide (slim, ordinary, sturdy), how tall, a man's or a woman's
+  P.bw = [1, 0.9, 1.17][look.build | 0] || 1; P.fem = (look.sex | 0) === 1;
+  { const hk = [1, 0.94, 1.06][look.height | 0] || 1; c.scale(hk, hk); }
   c.lineJoin = 'round'; c.lineCap = 'round';
   if (st.sit) c.translate(0, 23);                         // the seat is at (0, 0): hips on it, feet below
   if (P.lie) { c.translate(0, -7 * P.lie); c.rotate(-Math.PI / 2 * P.lie); c.translate(0, 9 * P.lie); }
@@ -544,9 +580,9 @@ export function drawAvatar(c, look, st = {}) {
   c.save(); c.translate(0, -P.bob);
   const [hl, hr] = hands(P);
   drawTorso(c, look, K, P);
-  drawArm(c, look, K, -1, hl);
+  drawArm(c, look, K, -1, hl, P.bw);
   const sipping = st.drink && (st.sip || 0) > 0.5;
-  if (!sipping) drawArm(c, look, K, 1, hr);
+  if (!sipping) drawArm(c, look, K, 1, hr, P.bw);
   drawNeck(c, look);
   // head
   c.save(); c.translate(0, -73); c.rotate(P.tilt);
@@ -558,7 +594,7 @@ export function drawAvatar(c, look, st = {}) {
   drawSplats(c, st, P);
   if (look.hat) drawHat(c, look.hat, P.t);
   c.restore();
-  if (sipping) drawArm(c, look, K, 1, hr);
+  if (sipping) drawArm(c, look, K, 1, hr, P.bw);
   if (st.drink) {
     c.save(); c.translate(hr[0] + 1.5, hr[1] + 3.5);
     if (st.emote !== 'cheers') c.rotate(-(st.sip || 0) * 0.9);
@@ -596,6 +632,21 @@ export function drawFigure(canvas, look, size = 180, st = {}) {
   c.save(); c.translate(canvas.width / 2, canvas.height - 10 * k); c.scale(k, k);
   ell(c, 0, 1, 24, 6); c.fillStyle = 'rgba(0,0,0,.22)'; c.fill();
   drawAvatar(c, look, st);
+  c.restore();
+}
+
+// A part of the figure on a square canvas, for the clothes shop: 'body' from the hat to the hips, 'neck' the collar,
+// 'feet' the legs and shoes, 'all' the whole figure. [how many of the figure's units fit, the height of the middle]
+const PART = { all: [132, -56], body: [80, -58], neck: [62, -66], feet: [52, -17] };
+export function drawPart(canvas, look, size = 76, part = 'all') {
+  const dpr = Math.min(2, window.devicePixelRatio || 1), [span, mid] = PART[part] || PART.all;
+  canvas.width = canvas.height = Math.round(size * dpr);
+  canvas.style.width = canvas.style.height = size + 'px';
+  const c = canvas.getContext('2d'), k = size * dpr / span;
+  c.clearRect(0, 0, canvas.width, canvas.height);
+  c.save(); c.translate(canvas.width / 2, canvas.height / 2 - mid * k); c.scale(k, k);
+  if (part === 'all' || part === 'feet') { ell(c, 0, 1, 24, 6); c.fillStyle = 'rgba(0,0,0,.22)'; c.fill(); }
+  drawAvatar(c, look, { t: 1 });
   c.restore();
 }
 

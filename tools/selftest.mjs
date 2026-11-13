@@ -216,7 +216,7 @@ section('musikboksen');
   check('en melodi spiller ud af sig selv', B.last('juke').k === 'blues' && C.last('room').juke === null);
 }
 
-section('kiosken');
+section('tøjbutikken (kiosken i koden)');
 {
   const before = A.me().chips;
   A.send({ t: 'buy', k: 'cap', wear: true });
@@ -1437,6 +1437,36 @@ section('kasinoet: blackjack');
   const bjSt = (await import('../public/shared/room.js')).STATION.blackjack, soon = (await import('../public/shared/games/index.js')).SOON;
   check('bordet i fløjen er blackjackbordet, og intet i klubhuset siger længere «Kommer snart»', bjSt.kind === 'blackjack' && bjSt.seats.length === BJ.SEATS && Object.keys(soon).length === 0);
   uA.chips = a0; uB.chips = b0;
+}
+
+section('figuren: krop, standardtøj og tøjbutikken');
+{
+  // (late in the test, so that what is bought here does not take chips from the games above)
+  const U = [A, B, C].sort((p, q) => q.me().chips - p.me().chips)[0], W = U === A ? B : A, gid = U.last('room').g.id;
+  for (const c of [U, W]) c.send({ t: 'enter', g: gid });
+  check('en ny konto har ikke lavet sin figur endnu', U.me().fresh === true && typeof U.me().look.sex === 'number' && typeof U.me().look.build === 'number' && typeof U.me().look.height === 'number');
+  U.send({ t: 'look', look: { ...U.me().look, sex: 1, build: 2, height: 2, top: 2, over: 'vest', feet: 'boots' } });
+  check('køn, krop og højde kan vælges frit, men tøj fra butikken skal købes først', U.me().look.sex === 1 && U.me().look.build === 2 && U.me().look.height === 2 && U.me().look.over === '' && U.me().look.feet === '' && U.me().fresh === true);
+  U.send({ t: 'look', look: U.me().look, done: true });
+  check('når figuren er lavet, spørges der ikke igen', U.me().fresh === false);
+  const before = U.me().chips;                      // (read after a message from the server: the sections above set chips by hand)
+  U.send({ t: 'buy', k: 'sneakers', wear: true });
+  check('kondisko fra tøjbutikken kan købes og tages på', before >= ITEMS.sneakers.cost && U.me().look.feet === 'sneakers' && U.me().chips === before - ITEMS.sneakers.cost && U.me().items.includes('sneakers'), 'jetoner: ' + before);
+  check('de andre ser kroppen og skoene', (() => { const l = W.got.filter(m => m.t === 'mem' && m.m.id === U.me().id && m.m.look).pop().m.look; return l.feet === 'sneakers' && l.sex === 1 && l.build === 2; })());
+  const old = cleanLook({ skin: 2, hair: 3, top: 1, hat: 'cap' }, ['cap']);
+  check('et udseende fra før får en almindelig krop og beholder resten', old.sex === 0 && old.build === 0 && old.height === 0 && old.skin === 2 && old.hair === 3 && old.hat === 'cap' && old.over === '' && old.feet === '');
+  check('ugyldige værdier ryddes', (() => { const l = cleanLook({ sex: 7, build: -1, height: 'høj', over: 'cap', feet: 'vest' }, ['cap', 'vest']); return l.sex === 0 && l.build === 0 && l.height === 0 && l.over === '' && l.feet === ''; })());
+  // every piece of clothing can be put on a figure of every body, in 3D
+  const THREE = await import('../public/shooter/vendor/three.module.min.js'), { makeFigures } = await import('../public/shooter/figure.js'), figs = makeFigures(THREE, null);
+  let made = 0, bad = 0;
+  for (const sex of [0, 1]) for (const build of [0, 1, 2]) for (const height of [0, 1, 2]) for (const k of ['', ...Object.keys(ITEMS)]) {
+    const look = { ...randomLook(made + 3), sex, build, height }; if (k) look[ITEMS[k].slot] = k;
+    const f = figs.make(look, {}); made++;
+    f.group.traverse(o => { if (![o.position.x, o.position.y, o.position.z, o.scale.x, o.scale.y, o.scale.z].every(Number.isFinite)) bad++; });
+    if (f.tall !== [1, 0.93, 1.07][height]) bad++;
+    f.dispose();
+  }
+  check('alle kroppe kan bære alt tøj i 3D, og i skydespillet er alle lige høje', bad === 0 && made === 18 * (Object.keys(ITEMS).length + 1) && figs.make({ height: 2 }, { even: true }).tall === 1, made + ' figurer, ' + bad + ' fejl');
 }
 
 section('stilarket');

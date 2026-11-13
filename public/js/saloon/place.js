@@ -75,8 +75,9 @@ export function buildSaloon(THREE, kit, groupName = '') {
   // the rail between boards and paper, and a skirting board
   for (const [x0, z0, x1, z1] of [[0, 0, W, 0], [0, 0, 0, D], [W, 0, W, D], [0, D, W, D]]) {
     const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz), inx = z0 === 0 && z1 === 0 ? 0 : x0 === 0 && x1 === 0 ? 0.04 : x0 === W && x1 === W ? -0.04 : 0, inz = z0 === 0 && z1 === 0 ? 0.04 : z0 === D && z1 === D ? -0.04 : 0;
-    solid.box((x0 + x1) / 2 + inx, WAIN, (z0 + z1) / 2 + inz, dx ? len : 0.08, 0.09, dz ? len : 0.08, DARK);
-    solid.box((x0 + x1) / 2 + inx, 0.09, (z0 + z1) / 2 + inz, dx ? len : 0.07, 0.18, dz ? len : 0.07, DARK);
+    const B2 = z0 === D && z1 === D ? near : solid;                // (the front wall's go with the front wall)
+    B2.box((x0 + x1) / 2 + inx, WAIN, (z0 + z1) / 2 + inz, dx ? len : 0.08, 0.09, dz ? len : 0.08, DARK);
+    B2.box((x0 + x1) / 2 + inx, 0.09, (z0 + z1) / 2 + inz, dx ? len : 0.07, 0.18, dz ? len : 0.07, DARK);
   }
   // the ceiling and its beams (in `upper`)
   high.quad([0, H, 0], [W, H, 0], [W, H, D], [0, H, D], tone(PINE, 0.5));

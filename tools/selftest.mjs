@@ -645,6 +645,19 @@ section('skydespillet: banen, og hvor robotterne kan gå');
   if (!hadDoc) globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => N }) };
   const scene = new THREE.Scene(), tex3 = makeTextures(THREE), w3 = buildWorld(THREE, scene, tex3), bare = scene.children.length;
   check('browserens bane (med three.js) er den samme som serverens', sig([w3.colliders, w3.surfaces, w3.ceilings]) === sig([w.colliders, w.surfaces, w.ceilings]) && bare > 1000);
+  // Two faces in the same plane, looking the same way, flicker when they do not look alike (the picture cannot tell
+  // which is in front). A door's or a window's frame must therefore never share an upright plane with the wall.
+  {
+    const boxes = scene.children.filter(m => m.isMesh && m.geometry.type === 'BoxGeometry').map(m => { const g = m.geometry.parameters, q = m.position; return { min: [q.x - g.width / 2, q.y - g.height / 2, q.z - g.depth / 2], max: [q.x + g.width / 2, q.y + g.height / 2, q.z + g.depth / 2], frame: !m.material.map && m.material.color.getHex() === 0xe9e4d8 }; });
+    const frames = boxes.filter(q => q.frame), walls = boxes.filter(q => !q.frame);
+    let shared = 0;
+    for (const f of frames) for (const o of walls) for (const ax of [0, 2]) for (const side of ['min', 'max']) {
+      if (Math.abs(f[side][ax] - o[side][ax]) > 1e-4) continue;
+      const u = ax === 0 ? 2 : 0, ou = Math.min(f.max[u], o.max[u]) - Math.max(f.min[u], o.min[u]), ov = Math.min(f.max[1], o.max[1]) - Math.max(f.min[1], o.min[1]);
+      if (ou > 0.02 && ov > 0.02) shared++;
+    }
+    check('ingen dør- eller vindueskarm står i samme plan som murens ende (det flimrer)', frames.length >= 12 && shared === 0, frames.length + ' karme, ' + shared + ' flader i samme plan');
+  }
   // what one sees on top of the arena (leaves, grass, roofs, the tunnel's brick, flags, the town): built here without a screen
   const { dressWorld } = await import('../public/shooter/scenery.js'), sc = dressWorld(THREE, scene, w3, tex3);
   if (!hadDoc) delete globalThis.document;

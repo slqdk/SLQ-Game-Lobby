@@ -125,8 +125,11 @@ export function buildWorld(THREE, scene, texLib) {
       // through the doorway never touches it
       if (s.along === 'x') addBox(mid, s.fixed, DOOR_W, WALL_T, DOOR_H, WALL_H, COL.wall, { tex: tex, walkable: false });
       else addBox(s.fixed, mid, WALL_T, DOOR_W, DOOR_H, WALL_H, COL.wall, { tex: tex, walkable: false });
-      trimBox(s.along, s.fixed, mid - DOOR_W / 2 - 0.1, 0.2, WALL_T + 0.1, 0, WALL_H * 0.97); // dørkarm v.
-      trimBox(s.along, s.fixed, mid + DOOR_W / 2 + 0.1, 0.2, WALL_T + 0.1, 0, WALL_H * 0.97); // dørkarm h.
+      // (clubhouse) The frame stands a finger's breadth into the doorway. Its side lay in the very plane of the
+      // wall's end, and where two faces share a plane the picture cannot tell which is in front: it flickered
+      // between brick and frame as one moved. (The frame is only looked at; nothing bumps into it.)
+      trimBox(s.along, s.fixed, mid - DOOR_W / 2 - 0.09, 0.22, WALL_T + 0.1, 0, WALL_H * 0.97); // dørkarm v.
+      trimBox(s.along, s.fixed, mid + DOOR_W / 2 + 0.09, 0.22, WALL_T + 0.1, 0, WALL_H * 0.97); // dørkarm h.
       return;
     }
     wallSeg(s.along, s.fixed, s.from, s.to, 0, WALL_H, COL.wall, tex); // full

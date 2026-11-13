@@ -8,9 +8,13 @@
 // doors, tables for board games, dice, cards and the map, a sofa, a dance floor, and to the right the casino with
 // three one-armed bandits, the chalk board and the blackjack table.
 import { ROOM, CASINO_X, STATION, STATIONS } from '../../shared/room.js';
+import { buildOutside } from './outside.js';
 
 export const WALL_H = 4.4;
 export const SEAT_H = { low: 0.52, high: 0.86, sofa: 0.5 };       // how high one sits on a chair, a bar stool, the sofa
+// The windows: how wide, from the sill to the top, and where along the two end walls (z) and the front wall (x).
+// The walls have real openings there, and one for the door: one looks out through them (outside.js).
+export const WINDOWS = { w: 1.9, y0: 1.5, y1: 3.4, ends: [3.2, 9.6], front: [5, 12, 19, 28] };
 
 const OAK = [0.34, 0.19, 0.09], DARK = [0.17, 0.085, 0.04], PINE = [0.56, 0.37, 0.19], BRASS = [0.82, 0.58, 0.18], IRON = [0.06, 0.06, 0.07], FELT = [0.05, 0.27, 0.13],
   WINE = [0.36, 0.05, 0.06], CREAM = [0.86, 0.79, 0.62], LEATHER = [0.33, 0.12, 0.06], STEEL = [0.45, 0.48, 0.52], PAPER = [0.9, 0.86, 0.74], GLASS = [0.35, 0.5, 0.56];
@@ -59,8 +63,9 @@ export function buildSaloon(THREE, kit, groupName = '') {
   const { batch, at, along, picture, tone, wood } = kit;
   const root = new THREE.Group(), upper = new THREE.Group();     // `upper`: the ceiling and what hangs from it (hidden when one looks in from above)
   root.add(upper);
-  const solid = batch(), glow = batch(), high = batch(), highGlow = batch(), near = batch(), nearGlow = batch(), floorB = batch(), carpetB = batch(), paperB = batch(), paper2B = batch(), wainB = batch();
+  const solid = batch(), glow = batch(), high = batch(), highGlow = batch(), near = batch(), floorB = batch(), carpetB = batch(), paperB = batch(), paper2B = batch(), wainB = batch();
   const roofB = batch(), gableB = batch();          // the boards under the roof and on the two gables (both in `upper`)
+  const paneB = batch();                            // windows and doorway filled with plain daylight: for the view from above, where there is no outdoors
   const W = ROOM.w, D = ROOM.d, CX = CASINO_X, H = WALL_H;
   const picks = [], signs = [];          // what one can click: { id, box }; where each sign hangs: station id -> [x, y, z]
   const live = {};                       // what moves: filled in below
@@ -106,13 +111,24 @@ export function buildSaloon(THREE, kit, groupName = '') {
   const WAIN = 1.15;
   floorB.quad([0, 0, D], [CX, 0, D], [CX, 0, 0], [0, 0, 0], [1, 1, 1], 0, D / 4, CX / 4, 0);
   carpetB.quad([CX, 0, D], [W, 0, D], [W, 0, 0], [CX, 0, 0], [1, 1, 1], 0, D / 2, (W - CX) / 2, 0);
-  const wall = (a, b, len, B2) => {                                // a, b: the two bottom corners, seen from inside from left to right
-    wainB.quad([a[0], 0, a[1]], [b[0], 0, b[1]], [b[0], WAIN, b[1]], [a[0], WAIN, a[1]], [1, 1, 1], 0, 0, len / 1.6, 1);
-    B2.quad([a[0], WAIN, a[1]], [b[0], WAIN, b[1]], [b[0], H, b[1]], [a[0], H, a[1]], [1, 1, 1], 0, 0, len / 2, (H - WAIN) / 2);
+  const WIN = WINDOWS;
+  const wall = (a, b, len, B2, holes = []) => {                    // a, b: the two bottom corners, seen from inside from left to right; holes: [from, to, bottom, top] along it
+    const ux = (b[0] - a[0]) / len, uz = (b[1] - a[1]) / len, at2 = (s, y) => [a[0] + ux * s, y, a[1] + uz * s];
+    const piece = (s0, s1, y0, y1) => {                            // boards below the rail, paper above it
+      const lo = Math.min(y1, WAIN), hi = Math.max(y0, WAIN);
+      if (s1 - s0 < 1e-6) return;
+      if (lo > y0) wainB.quad(at2(s0, y0), at2(s1, y0), at2(s1, lo), at2(s0, lo), [1, 1, 1], s0 / 1.6, y0 / WAIN, s1 / 1.6, lo / WAIN);
+      if (y1 > hi) B2.quad(at2(s0, hi), at2(s1, hi), at2(s1, y1), at2(s0, y1), [1, 1, 1], s0 / 2, (hi - WAIN) / 2, s1 / 2, (y1 - WAIN) / 2);
+    };
+    let s = 0;
+    for (const [h0, h1, y0, y1] of holes.slice().sort((p, q) => p[0] - q[0])) { piece(s, h0, 0, H); piece(h0, h1, 0, y0); piece(h0, h1, y1, H); s = h1; }
+    piece(s, len, 0, H);
   };
-  wall([0, 0], [CX, 0], CX, paperB); wall([CX, 0], [W, 0], W - CX, paper2B);                    // the back wall
-  wall([0, D], [0, 0], D, paperB); wall([W, 0], [W, D], D, paper2B);                              // the two ends
-  wall([CX, D], [0, D], CX, paperB); wall([W, D], [CX, D], W - CX, paper2B);                      // the front wall (only seen from inside)
+  const winHoles = (list, sOf) => list.map(v => [sOf(v) - WIN.w / 2, sOf(v) + WIN.w / 2, WIN.y0, WIN.y1]);
+  { const [dx, , dw, dh] = STATION.door.wall;
+    wall([0, 0], [CX, 0], CX, paperB, [[dx, dx + dw, 0, dh]]); wall([CX, 0], [W, 0], W - CX, paper2B); }                                                  // the back wall, with the doorway
+  wall([0, D], [0, 0], D, paperB, winHoles(WIN.ends, z => D - z)); wall([W, 0], [W, D], D, paper2B, winHoles(WIN.ends, z => z));                              // the two ends
+  wall([CX, D], [0, D], CX, paperB, winHoles(WIN.front.filter(x => x < CX), x => CX - x)); wall([W, D], [CX, D], W - CX, paper2B, winHoles(WIN.front.filter(x => x > CX), x => W - x));      // the front wall (only seen from inside)
   // the rail between boards and paper, and a skirting board
   for (const [x0, z0, x1, z1] of [[0, 0, W, 0], [0, 0, 0, D], [W, 0, W, D], [0, D, W, D]]) {
     const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz), inx = z0 === 0 && z1 === 0 ? 0 : x0 === 0 && x1 === 0 ? 0.04 : x0 === W && x1 === W ? -0.04 : 0, inz = z0 === 0 && z1 === 0 ? 0.04 : z0 === D && z1 === D ? -0.04 : 0;
@@ -133,11 +149,14 @@ export function buildSaloon(THREE, kit, groupName = '') {
     roofB.quad([W, H, D], [0, H, D], [0, RIDGE, MID], [W, RIDGE, MID], BOARD, 0, 0, W / 2.4, RUN / 2.4);
     // the gables: upright boards, seen from inside
     const gable = (x, flip) => {
-      const pts = flip ? [[D, H], [MID, RIDGE], [0, H]] : [[0, H], [MID, RIDGE], [D, H]];
-      for (const [z, y] of pts) gableB.vert(x, y, z, flip ? -1 : 1, 0, 0, z / 1.6, (y - H) / 1.2, [1.2, 1.05, 0.86]);
+      const pts = [[0, H], [D, H], [MID, RIDGE]];
+      // ... with a round hole for the window: one sees the sky through it
+      const shape = new THREE.Shape(pts.map(q => new THREE.Vector2(q[0], q[1]))), ring = new THREE.Path(); ring.absarc(MID, H + 1.25, 0.78, 0, Math.PI * 2, true); shape.holes.push(ring);
+      const sg = new THREE.ShapeGeometry(shape, 24), sp = sg.attributes.position;
+      for (let i = 0; i < sg.index.count; i += 3) for (const j of flip ? [0, 1, 2] : [0, 2, 1]) { const q = sg.index.getX(i + j), z = sp.getX(q), y = sp.getY(q); gableB.vert(x, y, z, flip ? -1 : 1, 0, 0, z / 1.6, (y - H) / 1.2, [1.2, 1.05, 0.86]); }
+      sg.dispose();
       const e = flip ? -1 : 1, gx = x + e * 0.06;
-      // a round window with a cross in it, and the daylight behind
-      highGlow.add(new THREE.CircleGeometry(0.78, 20), at(gx - e * 0.02, H + 1.25, MID, 0, e * Math.PI / 2, 0), [2.2, 2.0, 1.55]);
+      // the window's frame, with a cross in it
       high.add(new THREE.TorusGeometry(0.8, 0.07, 6, 24), at(gx, H + 1.25, MID, 0, Math.PI / 2, 0), old);
       high.box(gx, H + 1.25, MID, 0.05, 1.6, 0.07, old); high.box(gx, H + 1.25, MID, 0.05, 0.07, 1.6, old);
       // the last truss stands against the gable
@@ -177,18 +196,22 @@ export function buildSaloon(THREE, kit, groupName = '') {
   solid.box(CX, H / 2, 0.2, 0.36, H, 0.36, wood(OAK)); near.box(CX, H / 2, D - 0.2, 0.36, H, 0.36, wood(OAK));
   high.box(CX, H - 0.55, D / 2, 0.3, 0.5, D, wood(OAK));
 
-  // windows in the two ends and in the front wall: a frame, panes full of daylight
+  // windows in the two ends and in the front wall: a frame with bars, and the wall's own thickness round the opening
   const windowAt = (x, z, facing) => {                                // facing: 'x+' on the left wall, 'x-' on the right, 'z-' on the front
-    const along2 = facing === 'z-', w = 1.9, h = 1.9, y = 1.5 + h / 2, e = facing === 'x+' ? 0.03 : facing === 'x-' ? -0.03 : 0, ez = along2 ? -0.03 : 0;
-    const pane = (du, dv, pw, ph, col, B2, out) => B2.box(x + e * out + (along2 ? du : 0), y + dv, z + ez * out + (along2 ? 0 : du), along2 ? pw : 0.02, ph, along2 ? 0.02 : pw, col);
-    const G2 = along2 ? nearGlow : glow, S2 = along2 ? near : solid;
-    pane(0, 0, w, h, [2.2, 2.0, 1.55], G2, 1);
+    const along2 = facing === 'z-', w = WIN.w, h = WIN.y1 - WIN.y0, y = WIN.y0 + h / 2, e = facing === 'x+' ? 0.03 : facing === 'x-' ? -0.03 : 0, ez = along2 ? -0.03 : 0;
+    const pane = (du, dv, pw, ph, col, B2, out, deep = 0.02) => B2.box(x + e * out + (along2 ? du : 0), y + dv, z + ez * out + (along2 ? 0 : du), along2 ? pw : deep, ph, along2 ? deep : pw, col);
+    const S2 = along2 ? near : solid;
+    if (!along2) pane(0, 0, w, h, [2.2, 2.0, 1.55], paneB, 1);
     for (const du of [-w / 2, 0, w / 2]) pane(du, 0, 0.09, h + 0.1, DARK, S2, 2);
     for (const dv of [-h / 2, 0, h / 2]) pane(0, dv, w + 0.1, 0.09, DARK, S2, 2);
     pane(0, -h / 2 - 0.07, w + 0.3, 0.07, DARK, S2, 3);
+    // the opening goes through a wall of logs: its four sides, just outside the wall's own face
+    const log = wood(tone(OAK, 0.9));
+    for (const dv of [-h / 2 - 0.035, h / 2 + 0.035]) pane(0, dv, w + 0.14, 0.07, log, S2, -4.6, 0.27);
+    for (const du of [-w / 2 - 0.035, w / 2 + 0.035]) pane(du, 0, 0.07, h, log, S2, -4.6, 0.27);
   };
-  for (const z of [3.2, 9.6]) { windowAt(0, z, 'x+'); windowAt(W, z, 'x-'); }
-  for (const x of [5, 12, 19, 28]) windowAt(x, D, 'z-');
+  for (const z of WIN.ends) { windowAt(0, z, 'x+'); windowAt(W, z, 'x-'); }
+  for (const x of WIN.front) windowAt(x, D, 'z-');
 
   // lamps: wagon wheels with lanterns over the room, and a fine one over the casino
   const lamps = [];
@@ -430,9 +453,11 @@ export function buildSaloon(THREE, kit, groupName = '') {
     live.notes = [cx, 2.1, bz + 0.3];
   }
 
-  // ---------- the way out: swing doors, daylight behind them ----------
-  { const [x, , w, h] = STATION.door.wall, cx = x + w / 2;
-    glow.box(cx, h / 2, 0.012, w - 0.1, h, 0.01, [2.4, 2.1, 1.5]);
+  // ---------- the way out: swing doors, and the yard behind them ----------
+  { const [x, , w, h] = STATION.door.wall, cx = x + w / 2, log = wood(tone(OAK, 0.9));
+    paneB.box(cx, h / 2, 0.012, w - 0.1, h, 0.01, [2.4, 2.1, 1.5]);
+    for (const s of [-1, 1]) solid.box(cx + s * (w / 2 + 0.035), h / 2, -0.14, 0.07, h, 0.27, log);        // the doorway through the wall of logs
+    solid.box(cx, h + 0.035, -0.14, w + 0.14, 0.07, 0.27, log);
     for (const s of [-1, 1]) solid.box(cx + s * (w / 2), h / 2, 0.08, 0.14, h, 0.16, wood(DARK));
     solid.box(cx, h + 0.07, 0.08, w + 0.28, 0.14, 0.16, wood(DARK));
     live.doors = [-1, 1].map(s => ({ x: cx + s * (w / 2 - 0.07), s, w: w / 2 - 0.1 }));
@@ -591,7 +616,11 @@ export function buildSaloon(THREE, kit, groupName = '') {
   for (const c of chairs) placeChair(c);
   const nearGroup = new THREE.Group(); root.add(nearGroup);                       // what is on the front wall (hidden when one looks in through it)
   meshes.push(roofB.mesh(meshes[2].material, upper, 'roof'), gableB.mesh(meshes[6].material, upper, 'gables'));
-  meshes.push(high.mesh(solidMat, upper, 'high'), highGlow.mesh(glowMat, upper, 'highGlow'), near.mesh(solidMat, nearGroup, 'near'), nearGlow.mesh(glowMat, nearGroup, 'nearGlow'), quadsHigh.mesh(meshes[7].material, upper, 'wordsHigh'));
+  meshes.push(high.mesh(solidMat, upper, 'high'), highGlow.mesh(glowMat, upper, 'highGlow'), near.mesh(solidMat, nearGroup, 'near'), quadsHigh.mesh(meshes[7].material, upper, 'wordsHigh'));
+  // What is outside the windows and the door. From above (the whole room at once) there is no outdoors: then the
+  // openings are filled with plain daylight instead. The one who holds the camera says which (room3d.js).
+  const panes = new THREE.Group(); panes.visible = false; root.add(panes); meshes.push(paneB.mesh(glowMat, panes, 'panes'));
+  const outside = buildOutside(THREE, kit, { W, D, H, RIDGE, door: [STATION.door.wall[0], STATION.door.wall[2]] }); root.add(outside.group);
 
   // ---------- what changes: boards one writes on, screens, reels, the piano's roll ----------
   const screen = (w, h, x, y, z, sw, sh, face = 'z+', o = {}) => {
@@ -711,13 +740,15 @@ export function buildSaloon(THREE, kit, groupName = '') {
   const dealer = robot(live.dealer[0], live.dealer[2], 0, { hat: 'visor', cards: true });
 
   setName(groupName); setCasino({}); paintArcade(0); for (const r of Object.values(reels)) paintReels(r, 0, false);
-  let arcT = 0, music = false, keyT = 0;
+  let arcT = 0, music = false, keyT = 0, hold = 0;
   return {
-    root, upper, near: nearGroup, picks, signs, lamps, notes: live.notes, setName, setCasino,
+    root, upper, near: nearGroup, outside: outside.group, panes, picks, signs, lamps, notes: live.notes, setName, setCasino,
     setMusic(on) { music = !!on; if (!on) for (const m of down) m.visible = false; },
     // a machine turns for `secs` seconds
     spin(id, secs, t) { const r = reels[id]; if (r) { r.until = t + secs; r.shown++; } },
     swing() { for (const d of doors) d.v = 5 * d.s; },
+    // somebody stands in the doorway: the doors are held open, outwards, so that one can look out
+    doorway(open) { hold = open ? 1.3 : 0; },
     // which seats are in use (somebody sits there or is on the way): a Set of 'station:seat'
     seats(used) { for (const c of chairs) c.want = used.has(c.key) ? 1 : 0; },
     chairs, live,
@@ -744,9 +775,10 @@ export function buildSaloon(THREE, kit, groupName = '') {
       }
       // chairs are pulled out for whoever comes to sit, and pushed in again afterwards
       for (const c of chairs) if (c.pull !== c.want) { c.pull += (c.want - c.pull) * Math.min(1, dt * 7); if (Math.abs(c.want - c.pull) < 0.004) c.pull = c.want; placeChair(c); }
-      // the doors swing back by themselves
-      for (const d of doors) { d.v += (-d.a * 30 - d.v * 2.2) * dt; d.a += d.v * dt; d.m.rotation.y = d.a; }
+      outside.tick(dt, t);
+      // the doors swing back by themselves (or out to where they are held)
+      for (const d of doors) { d.v += ((-d.s * hold - d.a) * 30 - d.v * (hold ? 7 : 2.2)) * dt; d.a += d.v * dt; d.m.rotation.y = d.a; }
     },
-    dispose() { for (const m of chairSets) { m.geometry.dispose(); m.dispose(); } for (const m of meshes) { m.geometry.dispose(); if (m.material.map && m.material.map !== planks) m.material.map.dispose(); m.material.dispose(); } for (const t of [planks, carpet, paper, paper2, boards, sheet]) t.dispose(); },
+    dispose() { outside.dispose(); for (const m of chairSets) { m.geometry.dispose(); m.dispose(); } for (const m of meshes) { m.geometry.dispose(); if (m.material.map && m.material.map !== planks) m.material.map.dispose(); m.material.dispose(); } for (const t of [planks, carpet, paper, paper2, boards, sheet]) t.dispose(); },
   };
 }

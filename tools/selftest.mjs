@@ -815,7 +815,7 @@ section('klubhuset i 3D: saloonen og figurerne');
   const THREE = await import('../public/shooter/vendor/three.module.min.js'), N = nullThree();
   const hadDoc = 'document' in globalThis;
   if (!hadDoc) globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => N }) };
-  const { makeKit } = await import('../public/js/saloon/kit.js'), { buildSaloon, seatSpot, seatLine, GAP, SEAT_H } = await import('../public/js/saloon/place.js'), { makePeople } = await import('../public/js/saloon/people.js');
+  const { makeKit } = await import('../public/js/saloon/kit.js'), { buildSaloon, seatSpot, seatLine, GAP, SEAT_H, WINDOWS } = await import('../public/js/saloon/place.js'), { makePeople } = await import('../public/js/saloon/people.js');
   const sal = buildSaloon(THREE, makeKit(THREE), 'Torsdagsklubben');
   if (!hadDoc) delete globalThis.document;
   const named = STATIONS.filter(st => st.name), finite = o => { let ok = true; o.traverse(m => { if (m.isMesh) { const a = m.geometry.attributes.position.array; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) ok = false; } if (![m.position.x, m.position.y, m.position.z, m.quaternion.x, m.quaternion.w, m.scale.x, m.scale.y].every(Number.isFinite)) ok = false; }); return ok; };
@@ -847,7 +847,49 @@ section('klubhuset i 3D: saloonen og figurerne');
     check('robotten står frit i gangen bag disken, hvor end den går hen', kz - 0.34 >= az0 && kz + 0.5 <= az1 && kx - reach - 0.34 >= ax0 && kx + reach + 0.34 <= ax1 && az1 - az0 >= 1, [kz - 0.34, az0, kz + 0.5, az1].map(v => v.toFixed(2)).join(' '));
     check('baren har seks barstole foran disken, og man kan stå ved dem alle', bar.seats.length === 6 && bar.seats.every(q => isFree(q[0], q[1]) && q[1] > bar.box[1] + bar.box[3]) && isFree(bar.use[0], bar.use[1]));
   }
-  let tris = 0; sal.root.traverse(m => { if (m.isMesh) tris += m.geometry.attributes.position.count / 3; });
+  // the view outside: real openings in the walls, a valley out there, and nothing tall where the camera can be
+  const outdoors = m => { for (let o = m; o; o = o.parent) if (o === sal.outside) return true; return false; };
+  {
+    // is a place on a wall covered by wallpaper or boards?
+    const covered = (x, y, z) => {
+      let hit = false;
+      sal.root.traverse(m => {
+        if (!m.isMesh || !['paper', 'paper2', 'boards'].includes(m.name)) return;
+        const a = m.geometry.attributes.position.array;
+        for (let i = 0; i < a.length && !hit; i += 9) {
+          const ax = a[i], ay = a[i + 1], az = a[i + 2], ux = a[i + 3] - ax, uy = a[i + 4] - ay, uz = a[i + 5] - az, vx = a[i + 6] - ax, vy = a[i + 7] - ay, vz = a[i + 8] - az, px = x - ax, py = y - ay, pz = z - az;
+          const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+          if (Math.abs(px * nx + py * ny + pz * nz) > 1e-6 * Math.hypot(nx, ny, nz)) continue;          // not in this piece's plane
+          const uu = ux * ux + uy * uy + uz * uz, uv = ux * vx + uy * vy + uz * vz, vv = vx * vx + vy * vy + vz * vz, pu = px * ux + py * uy + pz * uz, pv = px * vx + py * vy + pz * vz, d = uu * vv - uv * uv, s = (pu * vv - pv * uv) / d, t = (pv * uu - pu * uv) / d;
+          if (s >= -1e-9 && t >= -1e-9 && s + t <= 1 + 1e-9) hit = true;
+        }
+      });
+      return hit;
+    };
+    const ym = (WINDOWS.y0 + WINDOWS.y1) / 2, hw = WINDOWS.w / 2, [dx, , dw, dh] = STATION.door.wall, RW = ROOM.w, RD = ROOM.d;
+    const open = [...WINDOWS.ends.flatMap(z => [[0, ym, z], [RW, ym, z], [0, WINDOWS.y0 + 0.05, z - hw + 0.05], [RW, WINDOWS.y1 - 0.05, z + hw - 0.05]]), ...WINDOWS.front.flatMap(x => [[x, ym, RD], [x - hw + 0.05, WINDOWS.y1 - 0.05, RD]]), [dx + dw / 2, dh / 2, 0], [dx + 0.05, 0.05, 0], [dx + dw - 0.05, dh - 0.05, 0]];
+    const shut = [...WINDOWS.ends.flatMap(z => [[0, WINDOWS.y0 - 0.05, z], [RW, WINDOWS.y1 + 0.05, z], [0, ym, z + hw + 0.05], [RW, ym, z - hw - 0.05]]), ...WINDOWS.front.flatMap(x => [[x, WINDOWS.y0 - 0.05, RD], [x + hw + 0.05, ym, RD]]), [dx - 0.05, 1, 0], [dx + dw + 0.05, 1, 0], [dx + dw / 2, dh + 0.05, 0], [1, 0.5, 0], [RW - 1, 3, RD], [RW / 2, 4, 0]];
+    check('væggene har rigtige åbninger, hvor vinduerne og døren er, og er hele alle andre steder', open.every(q => !covered(...q)) && shut.every(q => covered(...q)), open.filter(q => covered(...q)).length + ' lukkede åbninger, ' + shut.filter(q => !covered(...q)).length + ' huller i væggen');
+    let tall = 0, outTris = 0;
+    sal.outside.traverse(m => {
+      if (!m.isMesh) return;
+      outTris += m.geometry.attributes.position.count / 3;
+      if (!['land', 'paths', 'shadows', 'ranch'].includes(m.name)) return;           // (the sky, the clouds and what moves are elsewhere)
+      const a = m.geometry.attributes.position.array;
+      for (let i = 0; i < a.length; i += 3) if (a[i] > -8 && a[i] < RW + 8 && a[i + 2] > RD + 0.3 && a[i + 2] < RD + 13 && a[i + 1] > 0.3) tall++;
+    });
+    check('udenfor står intet højere end græsset foran huset, hvor kameraet kan komme', tall === 0 && outTris > 15000 && outTris < 45000, tall + ' hjørner for højt; ' + Math.round(outTris) + ' trekanter udenfor');
+    check('oversigten har lyse ruder i stedet for udsigten', sal.panes.visible === false && sal.outside.visible === true && sal.panes.children.length === 1 && sal.panes.children[0].geometry.attributes.position.count > 0);
+  }
+  // the swing doors: held open outwards (towards z < 0) while somebody stands in the doorway, shut again afterwards
+  {
+    const leaves = []; sal.root.traverse(m => { if (m.name === 'door') { m.geometry.computeBoundingBox(); const b = m.geometry.boundingBox; leaves.push({ m, dir: b.max.x > -b.min.x ? 1 : -1 }); } });
+    const run = secs => { for (let t = 0; t < secs; t += 0.05) sal.tick(0.05, 10 + t, null); };
+    sal.doorway(true); run(4); const out = leaves.map(l => l.dir * Math.sin(l.m.rotation.y));
+    sal.doorway(false); run(8); const shut = leaves.map(l => Math.abs(l.m.rotation.y));
+    check('den, der står i døren, holder svingdørene åbne udad, så man kan se ud', leaves.length === 2 && out.every(v => v > 0.9) && shut.every(v => v < 0.05), out.map(v => v.toFixed(2)) + ' / ' + shut.map(v => v.toFixed(2)));
+  }
+  let tris = 0; sal.root.traverse(m => { if (m.isMesh && !outdoors(m)) tris += m.geometry.attributes.position.count / 3; });
   check('saloonen bygges uden skærm og er ikke for tung', finite(sal.root) && tris > 8000 && tris < 60000 && (() => { sal.setCasino({ pot: 1234, lines: [['Søren', 40], ['Mads', -15]] }); sal.setName('En anden klub'); sal.setMusic(true); sal.spin('slot2', 2, 1); sal.swing(); for (let t = 0; t < 3; t += 0.1) sal.tick(0.1, t, t > 1 ? [10, 2] : null); return finite(sal.root); })(), Math.round(tris) + ' trekanter');
   const people = makePeople(THREE), who = people.person(randomLook(7)), base = { phase: 1.3, walk: 0, seed: 2, emote: '', drink: null, talk: false }, st0 = { T: 5, seat: '', seatY: 0, fill: 1, sip: 0, buzz: 0, fx: {}, et: 0.6, hen: false, first: false };
   const poses = [[base, st0], [{ ...base, walk: 1 }, st0], [{ ...base, talk: true }, { ...st0, buzz: 5 }]];

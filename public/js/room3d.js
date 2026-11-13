@@ -17,6 +17,7 @@ const TAU = Math.PI * 2, FONT = 'Fredoka, system-ui, sans-serif';
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const WORDS = { snow: 'BRRR!', tomato: 'SPLAT!', water: 'PLASK!', pie: 'KLASK!', banana: 'HOVSA!', feather: 'KILDE KILDE!', fart: 'PRUUT!', cloud: 'ØV!', chicken: 'GOK!', confetti: 'HURRA!', hug: 'KRAM!' };
 const SOUNDS = { snow: 'puff', tomato: 'splat', water: 'splash', pie: 'splat', banana: 'slip', feather: 'giggle', fart: 'fart', cloud: 'rain', chicken: 'cluck', confetti: 'pop', hug: 'heart' };
+const DOOR_X = STATION.door.wall[0] + STATION.door.wall[2] / 2;
 export const VIEWS = ['follow', 'eyes', 'over'];        // behind one's figure, through its eyes, the whole room from the front
 const SENS = 0.0022, REACH = 2.4;                       // the mouse as in the shooter; how near one must be to use a thing
 
@@ -26,7 +27,7 @@ export function createRoom3D(canvas, over, hooks) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x130f1c);
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.08, 200); camera.rotation.order = 'YXZ'; scene.add(camera);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.08, 300); camera.rotation.order = 'YXZ'; scene.add(camera);
   scene.add(new THREE.HemisphereLight(0xffe9cc, 0x4a3324, 1.15), new THREE.AmbientLight(0xffffff, 0.22));
   const sun = new THREE.DirectionalLight(0xfff0d8, 1.5); sun.position.set(8, 13, 17); sun.target.position.set(16, 0, 5); scene.add(sun, sun.target);
   const kit = makeKit(THREE), saloon = buildSaloon(THREE, kit, ''), people = makePeople(THREE);
@@ -140,6 +141,7 @@ export function createRoom3D(canvas, over, hooks) {
     const a = mine(), W = ROOM.w, D = ROOM.d;
     const [ax, ay, az] = a ? place(a) : [W / 2, D / 2, 0];
     saloon.upper.visible = true; saloon.near.visible = true;
+    saloon.outside.visible = cam.view !== 'over'; saloon.panes.visible = !saloon.outside.visible;      // the valley outside, or (from above) just daylight in the windows
     if (cam.view === 'over') {
       // the whole room from the front: far away through a long lens, so that it looks nearly flat
       camera.fov = 26; const el = 0.5, vt = Math.tan(camera.fov / 2 * Math.PI / 180), hw = vt * camera.aspect;
@@ -168,6 +170,7 @@ export function createRoom3D(canvas, over, hooks) {
       if (camera.position.z > D - 0.15) saloon.near.visible = false;
       if (camera.position.y > WALL_H - 0.5) saloon.upper.visible = false;
     }
+    if (cam.fly) { camera.fov = cam.fly[5] || 60; camera.position.set(cam.fly[0], cam.fly[1], cam.fly[2]); camera.rotation.set(cam.fly[4], cam.fly[3], 0); }      // (for trying things out: [x, y, z, yaw, pitch, fov])
     camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
   }
   // a point in the room -> where it is in the picture: [x, y, pixels per unit there, in front of the camera]
@@ -338,7 +341,9 @@ export function createRoom3D(canvas, over, hooks) {
     if (locked || target) hover = target && target.station ? target.station.id : null;
     // the barkeeper looks at whoever stands nearest the bar
     let near = null, nd = 30;
-    for (const a of actors.values()) { const d = (a.x - 10.9) ** 2 + (a.y - 3.2) ** 2; if (d < nd) { nd = d; near = [a.x, a.y]; } }
+    let atDoor = false;                                           // ... and whoever stands in the doorway holds the swing doors open
+    for (const a of actors.values()) { const d = (a.x - 10.9) ** 2 + (a.y - 3.2) ** 2; if (d < nd) { nd = d; near = [a.x, a.y]; } if ((a.x - DOOR_X) ** 2 + a.y ** 2 < 4.4) atDoor = true; }
+    saloon.doorway(atDoor);
     used.clear(); for (const a of actors.values()) if (a.sit) used.add(a.sit[0] + ':' + a.sit[1]);
     saloon.seats(used);
     saloon.tick(dt, T, near);

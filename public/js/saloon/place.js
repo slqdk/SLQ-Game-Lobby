@@ -15,6 +15,46 @@ export const SEAT_H = { low: 0.52, high: 0.86, sofa: 0.5 };       // how high on
 const OAK = [0.34, 0.19, 0.09], DARK = [0.17, 0.085, 0.04], PINE = [0.56, 0.37, 0.19], BRASS = [0.82, 0.58, 0.18], IRON = [0.06, 0.06, 0.07], FELT = [0.05, 0.27, 0.13],
   WINE = [0.36, 0.05, 0.06], CREAM = [0.86, 0.79, 0.62], LEATHER = [0.33, 0.12, 0.06], STEEL = [0.45, 0.48, 0.52], PAPER = [0.9, 0.86, 0.74], GLASS = [0.35, 0.5, 0.56];
 
+// ---------- seats at the tables ----------
+// The room's plan (shared/room.js) says where each seat is; it leaves a good step between seat and table, so that
+// one can walk up to it. Here a chair is turned to face its table and stands close to it: pushed in under the edge
+// while nobody uses it, pulled out a little for whoever sits there. The bar's stools stand a little nearer the bar.
+export const GAP = { sit: 0.4, tucked: 0.1, bar: 0.45 };      // from the table's edge to the middle of whoever sits
+
+// A table's outline as it is built below: a box, or a round. The blackjack table is half a round with the house's
+// side straight; the players' curve has its own middle and reach.
+function outlineOf(st) {
+  if (st.box) return { box: [st.box[0], st.box[1], st.box[0] + st.box[2], st.box[1] + st.box[3]], cx: st.box[0] + st.box[2] / 2, cz: st.box[1] + st.box[3] / 2 };
+  const [cx, cz, rx, rz] = st.round;
+  return st.kind === 'blackjack' ? { cx, cz: cz - rz * 0.55, rx, rz: rz * 1.55 } : { cx, cz, rx, rz };
+}
+// Seat i of a station: where the plan has it (x, z), which way it faces (dx, dz: straight at the table's edge) and
+// how far it is from that edge.
+export function seatLine(st, i) {
+  const q = st.seats[i], o = outlineOf(st);
+  let dx = o.cx - q[0], dz = o.cz - q[1], far;
+  const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
+  if (o.box) {
+    const [x0, z0, x1, z1] = o.box, inX = q[0] > x0 && q[0] < x1, inZ = q[1] > z0 && q[1] < z1;
+    if (inX && !inZ) { dx = 0; dz = Math.sign(o.cz - q[1]); } else if (inZ && !inX) { dz = 0; dx = Math.sign(o.cx - q[0]); }      // at a side: straight at it
+    const tx = dx > 1e-6 ? (x0 - q[0]) / dx : dx < -1e-6 ? (x1 - q[0]) / dx : -1e9, tz = dz > 1e-6 ? (z0 - q[1]) / dz : dz < -1e-6 ? (z1 - q[1]) / dz : -1e9;
+    far = Math.max(tx, tz);
+  } else {
+    // at a round table: straight at the nearest bit of the edge, which on an oval is not the same as at its middle
+    const e = 1 / Math.hypot(dx / o.rx, dz / o.rz), ex = -dx * e, ez = -dz * e;      // where the line to the middle crosses the edge
+    let nx = -ex / (o.rx * o.rx), nz = -ez / (o.rz * o.rz); const n = Math.hypot(nx, nz); nx /= n; nz /= n;
+    const px = q[0] - o.cx, pz = q[1] - o.cz, A = nx * nx / (o.rx * o.rx) + nz * nz / (o.rz * o.rz), B = 2 * (px * nx / (o.rx * o.rx) + pz * nz / (o.rz * o.rz)), C = px * px / (o.rx * o.rx) + pz * pz / (o.rz * o.rz) - 1, disc = B * B - 4 * A * C;
+    if (disc >= 0) { dx = nx; dz = nz; far = (-B - Math.sqrt(disc)) / (2 * A); } else far = L - e;
+  }
+  return { x: q[0], z: q[1], dx, dz, far: Math.max(0, far) };
+}
+// Where one sits on seat i, and which way one looks: [x, z, angle]. Not for the sofa (null): its seats are on it.
+export function seatSpot(st, i) {
+  if (!st || st.on || !st.seats || !st.seats[i] || !(st.box || st.round)) return null;
+  const l = seatLine(st, i), k = Math.max(0, l.far - (st.high ? GAP.bar : GAP.sit));
+  return [l.x + l.dx * k, l.z + l.dz * k, Math.atan2(l.dx, l.dz)];
+}
+
 export function buildSaloon(THREE, kit, groupName = '') {
   const { batch, at, along, picture, tone, wood } = kit;
   const root = new THREE.Group(), upper = new THREE.Group();     // `upper`: the ceiling and what hangs from it (hidden when one looks in from above)
@@ -119,13 +159,33 @@ export function buildSaloon(THREE, kit, groupName = '') {
     for (let k = 0; k < 4; k++) { const a = k / 4 * 6.283 + 0.785; solid.rod(x + Math.cos(a) * 0.2, sh - 0.07, z + Math.sin(a) * 0.2, x + Math.cos(a) * 0.27, 0, z + Math.sin(a) * 0.27, 0.028, hi ? BRASS : DARK); }
     if (hi) solid.add(new THREE.TorusGeometry(0.23, 0.014, 5, 16), at(x, 0.3, z, Math.PI / 2, 0, 0), BRASS);
   };
+  // A chair, standing at the place of whoever sits on it (the middle of the seat is a little behind that), facing
+  // +z. Every chair is the same shape, drawn many times over (one mesh for all of them, each with its own place).
+  const chairs = [];
+  const chairShape = fine => {
+    const B = batch(), frame = wood(fine ? DARK : OAK, 0.1), pad = fine ? WINE : LEATHER, sh = SEAT_H.low;
+    B.box(0, sh - 0.045, -0.06, 0.52, 0.055, 0.54, frame); B.box(0, sh - 0.014, -0.05, 0.44, 0.03, 0.44, pad);
+    for (const sd of [-1, 1]) {
+      B.rod(sd * 0.215, sh - 0.06, 0.17, sd * 0.24, 0, 0.21, 0.036, frame);                                         // front leg
+      B.rod(sd * 0.215, sh - 0.06, -0.28, sd * 0.24, 0, -0.35, 0.036, frame);                                       // back leg
+      B.rod(sd * 0.215, sh - 0.06, -0.3, sd * 0.205, 1.03, -0.4, 0.034, frame);                                     // and the post of the back above it
+      B.ball(sd * 0.205, 1.045, -0.402, fine ? 0.05 : 0.042, fine ? BRASS : frame);
+      B.rod(sd * 0.228, 0.23, 0.19, sd * 0.228, 0.23, -0.32, 0.02, frame);                                          // a rung along the side
+    }
+    B.box(0, 0.93, -0.386, 0.45, 0.17, 0.04, frame, -0.17, 0, 0); B.box(0, 0.71, -0.345, 0.43, 0.07, 0.035, frame, -0.17, 0, 0);      // the back: a broad rail and a slat
+    B.rod(-0.228, 0.2, 0.19, 0.228, 0.2, 0.19, 0.02, frame); B.rod(-0.228, 0.26, -0.32, 0.228, 0.26, -0.32, 0.02, frame);             // rungs in front and behind
+    return B;
+  };
   const pickBox = (id, x0, y0, z0, x1, y1, z1) => picks.push({ id, box: new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1)) });
   const bottle = (x, y, z, col, s = 1) => { solid.cyl(x, y, z, 0.045 * s, 0.17 * s, col, 7); solid.cyl(x, y + 0.17 * s, z, 0.045 * s, 0.05 * s, col, 7, 0.018 * s); solid.cyl(x, y + 0.22 * s, z, 0.018 * s, 0.07 * s, col, 6); };
   const BOTTLES = [[0.1, 0.32, 0.12], [0.45, 0.2, 0.06], [0.5, 0.36, 0.1], [0.08, 0.14, 0.3], [0.5, 0.06, 0.06], [0.6, 0.55, 0.4], [0.2, 0.1, 0.05]];
 
   for (const st of STATIONS) {
     const b = st.box, r = st.round;
-    if (st.seats && !st.on) for (const q of st.seats) stool(q[0], q[1], !!st.high);
+    if (st.seats && !st.on) st.seats.forEach((q, i) => {
+      if (st.high) { const sp = seatSpot(st, i); stool(sp[0], sp[1], true); }
+      else chairs.push({ key: st.id + ':' + i, line: seatLine(st, i), fine: st.kind === 'blackjack', pull: 0, want: 0, n: 0 });
+    });
     if (b) pickBox(st.id, b[0], 0, b[1], b[0] + b[2], st.h, b[1] + b[3]);
     else if (r) pickBox(st.id, r[0] - r[2], 0, r[1] - r[3], r[0] + r[2], st.h, r[1] + r[3]);
     else if (st.wall) pickBox(st.id, st.wall[0], st.wall[1], 0, st.wall[0] + st.wall[2], st.wall[1] + st.wall[3], 0.25);
@@ -387,6 +447,21 @@ export function buildSaloon(THREE, kit, groupName = '') {
   const meshes = [solid.mesh(solidMat, root, 'solid'), glow.mesh(glowMat, root, 'glow'), floorB.mesh(lambert({ map: planks }), root, 'floor'), carpetB.mesh(lambert({ map: carpet }), root, 'carpet'),
     paperB.mesh(lambert({ map: paper }), root, 'paper'), paper2B.mesh(lambert({ map: paper2 }), root, 'paper2'), wainB.mesh(lambert({ map: boards }), root, 'boards'),
     quads.mesh(basic({ map: sheet, transparent: true, depthWrite: false }), root, 'words')];
+  const chairSets = [false, true].map(fine => {
+    const list = chairs.filter(c => c.fine === fine), geo = chairShape(fine).mesh(solidMat).geometry, m = new THREE.InstancedMesh(geo, solidMat, Math.max(1, list.length));
+    m.count = list.length; m.frustumCulled = false; m.name = fine ? 'chairsFine' : 'chairs';
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    list.forEach((c, n) => { c.n = n; c.set = m; });
+    root.add(m);
+    return m;
+  });
+  const CM = new THREE.Matrix4();
+  const placeChair = c => {
+    const l = c.line, k = Math.max(0, l.far - (GAP.tucked + (GAP.sit - GAP.tucked) * c.pull));
+    CM.makeRotationY(Math.atan2(l.dx, l.dz)).setPosition(l.x + l.dx * k, 0, l.z + l.dz * k);
+    c.set.setMatrixAt(c.n, CM); c.set.instanceMatrix.needsUpdate = true;
+  };
+  for (const c of chairs) placeChair(c);
   const nearGroup = new THREE.Group(); root.add(nearGroup);                       // what is on the front wall (hidden when one looks in through it)
   meshes.push(high.mesh(solidMat, upper, 'high'), highGlow.mesh(glowMat, upper, 'highGlow'), near.mesh(solidMat, nearGroup, 'near'), nearGlow.mesh(glowMat, nearGroup, 'nearGlow'), quadsHigh.mesh(meshes[7].material, upper, 'wordsHigh'));
 
@@ -515,6 +590,9 @@ export function buildSaloon(THREE, kit, groupName = '') {
     // a machine turns for `secs` seconds
     spin(id, secs, t) { const r = reels[id]; if (r) { r.until = t + secs; r.shown++; } },
     swing() { for (const d of doors) d.v = 5 * d.s; },
+    // which seats are in use (somebody sits there or is on the way): a Set of 'station:seat'
+    seats(used) { for (const c of chairs) c.want = used.has(c.key) ? 1 : 0; },
+    chairs,
     // who the barkeeper looks at: [x, z] or null
     tick(dt, t, look) {
       // the robots: the keeper goes to and fro and polishes a glass, the dealer shuffles
@@ -536,9 +614,11 @@ export function buildSaloon(THREE, kit, groupName = '') {
         rollS.tex.offset.y = (t * 0.25) % 1;
         if ((keyT += dt) > 0.13) { keyT = 0; for (const m of down) { m.visible = Math.random() < 0.7; m.position.set(live.keys[0] - KW / 2 + (Math.floor(Math.random() * NK) + 0.5) * KW / NK, live.keys[1] + 0.006, live.keys[2]); } }
       }
+      // chairs are pulled out for whoever comes to sit, and pushed in again afterwards
+      for (const c of chairs) if (c.pull !== c.want) { c.pull += (c.want - c.pull) * Math.min(1, dt * 7); if (Math.abs(c.want - c.pull) < 0.004) c.pull = c.want; placeChair(c); }
       // the doors swing back by themselves
       for (const d of doors) { d.v += (-d.a * 30 - d.v * 2.2) * dt; d.a += d.v * dt; d.m.rotation.y = d.a; }
     },
-    dispose() { for (const m of meshes) { m.geometry.dispose(); if (m.material.map && m.material.map !== planks) m.material.map.dispose(); m.material.dispose(); } for (const t of [planks, carpet, paper, paper2, boards, sheet]) t.dispose(); },
+    dispose() { for (const m of chairSets) { m.geometry.dispose(); m.dispose(); } for (const m of meshes) { m.geometry.dispose(); if (m.material.map && m.material.map !== planks) m.material.map.dispose(); m.material.dispose(); } for (const t of [planks, carpet, paper, paper2, boards, sheet]) t.dispose(); },
   };
 }

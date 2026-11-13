@@ -61,11 +61,13 @@ export function createRoom3D(canvas, over, hooks) {
 
   // ---------- the members ----------
   function actor(m) {
-    const p = m.p && m.p.length ? m.p : [[ROOM.spawn[0], ROOM.spawn[1]]];
+    const off = !m.on && !!m.rest, p = m.p && m.p.length ? m.p : off ? [[m.rest[0], m.rest[1]]] : [[ROOM.spawn[0], ROOM.spawn[1]]];
     const a = { id: m.id, name: m.name, look: m.look, dnd: m.dnd, path: p, len: pathLen(p), dist: 0, x: p[0][0], y: p[0][1], sit: m.sit || null, seated: false,
+      off, rest: m.rest || null, lie: off ? 1 : 0, lieFrom: null, zAt: 0,      // off: not here, asleep on the floor at rest ([x, y, which way the feet point]); lie: 0..1
       moving: false, walk: 0, phase: 0, hop: 0, emote: '', emoteAt: 0, fxs: {}, drink: null, buzz: m.buzz || 0, buzzAt: T, bubble: null, net: m.busy === 'slot' || m.busy === 'bj' ? m.net || 0 : null,
       talkUntil: 0, seed: (m.id * 2.399) % 6.28, born: T, head: 0, want: 0, fig: people.person(m.look) };       // head: which way the figure looks (0: out into the room, at the viewer)
     if (a.sit && p.length < 2) { a.seated = true; faceSeat(a); a.head = a.want; }
+    if (off) a.head = a.want = m.rest[2];
     for (const [k, left] of m.fx || []) if (PRANKS[k]) a.fxs[k] = T - Math.max(0, PRANKS[k].dur - left / 1000);
     if (m.drink) a.drink = { k: m.drink[0], t0: T - (BAR.lasts - m.drink[1] / 1000) };
     scene.add(a.fig.group);
@@ -74,7 +76,8 @@ export function createRoom3D(canvas, over, hooks) {
   const drop = a => { scene.remove(a.fig.group); a.fig.dispose(); };
   const seatOf = a => a.seated && a.sit && STATION[a.sit[0]] ? STATION[a.sit[0]] : null;
   const seatKind = st => st.on ? 'sofa' : st.high ? 'high' : 'low';
-  function place(a) {            // where the figure stands or sits: [x, y, z]
+  function place(a) {            // where the figure stands or sits: [x, y, z] (asleep: the middle of the body)
+    if (a.off) return [a.rest[0], a.rest[1], 0];
     const st = seatOf(a);
     if (!st) return [a.x + (a.moving && a.buzz >= 3 ? Math.sin(T * 2.3 + a.seed) * 0.1 * Math.min(1, (a.buzz - 2) / 3) : 0), a.y, 0];
     const q = seatSpot(st, a.sit[1]) || st.seats[a.sit[1]] || st.use;         // at a table: on the chair, pulled up to it
@@ -90,10 +93,19 @@ export function createRoom3D(canvas, over, hooks) {
   const buzzNow = a => Math.max(0, a.buzz - (T - a.buzzAt) / (BAR.soberMin * 60));
   const isHen = a => a.fxs.chicken !== undefined && T >= a.fxs.chicken;
   // (a seated figure's hips are on the seat; a tall one's head is higher up)
-  const topOf = a => isHen(a) ? 1.15 : (seatOf(a) ? 1.5 * a.fig.tall : 2.25 * a.fig.tall) + (a.look.hat ? 0.3 : 0);
-  const headOf = a => { const [x, y, z] = place(a); return [x, y, z + (isHen(a) ? 0.85 : seatOf(a) ? 1.1 * a.fig.tall : 1.78 * a.fig.tall)]; };
+  const topOf = a => a.lie > 0.5 ? 0.62 : isHen(a) ? 1.15 : (seatOf(a) ? 1.5 * a.fig.tall : 2.25 * a.fig.tall) + (a.look.hat ? 0.3 : 0);
+  const headOf = a => { const [x, y, z] = place(a); if (a.lie > 0.5 && a.rest) return [x - Math.sin(a.rest[2]) * 0.75 * a.fig.tall, y - Math.cos(a.rest[2]) * 0.75 * a.fig.tall, 0.28]; return [x, y, z + (isHen(a) ? 0.85 : seatOf(a) ? 1.1 * a.fig.tall : 1.78 * a.fig.tall)]; };
+  const ease = u => u * u * (3 - 2 * u);
 
   function step(a, dt) {
+    // lying down (1.1 s) or getting up (0.9 s)
+    const goal = a.off ? 1 : 0;
+    if (a.lie !== goal) { a.lie = goal ? Math.min(1, a.lie + dt / 1.1) : Math.max(0, a.lie - dt / 0.9); if (!a.lie) a.lieFrom = null; }
+    if (a.off) {
+      a.moving = false; a.walk += (0 - a.walk) * Math.min(1, dt * 12);
+      let dh = a.want - a.head; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); a.head += dh * Math.min(1, dt * 8);
+      return;
+    }
     if (a.dist < a.len) {
       const ox = a.x, oy = a.y;
       a.dist = Math.min(a.len, a.dist + ROOM.speed * dt);
@@ -130,10 +142,15 @@ export function createRoom3D(canvas, over, hooks) {
     }
     a.sipNow = sip; a.fillNow = fill;
     const hop = a.hop > 0 ? Math.sin((1 - a.hop / 0.28) * Math.PI) * 0.16 : 0, grow = Math.min(1, (T - a.born) * 4);
-    const g = a.fig.group;
-    g.position.set(x, hop, y); g.rotation.y = a.head; g.scale.setScalar(grow);
+    const g = a.fig.group, e = a.lie > 0 && a.rest ? ease(a.lie) : 0;
+    if (e > 0) {
+      // the feet stay where they are and the body goes down behind them: from where one stood (or sat) to the place to lie
+      const L = a.rest, k = 0.85 * a.fig.tall, fx2 = L[0] + Math.sin(L[2]) * k, fz = L[1] + Math.cos(L[2]) * k, P0 = a.lieFrom || (a.off ? [fx2, fz, 0] : [x, y, z]);
+      g.position.set(P0[0] + (fx2 - P0[0]) * e, (P0[2] || 0) * (1 - e), P0[1] + (fz - P0[1]) * e);
+    } else g.position.set(x, hop, y);
+    g.rotation.y = a.head; g.scale.setScalar(grow);
     a.fig.pose({ phase: a.phase, walk: a.walk, seed: a.seed, emote: a.emote, drink: a.drink, talk: T < a.talkUntil },
-      { T, seat: st ? seatKind(st) : '', seatY: z, fill, sip, buzz: buzzNow(a), fx: fxs, et: T - a.emoteAt, hen: isHen(a), first: cam.view === 'eyes' && a.id === me });
+      { T, seat: st && !e ? seatKind(st) : '', seatY: z, fill, sip, buzz: buzzNow(a), fx: fxs, et: T - a.emoteAt, hen: isHen(a), first: cam.view === 'eyes' && a.id === me, lie: e });
   }
 
   // ---------- the camera ----------
@@ -202,11 +219,11 @@ export function createRoom3D(canvas, over, hooks) {
     const size = clamp(k * 0.25, 11, 15);
     let top = py - 4;
     c.font = '600 ' + size + 'px ' + FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
-    const name = a.name + (a.dnd ? ' ·zz' : ''), w = c.measureText(name).width + size * 1.1, h = size * 1.55;
+    const name = a.name + (a.off ? ' · sover' : a.dnd ? ' ·zz' : ''), w = c.measureText(name).width + size * 1.1, h = size * 1.55;
     for (let n = 0; n < 4 && placed.some(q => Math.abs(q[0] - cx) < (q[2] + w) / 2 - 2 && Math.abs(q[1] - top) < h); n++) top -= h + 2;
     placed.push([cx, top, w]);
-    c.beginPath(); c.roundRect(cx - w / 2, top - h, w, h, h / 2); c.fillStyle = a.id === me ? 'rgba(255,179,71,.94)' : 'rgba(28,23,40,.72)'; c.fill();
-    c.fillStyle = a.id === me ? '#2b1a08' : '#fff'; c.fillText(name, cx, top - h / 2 + 0.5);
+    c.beginPath(); c.roundRect(cx - w / 2, top - h, w, h, h / 2); c.fillStyle = a.id === me ? 'rgba(255,179,71,.94)' : a.off ? 'rgba(28,23,40,.46)' : 'rgba(28,23,40,.72)'; c.fill();
+    c.fillStyle = a.id === me ? '#2b1a08' : a.off ? '#d6cde6' : '#fff'; c.fillText(name, cx, top - h / 2 + 0.5);
     if (a.net !== null) {
       const t = (a.net > 0 ? '+' : '') + a.net, nw = c.measureText(t).width + size * 1.1;
       c.beginPath(); c.roundRect(cx - nw / 2, top - h * 2 - 2, nw, h, h / 2); c.fillStyle = a.net > 0 ? '#1f7a4a' : a.net < 0 ? '#a8323c' : 'rgba(28,23,40,.86)'; c.fill();
@@ -343,11 +360,12 @@ export function createRoom3D(canvas, over, hooks) {
     // the barkeeper looks at whoever stands nearest the bar
     let near = null, nd = 30;
     let atDoor = false;                                           // ... and whoever stands in the doorway holds the swing doors open
-    for (const a of actors.values()) { const d = (a.x - 10.9) ** 2 + (a.y - 3.2) ** 2; if (d < nd) { nd = d; near = [a.x, a.y]; } if ((a.x - DOOR_X) ** 2 + a.y ** 2 < 4.4) atDoor = true; }
+    for (const a of actors.values()) { if (a.off) continue; const d = (a.x - 10.9) ** 2 + (a.y - 3.2) ** 2; if (d < nd) { nd = d; near = [a.x, a.y]; } if ((a.x - DOOR_X) ** 2 + a.y ** 2 < 4.4) atDoor = true; }
     saloon.doorway(atDoor);
     used.clear(); for (const a of actors.values()) if (a.sit) used.add(a.sit[0] + ':' + a.sit[1]);
     saloon.seats(used);
     saloon.tick(dt, T, near);
+    for (const a of actors.values()) if (a.off && a.lie > 0.95 && T > a.zAt) { a.zAt = T + 1.5 + Math.random() * 0.9; const q = headOf(a); fx.push({ kind: 'p', shape: 'note', text: 'z', x: q[0], y: q[1], z: q[2] + 0.15, vx: 0.07, vy: 0, vz: 0.3, g: 0, t: 0, life: 2.6, col: '#d9d0ff', size: 0.045 + Math.random() * 0.025, rot: -0.2, vr: 0.15 }); }      // the sleepers snore
     if (music && (noteT += dt) > 0.45) { noteT = 0; const n = saloon.notes; fx.push({ kind: 'p', shape: 'note', text: Math.random() < 0.5 ? '♪' : '♫', x: n[0] + (Math.random() - 0.5) * 0.5, y: n[2], z: n[1] - 0.2, vx: (Math.random() - 0.5) * 0.4, vy: 0.2, vz: 0.7, g: 0, t: 0, life: 1.8, col: '#ffe9a8', size: 0.1, rot: 0, vr: 0 }); }
     hand.tick(dt);
     renderer.render(scene, camera);
@@ -388,9 +406,9 @@ export function createRoom3D(canvas, over, hooks) {
     let best = null, bd = 1e9;
     for (const a of actors.values()) {
       if (cam.view === 'eyes' && a.id === me) continue;
-      const [x, y, z] = place(a), hen = isHen(a);
-      for (const [dy, r] of hen ? [[0.55, 0.5]] : [[z + (seatOf(a) ? 1.1 : 1.75), 0.5], [z + 0.8, 0.42]]) {
-        SPH.center.set(x, dy, y); SPH.radius = r;
+      const [x, y, z] = place(a), hen = isHen(a), lying = a.lie > 0.5 && a.rest, ux = lying ? Math.sin(a.rest[2]) * 0.6 : 0, uz = lying ? Math.cos(a.rest[2]) * 0.6 : 0;
+      for (const [dy, r, s] of lying ? [[0.25, 0.42, 0], [0.25, 0.36, 1], [0.25, 0.36, -1]] : hen ? [[0.55, 0.5, 0]] : [[z + (seatOf(a) ? 1.1 : 1.75), 0.5, 0], [z + 0.8, 0.42, 0]]) {
+        SPH.center.set(x + ux * s, dy, y + uz * s); SPH.radius = r;
         if (ray.ray.intersectSphere(SPH, HIT)) { const d = HIT.distanceTo(ray.ray.origin); if (d < bd) { bd = d; best = { actor: a }; } }
       }
     }
@@ -574,18 +592,33 @@ export function createRoom3D(canvas, over, hooks) {
     setLabels(l) { labels = l; },
     hint(seconds = 7) { hintUntil = T + seconds; },
     spot: id => { const sg = saloon.signs.find(q => q[0] === id), st = STATION[id]; const q = P(sg[1], sg[3], st.wall ? sg[2] - 0.6 : Math.max(0.3, (st.h || 0.4) * 0.6)); return [q[0], q[1]]; },
-    here: id => actors.has(id),
+    here: id => actors.has(id) && !actors.get(id).off,
     sitting: id => { const a = actors.get(id); return a && a.sit ? a.sit[0] : ''; },
-    count: () => actors.size,
+    count: () => [...actors.values()].filter(a => !a.off).length,
     view: () => cam.view,
     setView(v) { if (!VIEWS.includes(v)) return; cam.view = v; cam.free = false; if (v === 'eyes') { const a = mine(); cam.pitch = 0; if (a) cam.yaw = a.head + Math.PI; } else if (v === 'follow') { cam.pitch = 0.36; } if (hooks.onView) hooks.onView(v); },
     setRoom(members, myId) {
       me = myId; for (const a of actors.values()) drop(a); actors.clear(); fx.length = 0; cam.free = false;
-      for (const m of members) if (m.on) actors.set(m.id, actor(m));
+      for (const m of members) if (m.on || m.rest) actors.set(m.id, actor(m));          // (and those who are not here: asleep where they were)
       const a = actors.get(me);
       if (a) { a.born = T - 1; cam.panX = a.x; }
     },
-    join(m) { const old = actors.get(m.id); if (old) drop(old); actors.set(m.id, actor(m)); if (m.id !== me) { play('door'); saloon.swing(); } },
+    join(m) {
+      const old = actors.get(m.id); if (old) drop(old);
+      const a = actor(m); actors.set(m.id, a);
+      if (old && old.off && old.rest) { a.rest = old.rest; a.lie = 1; a.head = a.want = old.rest[2]; a.born = T - 1; }         // asleep here: gets up where they lay
+      else if (m.id !== me) { play('door'); saloon.swing(); }
+    },
+    // somebody is gone: lies down and sleeps (rest: where the body is to lie, and which way its feet point)
+    sleep(id, rest) {
+      const a = actors.get(id);
+      if (!a || !rest) return;
+      a.lieFrom = place(a); a.off = true; a.rest = rest; a.want = rest[2];
+      a.path = [[rest[0], rest[1]]]; a.len = 0; a.dist = 0; a.sit = null; a.seated = false; a.x = rest[0]; a.y = rest[1];
+      a.drink = null; a.fxs = {}; a.bubble = null; a.net = null; a.emote = ''; a.talkUntil = 0;
+    },
+    // one comes back oneself: gets up from where one lay
+    wake(id, rest) { const a = actors.get(id); if (a && rest && !a.off) { a.rest = rest; a.lie = 1; a.head = a.want = rest[2]; } },
     leave(id) { const a = actors.get(id); if (a) { const [x, y] = place(a); burst(x, y, 1, 10, { cols: ['#fff', '#e9e3f5'], speed: 1.6, g: -0.5, size: 0.12 }); drop(a); saloon.swing(); } actors.delete(id); },
     patch(m) {
       const a = actors.get(m.id);
@@ -645,7 +678,7 @@ export function createRoom3D(canvas, over, hooks) {
     screenOf(id) { const a = actors.get(id); if (!a) return null; const [x, y, z] = place(a), q = P(x, y, z + topOf(a)); return [q[0], q[1]]; },
     // the members as they stand right now, in the shape the server sends them: for handing the room over to the other way of showing it
     snapshot() {
-      return [...actors.values()].map(a => ({ id: a.id, name: a.name, look: a.look, dnd: a.dnd, on: true, p: a.dist < a.len ? [[a.x, a.y], a.path[a.path.length - 1]] : [[a.x, a.y]], sit: a.sit,
+      return [...actors.values()].map(a => ({ id: a.id, name: a.name, look: a.look, dnd: a.dnd, on: !a.off, rest: a.off ? a.rest : undefined, p: a.dist < a.len ? [[a.x, a.y], a.path[a.path.length - 1]] : [[a.x, a.y]], sit: a.sit,
         fx: Object.keys(a.fxs).map(k => [k, Math.max(0, (PRANKS[k].dur - (T - a.fxs[k])) * 1000)]), drink: a.drink ? [a.drink.k, Math.max(0, (BAR.lasts - (T - a.drink.t0)) * 1000)] : null, buzz: buzzNow(a), busy: a.net !== null ? 'slot' : '', net: a.net || 0 }));
     },
     dispose() { api.stop(); document.removeEventListener('keydown', keyDown); document.removeEventListener('keyup', keyUp); window.removeEventListener('blur', onBlur); document.removeEventListener('pointerlockchange', onLock); document.removeEventListener('pointerlockerror', onLockError); document.removeEventListener('mousemove', onMouse); for (const a of actors.values()) drop(a); actors.clear(); saloon.dispose(); renderer.dispose(); },

@@ -60,8 +60,9 @@ export function createRoom(canvas, hooks) {
 
   // ---------- actors ----------
   function actor(m) {
-    const p = m.p && m.p.length ? m.p : [[ROOM.spawn[0], ROOM.spawn[1]]];
+    const off = !m.on && !!m.rest, p = m.p && m.p.length ? m.p : off ? [[m.rest[0], m.rest[1]]] : [[ROOM.spawn[0], ROOM.spawn[1]]];
     const a = { id: m.id, name: m.name, look: m.look, dnd: m.dnd, path: p, len: pathLen(p), dist: 0, x: p[0][0], y: p[0][1], sit: m.sit || null, seated: false,
+      off, rest: m.rest || null, lie: off ? 1 : 0, lieFrom: null, zAt: 0,      // off: not here, asleep on the floor at rest ([x, y, which way the feet point]); lie: 0..1
       moving: false, walk: 0, phase: 0, dir: 0, dirT: 0, hop: 0, emote: '', emoteAt: 0, fxs: {}, drink: null, buzz: m.buzz || 0, buzzAt: T, bubble: null, net: m.busy === 'slot' || m.busy === 'bj' ? m.net || 0 : null,
       talkUntil: 0, seed: (m.id * 2.399) % 6.28, born: T };
     if (a.sit && p.length < 2) a.seated = true;
@@ -70,7 +71,8 @@ export function createRoom(canvas, hooks) {
     return a;
   }
   const seatOf = a => a.seated && a.sit && STATION[a.sit[0]] ? STATION[a.sit[0]] : null;
-  function place(a) {            // where the avatar is drawn: [x, y, z, sort key]
+  function place(a) {            // where the avatar is drawn: [x, y, z, sort key] (asleep: the middle of the body)
+    if (a.off) return [a.rest[0], a.rest[1], 0, a.rest[1]];
     const st = seatOf(a);
     if (!st) return [a.x + (a.moving && a.buzz >= 3 ? Math.sin(T * 2.3 + a.seed) * 0.1 * Math.min(1, (a.buzz - 2) / 3) : 0), a.y, 0, a.y];
     const q = st.seats[a.sit[1]] || st.use;
@@ -79,9 +81,14 @@ export function createRoom(canvas, hooks) {
   const buzzNow = a => Math.max(0, a.buzz - (T - a.buzzAt) / (BAR.soberMin * 60));
   const isHen = a => a.fxs.chicken !== undefined && T >= a.fxs.chicken;
   // how far the top of the head is above the spot the avatar is drawn at (a hen is small, a seated one lower)
-  const topOf = a => isHen(a) ? 1.05 : (seatOf(a) ? 1.62 : 2.08) + (a.look.hat ? 0.34 : 0);
+  const topOf = a => a.lie > 0.5 ? 0.78 : isHen(a) ? 1.05 : (seatOf(a) ? 1.62 : 2.08) + (a.look.hat ? 0.34 : 0);
+  const ease = u => u * u * (3 - 2 * u);
+  const feetSide = a => Math.sin(a.rest[2]) >= 0 ? 1 : -1;            // asleep: the feet to the right (1) or to the left (-1) in the picture
 
   function step(a, dt) {
+    const goal = a.off ? 1 : 0;                                       // lying down (1.1 s) or getting up (0.9 s)
+    if (a.lie !== goal) { a.lie = goal ? Math.min(1, a.lie + dt / 1.1) : Math.max(0, a.lie - dt / 0.9); if (!a.lie) a.lieFrom = null; }
+    if (a.off) { a.moving = false; a.walk = 0; return; }
     if (a.dist < a.len) {
       a.dist = Math.min(a.len, a.dist + ROOM.speed * dt);
       const [x, y, dx] = posAt(a.path, a.dist);
@@ -104,7 +111,11 @@ export function createRoom(canvas, hooks) {
   const X = x => ox + x * s, Y = (y, z = 0) => oy + V(y, z) * s;
 
   function drawActor(a) {
-    const [x, y, z] = place(a), k = s * 0.02, st = seatOf(a);
+    let [x, y, z] = place(a); const k = s * 0.02, st = seatOf(a), e = a.lie > 0 && a.rest ? ease(a.lie) : 0;
+    if (e > 0) {                    // asleep: the feet stay put and the body goes down beside them (from where one stood, or to where one stands up)
+      const fx2 = a.rest[0] + feetSide(a) * 1.0, P0 = a.lieFrom || (a.off ? [fx2, a.rest[1], 0] : [x, y, z]);
+      x = P0[0] + (fx2 - P0[0]) * e; y = P0[1] + (a.rest[1] - P0[1]) * e; z = (P0[2] || 0) * (1 - e);
+    }
     const hop = a.hop > 0 ? Math.sin((1 - a.hop / 0.28) * Math.PI) * 0.22 : 0;
     const fxs = {};
     for (const key of Object.keys(a.fxs)) if (T >= a.fxs[key]) fxs[key] = T - a.fxs[key];
@@ -115,13 +126,13 @@ export function createRoom(canvas, hooks) {
       if (u > per - 1.6) sip = Math.sin((u - (per - 1.6)) / 1.6 * Math.PI) ** 0.6;
       if (a.sipAt && T - a.sipAt < 1.6) sip = Math.max(sip, Math.sin((T - a.sipAt) / 1.6 * Math.PI) ** 0.6);      // a mouthful one asked for
     }
-    if (!st && !fxs.banana) { c.beginPath(); c.ellipse(X(x), Y(y), s * 0.42, s * 0.13, 0, 0, TAU); c.fillStyle = 'rgba(30,15,30,.22)'; c.fill(); }
+    if (!st && !fxs.banana) { c.beginPath(); c.ellipse(X(x - (a.rest ? feetSide(a) : 0) * 1.0 * e), Y(y), s * (0.42 + 0.6 * e), s * 0.13, 0, 0, TAU); c.fillStyle = 'rgba(30,15,30,.22)'; c.fill(); }
     c.save();
     c.translate(X(x), Y(y, z + hop));
     const grow = Math.min(1, (T - a.born) * 4);
     c.scale(k * grow, k * grow);
-    drawAvatar(c, a.look, { t: T, seed: a.seed, walk: a.walk, phase: a.phase, dir: a.dir, sit: !!st, emote: a.emote, et: T - a.emoteAt, fx: fxs,
-      drink, fill, sip, buzz: buzzNow(a), talk: T < a.talkUntil ? 1 : 0 });
+    drawAvatar(c, a.look, { t: T, seed: a.seed, walk: a.walk, phase: a.phase, dir: a.dir, sit: !!st && !e, emote: a.emote, et: T - a.emoteAt, fx: fxs,
+      drink, fill, sip, buzz: buzzNow(a), talk: T < a.talkUntil ? 1 : 0, lie: e, lieDir: a.rest ? -feetSide(a) : -1 });
     c.restore();
   }
 
@@ -146,12 +157,12 @@ export function createRoom(canvas, hooks) {
     const [x, y, z] = place(a), size = clamp(s * 0.25, 11, 15), cx = X(x);
     let top = Y(y, z + topOf(a)) - s * 0.08;
     c.font = '600 ' + size + 'px ' + FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
-    const name = a.name + (a.dnd ? ' ·zz' : ''), w = c.measureText(name).width + size * 1.1, h = size * 1.55;
+    const name = a.name + (a.off ? ' · sover' : a.dnd ? ' ·zz' : ''), w = c.measureText(name).width + size * 1.1, h = size * 1.55;
     // two people close together: the second name goes above the first instead of on top of it
     for (let n = 0; n < 4 && placed.some(q => Math.abs(q[0] - cx) < (q[2] + w) / 2 - 2 && Math.abs(q[1] - top) < h); n++) top -= h + 2;
     placed.push([cx, top, w]);
-    c.beginPath(); c.roundRect(cx - w / 2, top - h, w, h, h / 2); c.fillStyle = a.id === me ? 'rgba(255,179,71,.94)' : 'rgba(28,23,40,.72)'; c.fill();
-    c.fillStyle = a.id === me ? '#2b1a08' : '#fff'; c.fillText(name, cx, top - h / 2 + 0.5);
+    c.beginPath(); c.roundRect(cx - w / 2, top - h, w, h, h / 2); c.fillStyle = a.id === me ? 'rgba(255,179,71,.94)' : a.off ? 'rgba(28,23,40,.46)' : 'rgba(28,23,40,.72)'; c.fill();
+    c.fillStyle = a.id === me ? '#2b1a08' : a.off ? '#d6cde6' : '#fff'; c.fillText(name, cx, top - h / 2 + 0.5);
     if (a.net !== null) {                  // at the slot machines: what this player is up or down since walking up to them
       const t = (a.net > 0 ? '+' : '') + a.net, nw = c.measureText(t).width + size * 1.1;
       c.beginPath(); c.roundRect(cx - nw / 2, top - h * 2 - 2, nw, h, h / 2); c.fillStyle = a.net > 0 ? '#1f7a4a' : a.net < 0 ? '#a8323c' : 'rgba(28,23,40,.86)'; c.fill();
@@ -199,7 +210,10 @@ export function createRoom(canvas, hooks) {
     raf = requestAnimationFrame(frame);
     const dt = clamp((now - last) / 1000 || 0, 0, 0.1);          // the first frame can carry a time from before start()
     last = now; T += dt;
-    for (const a of actors.values()) step(a, dt);
+    for (const a of actors.values()) {
+      step(a, dt);
+      if (a.off && a.lie > 0.95 && T > a.zAt) { a.zAt = T + 1.5 + Math.random() * 0.9; word('z', a.rest[0] - feetSide(a) * 0.8, a.rest[1], 0.5, '#d9d0ff'); }      // the sleepers snore
+    }
     // camera: the whole room when it fits, otherwise follow one's own avatar
     const roomW = ROOM.w * s, mine = actors.get(me);
     if (roomW <= cw) { ox = (cw - roomW) / 2; camX = 0; }
@@ -317,8 +331,8 @@ export function createRoom(canvas, hooks) {
   function pick(px, py) {
     let best = null;
     for (const a of actors.values()) {
-      const [x, y, z, key] = place(a), ax = X(x), ay = Y(y, z);
-      if (Math.abs(px - ax) < s * 0.5 && py < ay + s * (seatOf(a) ? 0.5 : 0.1) && py > ay - s * (topOf(a) + 0.1) && (!best || key > best.key)) best = { actor: a, key };
+      const [x, y, z, key] = place(a), ax = X(x), ay = Y(y, z), wide = a.lie > 0.5 ? 1.05 : 0.5;
+      if (Math.abs(px - ax) < s * wide && py < ay + s * (seatOf(a) ? 0.5 : 0.1) && py > ay - s * (topOf(a) + 0.1) && (!best || key > best.key)) best = { actor: a, key };
     }
     if (best) return best;
     const u = (px - ox) / s, v = (py - oy) / s;
@@ -373,18 +387,32 @@ export function createRoom(canvas, hooks) {
     setLabels(l) { labels = l; },
     hint(seconds = 7) { hintUntil = T + seconds; },
     spot: id => { const b = hitBox(STATION[id]); return [X((b[0] + b[2]) / 2), oy + (b[1] + b[3]) / 2 * s]; },      // where a piece of furniture is in the picture (for trying things out)
-    here: id => actors.has(id),
+    here: id => actors.has(id) && !actors.get(id).off,
     sitting: id => { const a = actors.get(id); return a && a.sit ? a.sit[0] : ''; },      // the furniture somebody sits at (or walks to)
-    count: () => actors.size,
+    count: () => [...actors.values()].filter(a => !a.off).length,
 
     // the whole room at once (on entering), and one member coming, changing or going
     setRoom(members, myId) {
       me = myId; actors.clear(); fx.length = 0; camFree = false;
-      for (const m of members) if (m.on) actors.set(m.id, actor(m));
+      for (const m of members) if (m.on || m.rest) actors.set(m.id, actor(m));          // (and those who are not here: asleep where they were)
       const mine = actors.get(me);
       if (mine) { mine.born = T - 1; camX = clamp(mine.x * s - cw / 2, 0, Math.max(0, ROOM.w * s - cw)); }
     },
-    join(m) { actors.set(m.id, actor(m)); if (m.id !== me) play('door'); },
+    join(m) {
+      const old = actors.get(m.id), a = actor(m); actors.set(m.id, a);
+      if (old && old.off && old.rest) { a.rest = old.rest; a.lie = 1; a.born = T - 1; }         // asleep here: gets up where they lay
+      else if (m.id !== me) play('door');
+    },
+    // somebody is gone: lies down and sleeps (rest: where the body is to lie, and which way its feet point)
+    sleep(id, rest) {
+      const a = actors.get(id);
+      if (!a || !rest) return;
+      a.lieFrom = place(a); a.off = true; a.rest = rest;
+      a.path = [[rest[0], rest[1]]]; a.len = 0; a.dist = 0; a.sit = null; a.seated = false; a.x = rest[0]; a.y = rest[1];
+      a.drink = null; a.fxs = {}; a.bubble = null; a.net = null; a.emote = ''; a.talkUntil = 0;
+    },
+    // one comes back oneself: gets up from where one lay
+    wake(id, rest) { const a = actors.get(id); if (a && rest && !a.off) { a.rest = rest; a.lie = 1; } },
     leave(id) { const a = actors.get(id); if (a) { const [x, y] = place(a); burst(x, y, 1, 10, { cols: ['#fff', '#e9e3f5'], speed: 1.6, g: -0.5, size: 0.12 }); } actors.delete(id); },
     patch(m) {
       const a = actors.get(m.id);
@@ -449,7 +477,7 @@ export function createRoom(canvas, hooks) {
     },
     // the members as they stand right now, in the shape the server sends them: for handing the room over to the other way of showing it (room3d.js)
     snapshot() {
-      return [...actors.values()].map(a => ({ id: a.id, name: a.name, look: a.look, dnd: a.dnd, on: true, p: a.dist < a.len ? [[a.x, a.y], a.path[a.path.length - 1]] : [[a.x, a.y]], sit: a.sit,
+      return [...actors.values()].map(a => ({ id: a.id, name: a.name, look: a.look, dnd: a.dnd, on: !a.off, rest: a.off ? a.rest : undefined, p: a.dist < a.len ? [[a.x, a.y], a.path[a.path.length - 1]] : [[a.x, a.y]], sit: a.sit,
         fx: Object.keys(a.fxs).map(k => [k, Math.max(0, (PRANKS[k].dur - (T - a.fxs[k])) * 1000)]), drink: a.drink ? [a.drink.k, Math.max(0, (BAR.lasts - (T - a.drink.t0)) * 1000)] : null, buzz: buzzNow(a), busy: a.net !== null ? 'slot' : '', net: a.net || 0 }));
     },
     // where on the canvas an avatar's head is (for a menu next to it)

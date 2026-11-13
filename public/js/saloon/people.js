@@ -80,7 +80,8 @@ export function makePeople(THREE) {
       return { g, drops };
     }
 
-    // a: the member as the room keeps it (see room3d.js). o: { T, seat: 'low' | 'high' | 'sofa' | '', seatY, fill, sip, buzz, fx: { name: age }, hen, first: this is oneself seen through one's own eyes }
+    // a: the member as the room keeps it (see room3d.js). o: { T, seat: 'low' | 'high' | 'sofa' | '', seatY, fill, sip, buzz, fx: { name: age }, hen, first: this is oneself seen through one's own eyes,
+    // lie: 0..1, asleep on the back (the feet where the figure stands, the head along -z) }
     function pose(a, o) {
       const T = o.T, fx = o.fx, ph = a.phase, walk = a.walk, seed = a.seed;
       const isHen = o.hen;
@@ -88,6 +89,7 @@ export function makePeople(THREE) {
       if (hen) hen.g.visible = !!isHen;
       P.body.visible = !isHen && !o.first;
       shadow.visible = !o.seat;
+      { const k = o.lie || 0; shadow.position.z = -0.85 * f.tall * k; shadow.scale.set(0.46, 0.46 + 0.5 * k, 1); }      // (lying: under the whole body)
       if (isHen) {
         const hop = Math.abs(Math.sin(ph * 1.2)) * 0.07 * walk;
         hen.g.position.y = hop; hen.g.rotation.z = Math.sin(ph * 1.2) * 0.12 * walk;
@@ -143,6 +145,17 @@ export function makePeople(THREE) {
       if (fx.cloud !== undefined) face = 'sad';
       if (fx.confetti !== undefined || fx.hug !== undefined) face = 'happy';
       if (a.talk && face === 'calm') face = 'talk';
+      // ----- asleep on the floor (a member who is not here), or lying down, or getting up -----
+      const lie = o.lie || 0;
+      if (lie > 0) {
+        const k = lie, q = 1 - k, br = Math.sin(T * 1.25 + seed) * 0.01;          // (it breathes)
+        lean = lean * q - 1.5 * k; by = by * q + (0.15 + br) * k; twist *= q; sway *= q; tilt *= q; jump *= q; shake *= q;
+        legA = legA * q + 0.04 * k; legB = legB * q - 0.03 * k; legZ = legZ * q + 0.05 * k;
+        armR = [armR[0] * q + 0.1 * k, armR[1] * q - 0.14 * k]; armL = [armL[0] * q, armL[1] * q + 0.1 * k];
+        if (k > 0.5) { handR = null; handL = [0.05, 0.24, 0.24]; }                   // the left hand on the belly
+        headX = headX * q - 0.05 * k; headY = headY * q + 0.42 * k; headZ *= q;
+        if (k > 0.6) face = 'sleep';
+      }
 
       body.position.set(shake, by + jump, 0); body.rotation.set(lean, twist, sway + tilt);
       upper.rotation.set(0, 0, 0); upper.position.y = 0.7;

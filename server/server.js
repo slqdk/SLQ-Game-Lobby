@@ -164,7 +164,7 @@ setInterval(() => { try { hub.tick(); } catch (e) { console.error(e); } }, 1000)
 setInterval(() => { try { hub.tidy(); ee.tick(); } catch (e) { console.error(e); } }, 60000).unref();
 
 // What has changed is written within a couple of seconds; on the way out, at once.
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { try { store.flush(); } finally { process.exit(0); } });
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { try { hub.sleepAll(); } catch (e) { console.error(e); } try { store.flush(); } finally { process.exit(0); } });      // (everybody in a clubhouse lies down where they are: they get up there again)
 process.on('exit', () => { try { store.flush(); } catch {} });
 
 server.listen(PORT, HOST, () => console.log(`SLQ Game Lobby ${VERSION} lytter på http://${HOST || 'localhost'}:${PORT}  (data: ${DATA})`));

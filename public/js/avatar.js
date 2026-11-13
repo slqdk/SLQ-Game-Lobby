@@ -67,6 +67,8 @@ function pose(st) {
   else if (e === 'sleep') { p.tilt = 0.2; p.bob = Math.sin(et * 1.6) * 1.2; p.face = 'sleep'; }
   else if (e === 'cheers') { p.ar = 2.35 + Math.sin(et * 9) * 0.06; p.face = 'happy'; }
   // what others did to this one
+  // asleep on the floor (a member who is not here): st.lie 0..1, st.lieDir -1 with the head to the left, 1 to the right
+  if (st.lie) { p.lie = st.lie; if (st.lie > 0.6) p.face = 'sleep'; p.al = p.ar = 0.14 + 0.1 * st.lie; p.bob = Math.sin(t * 1.25 + seed) * 0.5 * st.lie; }
   if (fx.banana !== undefined) {
     const b = fx.banana;
     p.lie = b < 0.35 ? b / 0.35 : b < 3 ? 1 : Math.max(0, 1 - (b - 3) / 0.6);
@@ -572,7 +574,7 @@ export function drawAvatar(c, look, st = {}) {
   { const hk = [1, 0.94, 1.06][look.height | 0] || 1; c.scale(hk, hk); }
   c.lineJoin = 'round'; c.lineCap = 'round';
   if (st.sit) c.translate(0, 23);                         // the seat is at (0, 0): hips on it, feet below
-  if (P.lie) { c.translate(0, -7 * P.lie); c.rotate(-Math.PI / 2 * P.lie); c.translate(0, 9 * P.lie); }
+  if (P.lie) { c.translate(0, -7 * P.lie); c.rotate((st.lieDir || -1) * Math.PI / 2 * P.lie); c.translate(0, 9 * P.lie); }
   c.translate(P.shake, -P.jump);
   c.rotate(P.lean);
   drawBack(c, look, K, P);

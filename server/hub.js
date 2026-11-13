@@ -184,6 +184,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   function member(g, uid) {
     const u = store.users.get(uid), p = rooms.has(g.id) ? rooms.get(g.id).get(uid) : null;
     const out = { id: uid, name: u.name, role: roleOf(g, uid), look: cleanLook(u.look, u.items), chips: u.chips, dnd: !!u.dnd, seen: u.seen, stats: u.stats, on: !!p, today: todayOf(u) };
+    if (!p && g.rest && g.rest[uid]) out.rest = g.rest[uid];                // not here: asleep on the floor, where they were
     if (p) {
       out.p = pathFrom(p.path, (now() - p.t0) / 1000 * ROOM.speed); out.sit = p.sit; out.open = p.open; out.busy = p.busy;
       if (p.busy === 'slot') out.slot = p.slot;
@@ -208,11 +209,52 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
     conn.gid = null;
     if (!room || !conn.user || !room.has(conn.user.id) || room.get(conn.user.id).conn !== conn) return;
     if (arena) arena.leave(conn.user.id);
-    if (store.groups.has(gid)) bjVacate(store.groups.get(gid), conn.user.id);
+    const g = store.groups.get(gid), rest = g ? lieDown(g, conn.user.id, room.get(conn.user.id)) : null;
+    if (g) bjVacate(g, conn.user.id);
     room.delete(conn.user.id);
     conn.user.seen = now();
-    cast(gid, { t: 'off', u: conn.user.id, seen: now() });
+    cast(gid, { t: 'off', u: conn.user.id, seen: now(), rest });
     if (!room.size) rooms.delete(gid);
+  }
+
+  // ---------- the sleepers ----------
+  // Søren: "hvis en bruger går offline, så lægger vedkommende sig ned der hvor han/hun stod da personen gik offline".
+  // g.rest[uid] = [x, y, a]: the middle of the body on the floor, and which way its feet point (a as a figure's
+  // facing: towards (sin a, cos a); the head is the other way). Kept with the group; one gets up there on coming back.
+  const LIE = 0.85;                                 // from the middle of a lying body to its head, and to its feet
+  const r2 = v => Math.round(v * 100) / 100;
+  function restSpot(g, uid, x, y, a0) {
+    const others = Object.entries(g.rest || {}).filter(([id]) => +id !== uid && !(rooms.get(g.id) || new Map()).has(+id)).map(e => e[1]);
+    const fits = (mx, my, a) => {
+      const dx = Math.sin(a) * LIE, dy = Math.cos(a) * LIE;
+      for (const k of [0, 0.5, 1, -0.5, -1]) if (!isFree(mx + dx * k, my + dy * k)) return false;
+      return others.every(q => Math.hypot(q[0] - mx, q[1] - my) > 1.0);
+    };
+    const angles = [0, 1, -1, 2, -2, 3, -3, 4].map(k => a0 + k * Math.PI / 4);
+    for (let r = 0; r <= 3.2; r += 0.35) {
+      const n = r ? Math.max(6, Math.round(r * 10)) : 1;
+      for (let k = 0; k < n; k++) {
+        const t = k / n * Math.PI * 2, mx = x + Math.cos(t) * r, my = y + Math.sin(t) * r;
+        for (const a of angles) if (fits(mx, my, a)) return [r2(mx), r2(my), r2(Math.atan2(Math.sin(a), Math.cos(a)))];
+      }
+    }
+    const [fx, fy] = nearestFree(x, y); return [r2(fx), r2(fy), r2(a0)];
+  }
+  // which way somebody was facing: the way they last walked (seated: towards the furniture), else out into the room
+  function facingOf(p) {
+    const st = p.sit && STATION[p.sit[0]];
+    if (st) { const q = st.seats && st.seats[p.sit[1]], c = st.box ? [st.box[0] + st.box[2] / 2, st.box[1] + st.box[3] / 2] : st.round ? [st.round[0], st.round[1]] : null; if (q && c) return Math.atan2(c[0] - q[0], c[1] - q[1]); }
+    const P = p.path; if (P.length > 1) { const a = P[P.length - 2], b = P[P.length - 1]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.05) return Math.atan2(b[0] - a[0], b[1] - a[1]); }
+    return 0;
+  }
+  function lieDown(g, uid, p) {
+    const [x, y] = here(p), spot = restSpot(g, uid, x, y, facingOf(p));
+    (g.rest || (g.rest = {}))[uid] = spot; store.saveGroup(g);
+    return spot;
+  }
+  // the server is stopped (an update): everybody lies down where they are, so that they get up there again
+  function sleepAll() {
+    for (const [gid, room] of rooms) { const g = store.groups.get(gid); if (g) for (const p of room.values()) lieDown(g, p.u.id, p); }
   }
 
   // Sends somebody walking. `sit` ([station, seat]) makes them sit down when they get there.
@@ -292,7 +334,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       p.conn.send(J({ t: 'out', g: g.id }));
       if (!room.size) rooms.delete(g.id);
     }
-    delete g.members[uid];
+    delete g.members[uid]; if (g.rest) delete g.rest[uid];
     store.saveGroup(g);
     cast(g.id, { t: 'gone', u: uid });
     if (text) addChat(g, null, text);
@@ -674,14 +716,14 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (!g || !g.members[u.id]) fail('Du er ikke med i den gruppe.');
       leaveRoom(conn);
       if (!rooms.has(g.id)) rooms.set(g.id, new Map());
-      const spot = nearestFree(ROOM.spawn[0] + (rand() - 0.5) * 2, ROOM.spawn[1] + rand() * 0.9);
+      const lay = g.rest && g.rest[u.id], spot = lay ? nearestFree(lay[0], lay[1]) : nearestFree(ROOM.spawn[0] + (rand() - 0.5) * 2, ROOM.spawn[1] + rand() * 0.9);      // up again where one lay, or in by the door
       rooms.get(g.id).set(u.id, { conn, u, path: [spot], t0: now(), sit: null, open: 0, busy: '', slot: '', net: 0, bj: false, fx: {}, drink: null });
       conn.gid = g.id;
       cast(g.id, { t: 'on', m: member(g, u.id) }, u.id);
       conn.send(J({
         t: 'room', g: { id: g.id, name: g.name, owner: g.owner, invite: isAdmin(g, u.id) ? g.invite : '' },
         mem: Object.keys(g.members).map(id => member(g, +id)), chat: g.chat.slice(-LIMITS.chatSend),
-        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), bj: g.bj ? bjSum(g.bj) : null, juke: jukeOf(g.id), now: now(),
+        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), bj: g.bj ? bjSum(g.bj) : null, juke: jukeOf(g.id), now: now(), up: lay || null,
       }));
     },
 
@@ -1228,5 +1270,5 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   if (ee && push) for (const g of store.groups.values()) for (const m of ee.ofGroup(g.id)) eeRound.set(m.code, m.round);
   for (const g of store.groups.values()) for (const t of Object.values(g.tables)) botSoon(g, t);
 
-  return { api, connect, message, disconnect, tidy, tick, eeChanged, arChanged, arEnded, arLeft, online: () => conns.size, adminKey: () => sign('admin:' + today()) };
+  return { api, connect, message, disconnect, tidy, tick, eeChanged, arChanged, arEnded, arLeft, sleepAll, online: () => conns.size, adminKey: () => sign('admin:' + today()) };
 }

@@ -228,6 +228,7 @@ const on = {
     closeArena();
     room.setName(m.g.name);
     room.setRoom(m.mem, mine());
+    if (m.up) room.wake(mine(), m.up);                                     // back again: one gets up from where one lay
     st.juke = m.juke || null;
     useView(viewWanted());
     $('#groupName').textContent = m.g.name;
@@ -251,7 +252,7 @@ const on = {
     if (sheet.kind === 'menu') openMenu();
   },
   on(m) { st.mem.set(m.m.id, m.m); room.join(m.m); renderFriends(); },
-  off(m) { const x = st.mem.get(m.u); if (x) { x.on = false; x.seen = m.seen; x.open = 0; } room.leave(m.u); renderFriends(); },
+  off(m) { const x = st.mem.get(m.u); if (x) { x.on = false; x.seen = m.seen; x.open = 0; x.rest = m.rest; } if (m.rest) room.sleep(m.u, m.rest); else room.leave(m.u); renderFriends(); },      // (gone: lies down and sleeps where they were)
   mem(m) {
     const x = st.mem.get(m.m.id);
     if (x) Object.assign(x, m.m); else if (m.m.name) st.mem.set(m.m.id, m.m);
@@ -516,7 +517,7 @@ function openActor(id) {
     let stake = 0;
     const seg = h('div', { class: 'seg' }, ECON.stakes.map(v => h('button', { class: v === 0 ? 'on' : '', disabled: st.me.chips < v, onclick: e => { stake = v; for (const b of seg.children) b.classList.toggle('on', b === e.currentTarget); } }, v ? String(v) : 'Ingen indsats')));
     body.push(h('div', { class: 'sec' }, 'Udfordr til 4 på stribe'), seg, h('button', { class: 'btn', onclick: () => { sheet.close(); send({ t: 'tnew', game: 'c4', stake, invite: id }); } }, 'Udfordr ' + m.name));
-  } else body.push(h('p', { class: 'hint' }, m.name + ' er ikke i klubhuset lige nu.'));
+  } else body.push(h('p', { class: 'hint' }, m.rest ? m.name + ' sover her i klubhuset, til ' + (LOOK.sex[m.look && m.look.sex] === 'f' ? 'hun' : 'han') + ' kommer igen.' : m.name + ' er ikke i klubhuset lige nu.'));
   sheet.open({ title: m.name, body, kind: 'actor' });
 }
 function emoteTiles() {

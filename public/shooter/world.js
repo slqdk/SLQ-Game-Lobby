@@ -593,7 +593,8 @@ export function buildWorld(THREE, scene, texLib) {
    * dæk 2.4 m), så man kan hoppe på det kørende tog og gå op. Bazooka ligger på
    * forreste vogn. Kørsel med uret set oppefra. Ringen er FRI af tårne/mure/huse
    * (lodrette rails x=±30, top/bund z=±27, hjørneradius 8). */
-  const TRAIN = { RX: 30, RZ: 27, CR: 8, CL: 6.0, CW: 3.0, DECK: 2.2, RAMP_LO: 0.35, SPEED: 9.0, GAP: 0.7, BRIDGE: 0.55 };
+  // (clubhouse) CAB: the engine's cab, from..to along the wagon; its roof is `h` over the deck and one can stand on it
+  const TRAIN = { RX: 30, RZ: 27, CR: 8, CL: 6.0, CW: 3.0, DECK: 2.2, RAMP_LO: 0.35, SPEED: 9.0, GAP: 0.7, BRIDGE: 0.55, CAB: { from: -3.0, to: -0.9, h: 0.5 } };
   const _seg = [];
   (function buildLoop() {
     const RX = TRAIN.RX, RZ = TRAIN.RZ, CR = TRAIN.CR, sx = RX - CR, sz = RZ - CR;
@@ -638,67 +639,13 @@ export function buildWorld(THREE, scene, texLib) {
       }
     }
   })();
-  // ---- vogn-mesh (KUN pynt — kollision bruger CL×CW-fodaftryk med dæk-top = DECK).
-  //      Små hjul tuckede ind, lav chassis, buffere; forreste vogn = lille lokomotiv.
-  //      Kørsel = +lokal Z (= front). Boarding sker via en separat platform (ikke rampe).
-  const steelMat = mat(0x3a3f45, 0.5), darkMat = mat(0x2a2c30, 0.6), WHEEL_R = 0.34;
-  // (clubhouse) a wheel one can see turning: a dark tyre, and on both faces light and dark wedges for spokes
-  let wheelGeo = null, wheelMat = null;
-  if (!HEADLESS) {
-    const P = [], N = [], C = [], put = function (geo, colOf) {
-      const g = geo.index ? geo.toNonIndexed() : geo, p = g.attributes.position, n = g.attributes.normal;
-      for (let i = 0; i < p.count; i++) { const c = colOf(Math.floor(i / 3)); P.push(p.getX(i), p.getY(i), p.getZ(i)); N.push(n.getX(i), n.getY(i), n.getZ(i)); C.push(c[0], c[1], c[2]); }
-    };
-    put(new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.18, 18, 1, true), function () { return [0.03, 0.03, 0.035]; });
-    for (let s = -1; s <= 1; s += 2) {
-      put(new THREE.CircleGeometry(WHEEL_R, 12).rotateX(-s * Math.PI / 2).translate(0, s * 0.09, 0), function (t) { return t % 2 ? [0.3, 0.32, 0.34] : [0.07, 0.075, 0.08]; });
-      put(new THREE.CircleGeometry(WHEEL_R * 0.3, 10).rotateX(-s * Math.PI / 2).translate(0, s * 0.094, 0), function () { return [0.42, 0.44, 0.46]; });
-    }
-    wheelGeo = new THREE.BufferGeometry();
-    wheelGeo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); wheelGeo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); wheelGeo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
-    wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.2 });
-  }
-  function buildCarMesh(kind, col) {
-    const CL = TRAIN.CL, CW = TRAIN.CW, D = TRAIN.DECK, g = new THREE.Group(), wr = WHEEL_R, wheels = [];
-    for (let a = -1; a <= 1; a++) for (let s = -1; s <= 1; s += 2) {     // 3 aksler x 2 sider, små hjul
-      const wh = new THREE.Mesh(wheelGeo, wheelMat);
-      wh.rotation.z = Math.PI / 2; wh.position.set(s * (CW / 2 - 0.12), wr, a * CL * 0.32); g.add(wh); wheels.push(wh);
-    }
-    g.userData.wheels = wheels;
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(CW - 0.2, 0.3, CL - 0.2), darkMat);
-    chassis.position.y = wr + 0.2; g.add(chassis);
-    for (let e = -1; e <= 1; e += 2) for (let s = -1; s <= 1; s += 2) {  // buffere
-      const bf = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.28, 8), steelMat);
-      bf.rotation.x = Math.PI / 2; bf.position.set(s * 0.8, wr + 0.3, e * (CL / 2 + 0.12)); g.add(bf);
-    }
-    const floorY = wr + 0.35, bodyH = D - floorY;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(CW, bodyH, CL), mat(col, 0.8, 'concrete', 1, 1));
-    body.position.y = floorY + bodyH / 2; body.castShadow = true; g.add(body);
-    for (let s = -1; s <= 1; s += 2) {                                   // lave sidekarme i kropsfarve
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.34, CL - 0.3), mat(col, 0.8, 'concrete', 1, 1));
-      rail.position.set(s * (CW / 2 - 0.05), D + 0.17, 0); g.add(rail);
-    }
-    if (kind === 'baz') {                                                // forreste = lokomotiv-agtig
-      const cab = new THREE.Mesh(new THREE.BoxGeometry(CW - 0.4, 0.9, 1.4), mat(0x552019, 0.75, 'concrete', 1, 1));
-      cab.position.set(0, D + 0.45, CL / 2 - 0.9); cab.castShadow = true; g.add(cab);
-      const win = new THREE.Mesh(new THREE.BoxGeometry(CW - 0.36, 0.32, 1.42), mat(0x10131a, 0.3));
-      win.position.set(0, D + 0.58, CL / 2 - 0.9); g.add(win);
-      const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.6, 12), mat(0x161616, 0.6));
-      funnel.position.set(0, D + 0.5, CL / 2 - 1.8); funnel.castShadow = true; g.add(funnel);
-      // (clubhouse) a flared top on the funnel (it smokes: game.js), a dome on the cab and a lamp in front
-      const flare = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.22, 0.16, 12), mat(0x161616, 0.6)); flare.position.set(0, D + 0.86, CL / 2 - 1.8); g.add(flare);
-      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x8a6a2a, 0.35)); dome.scale.set(1, 0.6, 1); dome.position.set(0, D + 0.9, CL / 2 - 0.9); g.add(dome);
-      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff0b8 })); lamp.position.set(0, D + 0.5, CL / 2 - 0.17); g.add(lamp);
-      const mnt = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.18, 0.8), steelMat);
-      mnt.position.set(0, D + 0.09, -0.6); g.add(mnt);                   // bazooka-mount
-    }
-    return g;
-  }
-  const CARDEFS = [{ kind: 'baz', col: 0x7a3b2e }, { kind: 'flat', col: 0x45505b }, { kind: 'flat', col: 0x50565e }];
-  const trainCars = CARDEFS.map(function (d, i) {
-    const g = buildCarMesh(d.kind, d.col);
+  // (clubhouse) What the train looks like is built in scenery.js: a tank engine, a tender and a van, hung on these
+  // empty groups. Collision is the same as ever: a footprint of CL x CW per wagon with a flat top at DECK, and on the
+  // engine the cab's roof a step higher (carTopLocal). Forwards is the group's +z.
+  const trainCars = ['baz', 'tender', 'van'].map(function (kind, i) {        // 'baz': the engine (the star rides on it)
+    const g = new THREE.Group();
     scene.add(g);
-    return { grp: g, kind: d.kind, off: i * (TRAIN.CL + TRAIN.GAP), cx: 0, cz: 0, dx: 1, dz: 0, wheels: HEADLESS ? [] : g.userData.wheels };
+    return { grp: g, kind: kind, off: i * (TRAIN.CL + TRAIN.GAP), cx: 0, cz: 0, dx: 1, dz: 0 };
   });
   let trainHead = 0;
   const bazCar = trainCars[0];
@@ -713,7 +660,9 @@ export function buildWorld(THREE, scene, texLib) {
   // lokalt vogn-koordinatsystem: along = langs kørsel, across = på tværs (venstre positiv)
   function carLocal(c, x, z) { const ex = x - c.cx, ez = z - c.cz; return { along: ex * c.dx + ez * c.dz, across: ex * (-c.dz) + ez * c.dx }; }
   function carWorld(c, along, across) { return { x: c.cx + along * c.dx + across * (-c.dz), z: c.cz + along * c.dz + across * c.dx }; }
-  function carTopLocal(c, along) { if (c.kind !== 'ramp') return TRAIN.DECK; const t = clamp((along + TRAIN.CL / 2) / TRAIN.CL, 0, 1); return TRAIN.RAMP_LO + (TRAIN.DECK - TRAIN.RAMP_LO) * t; }
+  // (clubhouse) the top of a wagon at a place along it: the deck, and on the engine the cab's roof (not over the
+  // gap behind it, where the plate to the next wagon lies at deck height)
+  function carTopLocal(c, along) { return c.kind === 'baz' && along >= TRAIN.CAB.from && along < TRAIN.CAB.to ? TRAIN.DECK + TRAIN.CAB.h : TRAIN.DECK; }
   // højeste togflade under fødderne (indenfor STEP) + hvilken vogn. BRIDGE bygger bro over koblingsgabet.
   function trainGround(x, z, feetY) {
     let best = -Infinity, car = -1;
@@ -827,7 +776,6 @@ export function buildWorld(THREE, scene, texLib) {
       const c = trainCars[i], p = loopAt(trainHead - c.off);
       c.cx = p.x; c.cz = p.z; c.dx = p.dx; c.dz = p.dz;
       c.grp.position.set(p.x, 0, p.z); c.grp.rotation.y = Math.atan2(p.dx, p.dz);
-      for (let k = 0; k < c.wheels.length; k++) c.wheels[k].rotation.x = trainHead / WHEEL_R;      // the wheels roll
     }
   }
   setTrain(0);

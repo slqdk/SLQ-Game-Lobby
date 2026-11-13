@@ -2,7 +2,7 @@
 // stairs: boxes, because that is what one walks on and hides behind. This file dresses it up, in the browser
 // only: hedges and trees of leaves that move in the wind, a meadow with tufts, flowers and worn paths, paving in
 // the two teams' yards, houses with roof timbers, shutters, flower boxes and smoking chimneys, a vaulted tunnel
-// with lamps, flags on the towers, a town around it all, a sky with clouds, birds and butterflies.
+// with lamps, flags on the towers, the steam train, a town around it all, a sky with clouds, birds and butterflies.
 //
 // Nothing here can be walked on, bumped into or hit: that is decided by world.js alone, and the server never
 // loads this file. world.js notes what there is to dress up in `world.decor` (and leaves out its own plain
@@ -834,6 +834,193 @@ export function dressWorld(THREE, scene, world, texLib, opt = {}) {
     for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) plain(balloons, new THREE.CylinderGeometry(0.04, 0.04, 2.6, 3), along(x + lx * 0.95, y - 11.9, z + lz * 0.95, lx * 0.22, 1, lz * 0.22), DARK);
   }
 
+  // ---------- the train ----------
+  // A small steam train: a tank engine in green with brass, a tender with coal, and a covered van. One still walks
+  // on a flat top 2.2 m up on each (world.js; the engine's cab roof half a metre higher): the tanks beside the
+  // boiler, the tender's lid and the van's roof boards are that top. Wheels turn and the engine's rods go round by
+  // how far the train has run. Everything is built in the wagon's own measure: z forwards, x across, y up.
+  const TR = world.TRAIN, DK = TR.DECK, CAB = TR.CAB, trainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.25 });
+  const GREEN = [0.04, 0.2, 0.09], GREEN_D = [0.03, 0.13, 0.06], BLACK = [0.03, 0.03, 0.035], IRON = [0.09, 0.09, 0.1], RED = [0.5, 0.05, 0.04], BRASS = [0.8, 0.52, 0.14], BRIGHT = [0.55, 0.57, 0.6], CREAM = [0.85, 0.72, 0.4], GOLD = [1.0, 0.68, 0.12], PLANK = [0.3, 0.13, 0.08];
+  const X1 = (x, y, z) => along(x, y, z, 1, 0, 0), Z1 = (x, y, z) => along(x, y, z, 0, 0, 1), RX = new THREE.Matrix4(), M5 = new THREE.Matrix4();
+  const turning = [], engine = {};
+  const starShape = new THREE.Shape(); for (let i = 0; i < 10; i++) { const a = i / 10 * 6.2832 + Math.PI / 2, r = i % 2 ? 0.42 : 1; if (i) starShape.lineTo(Math.cos(a) * r, Math.sin(a) * r); else starShape.moveTo(Math.cos(a) * r, Math.sin(a) * r); }
+  // a mesh of the train's own, hung on a wagon (or left to be moved every frame)
+  const hang = (B, grp, moving) => { const m = B.mesh(trainMat, { cast: true }); grp.add(m); m.matrixAutoUpdate = !!moving; m.frustumCulled = !moving; return m; };
+  // One axle with a spoked wheel at either end. o: { r, pin: how far out the crank pin sits (0: none), quarter: the
+  // far wheel's pin is a quarter turn ahead }
+  function axle(grp, y, z, o) {
+    const B = makeBatch(), R = o.r, XW = TR.CW / 2 - 0.12, col = o.col || RED;
+    for (const sd of [-1, 1]) {
+      RX.makeRotationX(sd > 0 && o.quarter ? Math.PI / 2 : 0);
+      const put = (geo, m, c) => B.add(geo, M5.copy(RX).multiply(m), { col: c });
+      put(new THREE.CylinderGeometry(R, R, 0.15, 26, 1, true), X1(sd * XW, 0, 0), BRIGHT);                                   // the tyre
+      put(new THREE.CylinderGeometry(R + 0.035, R + 0.035, 0.03, 26, 1, true), X1(sd * (XW - 0.06), 0, 0), BRIGHT);           // its flange
+      put(new THREE.RingGeometry(R - 0.075, R + 0.035, 26), at(sd * (XW + 0.076), 0, 0, 0, sd * Math.PI / 2, 0), BRIGHT);
+      put(new THREE.RingGeometry(R - 0.15, R - 0.07, 26), at(sd * (XW + 0.05), 0, 0, 0, sd * Math.PI / 2, 0), col);
+      put(new THREE.CircleGeometry(R + 0.03, 20), at(sd * (XW - 0.076), 0, 0, 0, -sd * Math.PI / 2, 0), IRON);                // the back of the wheel
+      for (let k = 0; k < (o.spokes || 10); k++) { const a = k / (o.spokes || 10) * 6.2832, q = (R - 0.1) / 2 + 0.04; put(new THREE.BoxGeometry(0.05, R - 0.16, 0.045 + 0.02 * (R > 0.45)), at(sd * (XW + 0.03), Math.cos(a) * q, Math.sin(a) * q, a, 0, 0), col); }
+      put(new THREE.CylinderGeometry(0.12, 0.12, 0.2, 12), X1(sd * (XW + 0.01), 0, 0), col);
+      put(new THREE.CircleGeometry(0.07, 10), at(sd * (XW + 0.112), 0, 0, 0, sd * Math.PI / 2, 0), BRIGHT);
+      if (o.pin) {
+        put(new THREE.RingGeometry(R - 0.34, R - 0.075, 10, 1, Math.PI * 1.5 - 0.62, 1.24), at(sd * (XW + 0.062), 0, 0, 0, sd * Math.PI / 2, 0), col);   // the weight opposite the pin
+        put(new THREE.CylinderGeometry(0.055, 0.055, 0.22, 8), X1(sd * (XW + 0.16), o.pin, 0), BRIGHT);
+      }
+    }
+    B.add(new THREE.CylinderGeometry(0.07, 0.07, 2 * XW, 8), X1(0, 0, 0), { col: IRON });
+    const m = hang(B, grp, true); m.position.set(0, y, z);
+    turning.push({ m, r: R });
+    return m;
+  }
+  // what every wagon has: a plate to stand the body on, buffer beams with buffers, a hook, steps
+  function underframe(B, top, len) {
+    box(B, 0, top - 0.04, 0, TR.CW, 0.08, len, { col: IRON });
+    for (const sd of [-1, 1]) {
+      box(B, sd * (TR.CW / 2 - 0.005), top - 0.1, 0, 0.03, 0.12, len, { col: RED });                       // the red edge
+      box(B, sd * 1.12, top - 0.33, 0, 0.08, 0.5, len - 0.7, { col: BLACK });                             // the frames
+      box(B, 0, top - 0.24, sd * (len / 2 - 0.07), TR.CW, 0.4, 0.14, { col: RED });                        // a buffer beam
+      box(B, 0, top - 0.3, sd * (len / 2 + 0.13), 0.1, 0.12, 0.3, { col: IRON });                          // the hook
+      for (const bx of [-0.86, 0.86]) {
+        B.add(new THREE.CylinderGeometry(0.085, 0.11, 0.24, 10), Z1(bx, top - 0.24, sd * (len / 2 + 0.12)), { col: IRON });
+        B.add(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 14), Z1(bx, top - 0.24, sd * (len / 2 + 0.265)), { col: BRIGHT });
+      }
+    }
+  }
+  // a frame of thin lining on a side that faces x, and a gold star in the middle of it
+  function lining(B, x, y0, y1, z0, z1, star) {
+    const sd = Math.sign(x), e = 0.09;
+    for (const y of [y0 + e, y1 - e]) box(B, x + sd * 0.006, y, (z0 + z1) / 2, 0.012, 0.028, z1 - z0 - 2 * e, { col: CREAM });
+    for (const z of [z0 + e, z1 - e]) box(B, x + sd * 0.006, (y0 + y1) / 2, z, 0.012, y1 - y0 - 2 * e, 0.028, { col: CREAM });
+    if (star) { const g = new THREE.ShapeGeometry(starShape); g.deleteAttribute('uv'); B.add(g, at(x + sd * 0.012, (y0 + y1) / 2, (z0 + z1) / 2, 0, sd * Math.PI / 2, 0, star), { col: GOLD }); }
+  }
+  // a plate over the gap to the next wagon, level with the top one walks on
+  const gangway = (B, len) => { box(B, 0, DK - 0.025, -len / 2 - 0.36, 1.5, 0.05, 0.86, { col: IRON }); for (const sd of [-1, 1]) box(B, sd * 0.72, DK + 0.0, -len / 2 - 0.36, 0.05, 0.07, 0.86, { col: BRIGHT }); };
+
+  for (const car of world.trainCars) {
+    const B = makeBatch(), L = TR.CL, W = TR.CW, g = car.grp;
+    if (car.kind === 'baz') {
+      // ----- the engine -----
+      const R = 0.5, AY = 0.2 + R, PL = AY + R + 0.08, PIN = 0.23, BY = 1.5, BR = DK - BY + 0.015;      // wheel, axle height, the plate's top, the boiler
+      underframe(B, PL, L);
+      // the boiler between the tanks, with bands; the smokebox in front of it with its door
+      B.add(new THREE.CylinderGeometry(BR, BR, 2.95, 22, 1, true), Z1(0, BY, 0.575), { col: GREEN });
+      for (const z of [-0.3, 0.75, 1.75]) B.add(new THREE.CylinderGeometry(BR + 0.012, BR + 0.012, 0.05, 22, 1, true), Z1(0, BY, z), { col: BRASS });
+      B.add(new THREE.CylinderGeometry(BR + 0.04, BR + 0.04, 0.85, 22, 1, true), Z1(0, BY, 2.475), { col: BLACK });
+      B.add(new THREE.CircleGeometry(BR + 0.04, 22), at(0, BY, 2.9), { col: BLACK });
+      B.add(new THREE.SphereGeometry(BR + 0.04, 22, 6, 0, 6.2832, 0, 1.05), M5.copy(Z1(0, BY, 2.795)).scale(V2.set(1, 0.28, 1)), { col: BLACK });      // the round door, a little domed
+      B.add(new THREE.TorusGeometry(BR - 0.12, 0.02, 5, 22), at(0, BY, 2.93), { col: BRIGHT });
+      for (const a of [0.5, -0.9]) box(B, 0, BY, 3.012, 0.035, 0.42, 0.03, { col: BRIGHT, rz: a });                      // the door's two handles
+      for (const y of [BY + 0.3, BY - 0.3]) box(B, -0.36, y, 2.97, 0.8, 0.045, 0.02, { col: IRON });                     // its hinges
+      // the chimney with its brass cap, the brass dome, two safety valves and a whistle
+      B.add(new THREE.CylinderGeometry(0.19, 0.25, 0.72, 16), at(0, DK + 0.4, 2.45), { col: BLACK });
+      B.add(new THREE.CylinderGeometry(0.26, 0.37, 0.1, 16, 1, true), at(0, DK + 0.09, 2.45), { col: BLACK });
+      B.add(new THREE.CylinderGeometry(0.3, 0.2, 0.16, 16), at(0, DK + 0.84, 2.45), { col: BRASS });
+      B.add(new THREE.CircleGeometry(0.25, 16), at(0, DK + 0.925, 2.45, -Math.PI / 2, 0, 0), { col: [0.005, 0.005, 0.005] });
+      B.add(new THREE.SphereGeometry(0.33, 18, 12), at(0, DK + 0.16, 1.25, 0, 0, 0, 1, 1.2, 1), { col: BRASS });
+      B.add(new THREE.CylinderGeometry(0.36, 0.38, 0.06, 18), at(0, DK + 0.02, 1.25), { col: BRASS });
+      for (const sx of [-0.12, 0.12]) { B.add(new THREE.CylinderGeometry(0.045, 0.06, 0.26, 8), at(sx, DK + 0.13, 0.15), { col: BRASS }); B.add(new THREE.SphereGeometry(0.05, 8, 6), at(sx, DK + 0.27, 0.15), { col: BRASS }); }
+      B.add(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 6), at(0.42, CAB.h + DK + 0.15, CAB.to - 0.25), { col: BRASS }); B.add(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8), at(0.42, CAB.h + DK + 0.3, CAB.to - 0.25), { col: BRASS });
+      // the tanks beside the boiler: their tops are where one walks
+      for (const sd of [-1, 1]) {
+        box(B, sd * 1.145, (PL + DK) / 2, 0.55, 0.71, DK - PL, 2.9, { col: GREEN });
+        box(B, sd * 1.145, DK - 0.004, 0.55, 0.69, 0.012, 2.88, { col: GREEN_D });                                       // the lid, a shade darker
+        B.add(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 12), at(sd * 1.15, DK + 0.02, 1.6), { col: BRASS });          // the filler
+        lining(B, sd * 1.5, PL, DK, -0.9, 2.0, 0.24);
+        B.add(new THREE.CylinderGeometry(0.018, 0.018, 2.7, 6), Z1(sd * 1.52, DK - 0.14, 0.55), { col: BRASS });         // a handrail along the tank
+      }
+      // the cab: sheets with round windows front and back, open sides with handrails, a roof one can stand on
+      const c0 = CAB.from, c1 = CAB.to, RY = DK + CAB.h, cm = (c0 + c1) / 2;
+      for (const [z, f] of [[c1 - 0.03, 1], [c0 + 0.03, -1]]) {
+        box(B, 0, (PL + RY) / 2, z, W - 0.04, RY - PL, 0.06, { col: GREEN });
+        for (const sx of [-0.98, 0.98]) { B.add(new THREE.RingGeometry(0.13, 0.17, 16), at(sx, DK + 0.25, z + f * 0.034, 0, f > 0 ? 0 : Math.PI, 0), { col: BRASS }); B.add(new THREE.CircleGeometry(0.13, 16), at(sx, DK + 0.25, z + f * 0.033, 0, f > 0 ? 0 : Math.PI, 0), { col: [0.02, 0.03, 0.05] }); }
+      }
+      for (const sd of [-1, 1]) {
+        box(B, sd * (W / 2 - 0.03), PL + 0.4, cm, 0.06, 0.8, c1 - c0, { col: GREEN });                                   // the lower side sheet
+        for (const z of [c0 + 0.16, c1 - 0.16]) box(B, sd * (W / 2 - 0.03), (PL + 0.8 + RY) / 2, z, 0.06, RY - PL - 0.8, 0.32, { col: GREEN });
+        lining(B, sd * 1.5, PL, PL + 0.8, c0, c1, 0);
+        for (const z of [c0 + 0.34, c1 - 0.34]) B.add(new THREE.CylinderGeometry(0.02, 0.02, RY - PL - 0.85, 6), at(sd * 1.51, (PL + 0.8 + RY) / 2, z), { col: BRASS });
+        box(B, sd * 1.62, 0.56, cm, 0.3, 0.04, 0.5, { col: IRON }); box(B, sd * 1.52, 0.86, cm, 0.04, 0.62, 0.06, { col: IRON });      // a step up to the cab
+      }
+      box(B, 0, RY - 0.03, cm - 0.02, W + 0.16, 0.06, c1 - c0 + 0.12, { col: [0.05, 0.05, 0.055] });                      // the roof
+      for (const z of [c0 - 0.05, c1 + 0.01]) box(B, 0, RY + 0.01, z, W + 0.18, 0.025, 0.05, { col: BRIGHT });
+      // inside: the boiler's back with the fire door aglow, two gauges, the regulator
+      B.add(new THREE.CircleGeometry(BR, 20), at(0, BY, c1 - 0.065, 0, Math.PI, 0), { col: BLACK });
+      box(B, 0, BY - 0.25, c1 - 0.08, 0.42, 0.3, 0.03, { col: [5, 1.6, 0.25] }); box(B, 0, BY - 0.25, c1 - 0.075, 0.5, 0.38, 0.02, { col: IRON });
+      for (const sx of [-0.3, 0.3]) B.add(new THREE.CircleGeometry(0.07, 10), at(sx, BY + 0.38, c1 - 0.07, 0, Math.PI, 0), { col: [0.9, 0.9, 0.85] });
+      box(B, 0.1, BY + 0.15, c1 - 0.14, 0.5, 0.035, 0.035, { col: BRASS, rz: 0.4 });
+      box(B, 0, PL + 0.02, cm, W - 0.2, 0.04, c1 - c0 - 0.1, { col: [0.2, 0.12, 0.07] });                                 // the wooden floor
+      // the cylinders with their steam chests, and the bars the crosshead slides between
+      for (const sd of [-1, 1]) {
+        B.add(new THREE.CylinderGeometry(0.27, 0.27, 0.86, 16, 1, true), Z1(sd * 1.5, AY + 0.03, 2.25), { col: GREEN });
+        for (const [z, f] of [[2.68, 0], [1.82, Math.PI]]) B.add(new THREE.CircleGeometry(0.27, 16), at(sd * 1.5, AY + 0.03, z, 0, f, 0), { col: BRIGHT });
+        box(B, sd * 1.5, AY + 0.4, 2.25, 0.32, 0.22, 0.7, { col: BLACK });
+        for (const dy of [0.12, -0.12]) box(B, sd * 1.585, AY + dy, 1.5, 0.05, 0.04, 0.66, { col: BRIGHT });
+        box(B, sd * 1.5, AY + 0.22, 1.2, 0.2, 0.3, 0.05, { col: IRON });
+        box(B, sd * 1.3, 0.42, 2.9, 0.04, 0.34, 0.1, { col: IRON });                                                       // a guard iron ahead of the wheels
+      }
+      // a lamp in front
+      box(B, 0, PL + 0.16, L / 2 - 0.12, 0.2, 0.26, 0.18, { col: BLACK }); B.add(new THREE.CircleGeometry(0.075, 12), at(0, PL + 0.17, L / 2 - 0.028), { col: [6, 5.2, 3] });
+      gangway(B, L);
+      hang(B, g);
+      // what moves: three axles, and on either side a coupling rod, a connecting rod and a crosshead
+      const AZ = [-1.5, -0.1, 1.3], CL2 = 1.62;
+      for (const z of AZ) axle(g, AY, z, { r: R, pin: PIN, quarter: true });
+      engine.r = R; engine.sides = [-1, 1].map(sd => {
+        const cr = makeBatch(), cn = makeBatch(), ch = makeBatch();
+        box(cr, 0, 0, 0, 0.05, 0.1, AZ[2] - AZ[0], { col: BRIGHT }); for (const z of AZ) cr.add(new THREE.CylinderGeometry(0.095, 0.095, 0.06, 10), X1(0, 0, z - AZ[1]), { col: BRIGHT });
+        box(cn, 0, 0, CL2 / 2, 0.045, 0.085, CL2, { col: BRIGHT }); cn.add(new THREE.CylinderGeometry(0.1, 0.1, 0.055, 10), X1(0, 0, 0), { col: BRIGHT }); cn.add(new THREE.CylinderGeometry(0.07, 0.07, 0.055, 10), X1(0, 0, CL2), { col: BRIGHT });
+        box(ch, 0, 0, 0, 0.1, 0.2, 0.17, { col: IRON }); ch.add(new THREE.CylinderGeometry(0.028, 0.028, 0.62, 6), Z1(-0.08 * sd, 0.03, 0.39), { col: BRIGHT });
+        return { x: sd * 1.515, x2: sd * 1.585, ph: sd > 0 ? Math.PI / 2 : 0, cr: hang(cr, g, true), cn: hang(cn, g, true), ch: hang(ch, g, true) };
+      });
+      engine.at = (th) => { for (const s of engine.sides) { const a = th + s.ph, py = PIN * Math.cos(a), pz = PIN * Math.sin(a); s.cr.position.set(s.x, AY + py, AZ[1] + pz); s.cn.position.set(s.x2, AY + py, AZ[1] + pz); s.cn.rotation.x = Math.asin(py / CL2); s.ch.position.set(s.x2, AY, AZ[1] + pz + Math.sqrt(CL2 * CL2 - py * py)); } };
+    } else if (car.kind === 'tender') {
+      // ----- the tender: water in the tank, coal on top at the front -----
+      const R = 0.4, AY = 0.2 + R, PL = AY + R + 0.08, TY = DK - 0.1;
+      underframe(B, PL, L);
+      box(B, 0, (PL + TY) / 2, 0, W - 0.1, TY - PL, L - 0.3, { col: GREEN });
+      for (const sd of [-1, 1]) { B.add(new THREE.CylinderGeometry(0.06, 0.06, L - 0.3, 8), Z1(sd * (W / 2 - 0.05), TY, 0), { col: GREEN }); B.add(new THREE.CylinderGeometry(0.06, 0.06, W - 0.1, 8), X1(0, TY, sd * (L / 2 - 0.15)), { col: GREEN }); lining(B, sd * (W / 2 - 0.05), PL, TY, -L / 2 + 0.15, L / 2 - 0.15, 0.27); }
+      box(B, 0, DK - 0.05, -1.6, W - 0.22, 0.1, 2.5, { col: GREEN_D });                                                    // the lid over the water
+      B.add(new THREE.CylinderGeometry(0.24, 0.26, 0.07, 14), at(0, DK + 0.03, -2.1), { col: BRASS });
+      // the coal: a heap of lumps, a little higher than the top one walks on
+      const coal = new THREE.IcosahedronGeometry(1, 3), cp = coal.attributes.position;
+      for (let i = 0; i < cp.count; i++) { const x = cp.getX(i), y = cp.getY(i), z = cp.getZ(i), k = 0.86 + 0.34 * noise(x * 3.1 + 5, y * 3.1, z * 3.1) + 0.1 * noise(x * 9, y * 9 + 3, z * 9); cp.setXYZ(i, x * k, y * k, z * k); }
+      coal.computeVertexNormals(); coal.deleteAttribute('uv');
+      box(B, 0, TY + 0.004, 1.25, W - 0.24, 0.012, 3.2, { col: [0.02, 0.02, 0.022] });
+      B.add(coal, at(0, DK - 0.36, 1.2, 0, 0, 0, 1.02, 0.42, 1.2), { col: (x, y, z) => { const k = 0.02 + 0.05 * noise(x * 14, y * 14, z * 14); return [k, k, k * 1.1]; } });
+      for (const sd of [-1, 1]) { for (const y of [0.14, 0.3]) B.add(new THREE.CylinderGeometry(0.02, 0.02, 3.1, 6), Z1(sd * (W / 2 - 0.08), DK + y, 1.25), { col: IRON }); for (const z of [-0.3, 1.25, 2.8]) B.add(new THREE.CylinderGeometry(0.025, 0.025, 0.36, 6), at(sd * (W / 2 - 0.08), DK + 0.14, z), { col: IRON }); }
+      gangway(B, L);
+      hang(B, g);
+      for (const z of [-1.95, 0, 1.95]) axle(g, AY, z, { r: R, spokes: 8 });
+    } else {
+      // ----- the van: boards, iron straps, a sliding door on either side, a roof with a walk along its top -----
+      const R = 0.4, AY = 0.2 + R, PL = AY + R + 0.08, EY = DK - 0.09, HW = W / 2 - 0.07, HL = L / 2 - 0.14;
+      underframe(B, PL, L);
+      box(B, 0, (PL + EY) / 2, 0, 2 * HW - 0.06, EY - PL, 2 * HL - 0.06, { col: [0.03, 0.02, 0.015] });                    // the dark behind the boards
+      const board = (x, z, w, d, k) => box(B, x, (PL + EY) / 2, z, w, EY - PL, d, { col: [PLANK[0] * k, PLANK[1] * k, PLANK[2] * k] });
+      for (const sd of [-1, 1]) {
+        for (let i = 0; i < 30; i++) { const z = -HL + (i + 0.5) * (2 * HL / 30); if (Math.abs(z) > 0.78) board(sd * HW, z, 0.05, 2 * HL / 30 - 0.012, 0.78 + rnd() * 0.44); }
+        for (let i = 0; i < 8; i++) board(sd * (HW + 0.04), -0.75 + (i + 0.5) * 0.1875, 0.05, 0.176, 0.9 + rnd() * 0.4);    // the door, a board's thickness out
+        box(B, sd * (HW + 0.075), EY - 0.07, 0.75, 0.03, 0.04, 3.1, { col: IRON }); box(B, sd * (HW + 0.075), PL + 0.06, 0.75, 0.03, 0.04, 3.1, { col: IRON });      // the rails it slides on
+        box(B, sd * (HW + 0.08), (PL + EY) / 2, -0.62, 0.03, 0.2, 0.04, { col: BRIGHT });                                 // its handle
+        for (const z of [-HL + 0.03, -0.82, 0.82, HL - 0.03]) box(B, sd * (HW + 0.03), (PL + EY) / 2, z, 0.035, EY - PL, 0.07, { col: IRON });
+        for (const [zc, f] of [[-(HL + 0.82) / 2, 1], [(HL + 0.82) / 2, -1]]) box(B, sd * (HW + 0.032), (PL + EY) / 2, zc, 0.03, 0.05, Math.hypot(HL - 0.82, EY - PL) - 0.1, { col: IRON, rx: f * Math.atan2(EY - PL, HL - 0.82) });
+        for (let i = 0; i < 14; i++) { const x = -HW + (i + 0.5) * (2 * HW / 14); box(B, x, (PL + EY) / 2, sd * HL, 2 * HW / 14 - 0.012, EY - PL, 0.05, { col: [PLANK[0] * (0.8 + rnd() * 0.4), PLANK[1] * (0.8 + rnd() * 0.4), PLANK[2] * (0.8 + rnd() * 0.4)] }); }
+        for (const x of [-HW, HW]) box(B, x, (PL + EY) / 2, sd * (HL + 0.03), 0.07, EY - PL, 0.035, { col: IRON });
+      }
+      // the roof: a low arch of tarred cloth over ribs, and boards along the middle to walk on
+      const N = 10, RISE = 0.07, top = x => EY + 0.02 + RISE * (1 - (x / (HW + 0.12)) * (x / (HW + 0.12)));
+      for (let i = 0; i < N; i++) {
+        const x0 = -(HW + 0.12) + i * 2 * (HW + 0.12) / N, x1 = x0 + 2 * (HW + 0.12) / N, y0 = top(x0), y1 = top(x1), z0 = -HL - 0.12, z1 = HL + 0.12, n = NV.set(y0 - y1, x1 - x0, 0).normalize();
+        for (const p of [[x0, y0, z1], [x1, y1, z1], [x1, y1, z0], [x0, y0, z1], [x1, y1, z0], [x0, y0, z0]]) B.vert(p[0], p[1], p[2], n.x, n.y, n.z, 0, 0, [0.045, 0.047, 0.052]);
+      }
+      for (const z of [-HL - 0.12, HL + 0.12]) box(B, 0, EY + 0.0, z, 2 * HW + 0.24, 0.07, 0.03, { col: IRON });
+      for (const x of [-0.26, 0, 0.26]) box(B, x, DK - 0.012, 0, 0.24, 0.024, 2 * HL + 0.1, { col: [0.36, 0.25, 0.14] });
+      // a red lamp at the tail
+      box(B, 0.9, PL + 0.5, -L / 2 + 0.04, 0.16, 0.22, 0.14, { col: BLACK }); B.add(new THREE.CircleGeometry(0.06, 12), at(0.9, PL + 0.5, -L / 2 - 0.032, 0, Math.PI, 0), { col: [7, 0.5, 0.3] });
+      hang(B, g);
+      for (const z of [-1.8, 1.8]) axle(g, AY, z, { r: R, spokes: 8, col: IRON });
+    }
+  }
+
   // ---------- the sky ----------
   // One big dome that follows the eye: blue that pales towards the haze at the horizon, the sun with warmth around
   // it, and clouds worked out for every point of the sky (soft heaps that drift, lit from the sun's side, with thin
@@ -938,6 +1125,7 @@ export function dressWorld(THREE, scene, world, texLib, opt = {}) {
     // every frame. t: seconds, any clock that runs evenly
     tick(dt, t) {
       time.value = t;
+      { const head = world.trainHead(); for (const w of turning) w.m.rotation.x = head / w.r; if (engine.at) engine.at(head / engine.r); }
       craneArm.rotation.y = 0.6 + 1.3 * Math.sin(t * 0.045);
       bigWheel.rotation.set(0, wheel.rot || 0, t * 0.07, 'YXZ');
       drift.rotation.y = t * 0.0045; drift.position.y = 2.5 * Math.sin(t * 0.11);

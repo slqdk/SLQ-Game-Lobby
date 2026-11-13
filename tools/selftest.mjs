@@ -641,6 +641,8 @@ section('skydespillet: banen, og hvor robotterne kan gå');
     return top > 1 && Math.abs(p.x - H.cx) < H.w / 2 - 0.3 && Math.abs(p.z - H.cz) < H.d / 2 - 0.3;
   })));
   check('toget kører i ring og er samme sted til samme tid', (() => { w.setTrain(50); const a = [w.bazCar.cx, w.bazCar.cz]; w3.setTrain(50); w.setTrain(50 + w.LOOP_L); return Math.hypot(a[0] - w3.bazCar.cx, a[1] - w3.bazCar.cz) < 1e-9 && Math.hypot(a[0] - w.bazCar.cx, a[1] - w.bazCar.cz) < 1e-6; })());
+  { w.setTrain(0); const c = w.bazCar, T = w.TRAIN, on = (al, y) => { const p = w.carWorld(c, al, 0); return w.trainGround(p.x, p.z, y).h; };
+    check('på lokomotivet går man på tankene, et trin op på førerhusets tag, og pladen bag det ligger i dækhøjde', on(1, T.DECK) === T.DECK && on(-2, T.DECK) === T.DECK + T.CAB.h && on(-2, T.DECK - 1) === -Infinity && on(-3.3, T.DECK) === T.DECK && T.CAB.h <= STEP && w.trainCars.length === 3, [on(1, T.DECK), on(-2, T.DECK), on(-2, T.DECK - 1), on(-3.3, T.DECK)].join(' ')); }
 
   const nav = buildNav(w, [[0, -52, 0], [0, 52, 0]]);
   check('gå-nettet lader banen være, som den var', sig([w.colliders, w.surfaces]) === sig([w3.colliders, w3.surfaces]));

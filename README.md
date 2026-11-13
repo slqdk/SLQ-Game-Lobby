@@ -5,7 +5,8 @@ A clubhouse for a group of friends. Each group gets a drawn room where everybody
 What is in it:
 
 - **Groups** with an owner, admins and an invitation link. An account is a name and a password.
-- **The clubhouse**: a 2D room seen from the front and a little from above. Click or tap the floor to walk, the furniture to use it, another avatar to tease or challenge. Works with a mouse and on a phone.
+- **The clubhouse in 3D**: a western saloon with a casino wing. Follow your figure with the camera, look through its eyes (with your glass in your hand), or see the whole room from the front; walk by pressing the floor or with W A S D. The drawn, flat clubhouse is still there as a fourth view.
+- **The flat clubhouse**: a 2D room seen from the front and a little from above. Click or tap the floor to walk, the furniture to use it, another avatar to tease or challenge. Works with a mouse and on a phone.
 - **Avatars** you put together yourself (skin, hair, face, clothes), plus hats, glasses and more from the kiosk.
 - **Chips** (jetoner): one wallet per player. 100 for showing up each day, a reward for every finished game against a friend, and the pot when you play for a stake. Spent in the bar, in the kiosk and on teasing.
 - **Teasing**: snowball, tomato, water balloon, cream pie, banana peel, tickle feather, whoopee cushion, rain cloud, turning somebody into a hen; and the friendly ones, confetti and a hug. Only looks, and it wears off. "Forstyr ikke" switches it off both ways.

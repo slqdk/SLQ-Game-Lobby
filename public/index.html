@@ -39,6 +39,14 @@
 
   <main id="stage">
     <canvas id="room"></canvas>
+    <canvas id="room3d" hidden></canvas>
+    <canvas id="roomOver" hidden></canvas>
+    <div id="viewBar" class="seg" hidden role="group" aria-label="Visning">
+      <button data-view="follow" title="Kameraet følger din figur (V skifter)">Følg</button>
+      <button data-view="eyes" title="Se med din figurs egne øjne">Øjne</button>
+      <button data-view="over" title="Hele saloonen forfra">Oversigt</button>
+      <button data-view="flat" title="Den tegnede, flade klub">Flad</button>
+    </div>
     <aside id="friends" hidden>
       <div class="phead"><b>Klubben</b><button class="x" data-close="friends" aria-label="Luk">✕</button></div>
       <div id="friendList"></div>

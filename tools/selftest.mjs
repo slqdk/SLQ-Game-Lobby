@@ -731,6 +731,32 @@ section('skydespillet: banen, og hvor robotterne kan gå');
   check('en hurtig kugle springer ikke gennem en person eller ud gennem hækken', hit1 === 'body' && wall === 'wall' && s2.z < 55.5);
 }
 
+section('klubhuset i 3D: saloonen og figurerne');
+{
+  // built here without a screen: the saloon's furniture (every piece where the paths expect it), and a figure
+  // put through everything a member can do
+  const THREE = await import('../public/shooter/vendor/three.module.min.js'), N = nullThree();
+  const hadDoc = 'document' in globalThis;
+  if (!hadDoc) globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => N }) };
+  const { makeKit } = await import('../public/js/saloon/kit.js'), { buildSaloon, SEAT_H } = await import('../public/js/saloon/place.js'), { makePeople } = await import('../public/js/saloon/people.js');
+  const sal = buildSaloon(THREE, makeKit(THREE), 'Torsdagsklubben');
+  if (!hadDoc) delete globalThis.document;
+  const named = STATIONS.filter(st => st.name), finite = o => { let ok = true; o.traverse(m => { if (m.isMesh) { const a = m.geometry.attributes.position.array; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) ok = false; } if (![m.position.x, m.position.y, m.position.z, m.quaternion.x, m.quaternion.w, m.scale.x, m.scale.y].every(Number.isFinite)) ok = false; }); return ok; };
+  check('hvert møbel i saloonen kan trykkes på og har et skilt', named.every(st => sal.picks.some(q => q.id === st.id) && sal.signs.some(q => q[0] === st.id)), named.filter(st => !sal.picks.some(q => q.id === st.id)).map(st => st.id).join());
+  check('møblerne står, hvor stierne går udenom dem', sal.picks.every(q => { const st = STATION[q.id], b = st.box, r = st.round; return b ? Math.abs(q.box.min.x - b[0]) < 1e-9 && Math.abs(q.box.max.z - b[1] - b[3]) < 1e-9 : r ? Math.abs(q.box.min.x - (r[0] - r[2])) < 1e-9 : true; }) && SEAT_H.high > SEAT_H.low);
+  let tris = 0; sal.root.traverse(m => { if (m.isMesh) tris += m.geometry.attributes.position.count / 3; });
+  check('saloonen bygges uden skærm og er ikke for tung', finite(sal.root) && tris > 8000 && tris < 60000 && (() => { sal.setCasino({ pot: 1234, lines: [['Søren', 40], ['Mads', -15]] }); sal.setName('En anden klub'); sal.setMusic(true); sal.spin('slot2', 2, 1); sal.swing(); for (let t = 0; t < 3; t += 0.1) sal.tick(0.1, t, t > 1 ? [10, 2] : null); return finite(sal.root); })(), Math.round(tris) + ' trekanter');
+  const people = makePeople(THREE), who = people.person(randomLook(7)), base = { phase: 1.3, walk: 0, seed: 2, emote: '', drink: null, talk: false }, st0 = { T: 5, seat: '', seatY: 0, fill: 1, sip: 0, buzz: 0, fx: {}, et: 0.6, hen: false, first: false };
+  const poses = [[base, st0], [{ ...base, walk: 1 }, st0], [{ ...base, talk: true }, { ...st0, buzz: 5 }]];
+  for (const seat of ['low', 'high', 'sofa']) poses.push([base, { ...st0, seat, seatY: SEAT_H[seat] }]);
+  for (const k of Object.keys(DRINKS)) poses.push([{ ...base, drink: { k } }, { ...st0, sip: 0.7, fill: 0.4 }], [{ ...base, drink: { k }, emote: 'cheers' }, { ...st0, seat: 'high', seatY: SEAT_H.high }]);
+  for (const e of ['wave', 'dance', 'laugh', 'cheer', 'cry', 'sleep', 'cheers']) poses.push([{ ...base, emote: e }, st0]);
+  for (const k of Object.keys(PRANKS)) for (const age of [0.1, 1.5, 3.5]) poses.push([base, { ...st0, fx: { [k]: age }, hen: k === 'chicken' && age > 1 }]);
+  poses.push([base, { ...st0, first: true }]);
+  check('en figur kan gå, sidde, drikke af hvert glas, gøre alle fagter og blive drillet på alle måder', poses.every(([a, o]) => { who.pose(a, o); return finite(who.group); }), poses.length + ' stillinger');
+  who.dispose(); sal.dispose();
+}
+
 section('skydespillet: en kamp i arkaden');
 {
   const idA = A.me().id, idB = B.me().id, idC = C.me().id;

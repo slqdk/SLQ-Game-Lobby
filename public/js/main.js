@@ -32,7 +32,7 @@ const st = {
 const RENDER = { c4: renderC4, ludo: renderLudo, poker: renderPoker, yatzy: renderYatzy, meyer: renderMeyer };
 const BUSY = { ee: 'EagleEye Commander', shooter: 'skydespillet' };
 const app = $('#app');
-let room = null, demoTimer = 0, jukeEnd = 0, jukeRetry = 0, jukeTries = 0;
+let room = null, flat = null, deep = null, demoTimer = 0, jukeEnd = 0, jukeRetry = 0, jukeTries = 0;       // room: the clubhouse on screen, flat (room.js) or in 3D (room3d.js)
 
 const now = () => Date.now() + st.skew;
 const send = m => st.sock && st.sock.send(m);
@@ -227,6 +227,7 @@ const on = {
     room.setName(m.g.name);
     room.setRoom(m.mem, mine());
     st.juke = m.juke || null;
+    useView(viewWanted());
     $('#groupName').textContent = m.g.name;
     $('#chatlog').replaceChildren();
     for (const c of m.chat) addChat(c, true);
@@ -419,6 +420,40 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && document.activeElement !== $('#chatInput')) { $('#chatInput').focus(); e.preventDefault(); }
 });
 
+// ---------- the clubhouse in 3D, or flat ----------
+// Four ways to see it: 'follow' (the camera behind one's figure), 'eyes' (through its eyes), 'over' (the whole saloon
+// from the front) and 'flat' (the drawn clubhouse of old). The first three are the same saloon in 3D (room3d.js,
+// fetched when first needed); whoever is shown at the moment is handed over when one switches.
+const viewWanted = () => { const v = load('slq-room'); return ['follow', 'eyes', 'over', 'flat'].includes(v) ? v : matchMedia('(max-width: 760px), (pointer: coarse)').matches ? 'over' : 'follow'; };
+const keysOn = () => st.view === 'room' && !sheet.isOpen && !arenaOpen() && $('#embed').hidden;
+const sip = () => send({ t: 'emote', k: 'sip' });
+let viewBusy = false;
+async function useView(v) {
+  if (viewBusy) return;
+  viewBusy = true;
+  try {
+    if (v !== 'flat' && !deep) {
+      try { const mod = await import('./room3d.js'); deep = mod.createRoom3D($('#room3d'), $('#roomOver'), { onActor, onStation, onFloor, keysOn, onSip: sip }); }
+      catch (e) { console.error(e); toast('Saloonen i 3D kunne ikke starte i denne browser. Du får den flade klub.'); v = 'flat'; }
+    }
+    const next = v === 'flat' ? flat : deep;
+    if (next !== room) {
+      const who = room.snapshot(), was = room;
+      was.stop();
+      room = next;
+      room.setName(st.g ? st.g.name : ''); room.setRoom(who, st.g ? mine() : 0);
+      $('#room').hidden = v !== 'flat'; $('#room3d').hidden = $('#roomOver').hidden = v === 'flat';
+      room.start(); room.resize();
+      if (st.g) { tablesChanged(); casinoChanged(); }
+      musicSync();
+    }
+    if (v !== 'flat') { deep.setView(v); if (st.g && !load('slq-3d-tip')) { save('slq-3d-tip', '1'); toast('Træk for at se dig om. Gå ved at trykke på gulvet eller med W A S D. V skifter visning, E tager en tår af glasset.', { ms: 10000 }); } }
+    save('slq-room', v);
+    $('#viewBar').hidden = false;
+    for (const b of $('#viewBar').children) b.classList.toggle('on', b.dataset.view === v);
+  } finally { viewBusy = false; }
+}
+
 // ---------- clicks in the room ----------
 function onFloor(x, y) {
   if (st.view !== 'room') return;
@@ -484,7 +519,8 @@ function dndSwitch() {
 }
 function openSelf() {
   sheet.open({ title: st.me.name, kind: 'self', body: [h('div', { class: 'sec' }, 'Fagter'), emoteTiles(),
-    room.sitting(mine()) === 'bar' ? h('button', { class: 'btn', onclick: openBar }, 'Bestil i baren') : null, dndSwitch(),
+    room.sitting(mine()) === 'bar' ? h('button', { class: 'btn', onclick: openBar }, 'Bestil i baren') : null,
+    h('button', { class: 'btn alt', onclick: () => { sheet.close(); sip(); } }, 'Tag en tår af glasset'), dndSwitch(),
     h('div', { class: 'row' }, h('button', { class: 'btn alt', onclick: openWardrobe }, 'Garderoben'), h('button', { class: 'btn alt', onclick: openShop }, 'Kiosken'))] });
 }
 $('#btnEmote').addEventListener('click', () => sheet.open({ title: 'Fagter', kind: 'emote', body: emoteTiles() }));
@@ -1033,7 +1069,8 @@ on.ptest = m => {
 // ---------- start ----------
 async function boot() {
   try { await Promise.race([document.fonts.load('600 16px Fredoka'), new Promise(r => setTimeout(r, 1500))]); } catch {}
-  room = createRoom($('#room'), { onActor, onStation, onFloor });
+  room = flat = createRoom($('#room'), { onActor, onStation, onFloor });
+  for (const b of $('#viewBar').children) b.addEventListener('click', () => useView(b.dataset.view));
   new ResizeObserver(() => room.resize()).observe($('#stage'));
   // Sound is made, or woken, by any press or key (see sfx.js). A tune that waited for that starts then.
   const press = () => { unlock(); if (st.juke && !playing()) setTimeout(musicSync, 120); };
@@ -1052,6 +1089,6 @@ async function boot() {
   demo();
   room.start();
   if (st.token) connect(); else showWelcome();
-  window.SLQ = { st, room, send };
+  window.SLQ = { st, get room() { return room; }, send };
 }
 boot();

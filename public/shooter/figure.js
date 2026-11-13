@@ -147,12 +147,14 @@ export function makeFigures(THREE, arsenal) {
     const head = new THREE.Group(); head.position.y = 1.08; head.rotation.order = 'YXZ'; upper.add(head);
     const skull = part(head, G.sphere, skin, 0.42, 0.42, 0.42, 0, 0, 0, true);
     const eyes = pick('eyes'), eyeM = opt.bot ? mat(0x7fe8ff, 0.3, { emissive: 0x39c8f0, emissiveIntensity: 1.2 }) : ink;
+    const eyeParts = [];
     for (const s of [-1, 1]) {
       if (eyes === 'round' && !opt.bot) part(head, G.sphere, mat(0xffffff, 0.5), 0.085, 0.085, 0.04, s * 0.15, 0.06, 0.375);
       const e = part(head, G.sphere, eyeM, 0.05, eyes === 'happy' || eyes === 'sleepy' ? 0.022 : 0.05, 0.03, s * 0.15, eyes === 'sleepy' ? 0.03 : 0.06, 0.395);
       if (eyes === 'happy') e.rotation.z = s * 0.25;
+      eyeParts.push(e);
     }
-    part(head, G.box, ink, 0.13, 0.028, 0.03, 0, -0.13, 0.39);
+    const mouth = part(head, G.box, ink, 0.13, 0.028, 0.03, 0, -0.13, 0.39);
     if (!opt.bot) {
       hair(head, pick('hair'), hairM);
       const beard = pick('beard');
@@ -180,7 +182,8 @@ export function makeFigures(THREE, arsenal) {
     if (tag) root.add(tag);
 
     // ---- moving ----
-    const f = { group: root, weaponId: '', walk: 0, flashT: 0, shootT: 0, deadT: -1, tag };
+    // parts: the pieces that move, for whoever poses the figure themselves (the clubhouse does; the shooter uses update)
+    const f = { group: root, weaponId: '', walk: 0, flashT: 0, shootT: 0, deadT: -1, tag, parts: { body, upper, head, legs, arms, hands, torso, skull, mouth, eyes: eyeParts } };
     let held = null, hold = HOLD.knife, swingT = -1, swingKind = 0, swingNo = 0, twist = 0, loadK = 0, loadT = 0;
     f.setWeapon = id => {
       if (id === f.weaponId) return;

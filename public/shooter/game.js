@@ -51,7 +51,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x8fb7d6); scene.fog = new THREE.Fog(0x8fb7d6, 70, 230);
+  scene.background = new THREE.Color(0x8fb7d6); scene.fog = new THREE.Fog(0x8fb7d6, 70, 330);
   const camera = new THREE.PerspectiveCamera(BASE_FOV, 16 / 9, 0.08, 500);
   scene.add(camera);
   scene.add(new THREE.HemisphereLight(0xbcd7ef, 0x41474e, 0.85));
@@ -64,6 +64,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
   const texLib = makeTextures(THREE), world = buildWorld(THREE, scene, texLib);
   // the arena is walls and floors; the scenery makes it a place: leaves, grass, roofs, lamps, flags (scenery.js)
   const scenery = dressWorld(THREE, scene, world, texLib, { anisotropy: renderer.capabilities.getMaxAnisotropy() });
+  scene.background.copy(scenery.haze); scene.fog.color.copy(scenery.haze);        // far things fade into the sky's horizon
   // everything that stands still is joined into a few big pieces (the wagons of the train move, so they are left)
   const merged = mergeStatic(THREE, scene, new Set(world.trainCars.map(c => c.grp)));
   // The weapons: one arsenal makes the models, for my own hands (the view model, drawn on top of the arena),

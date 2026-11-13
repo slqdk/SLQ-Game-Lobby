@@ -446,7 +446,7 @@ export function paintStool(c, x, y, high) {
 export const seatHeight = s => s.on ? 0.42 : s.high ? 0.7 : 0.44;
 
 // ---------- the things that move (drawn every frame) ----------
-export function paintLive(c, t, soundOn, casino) {
+export function paintLive(c, t, music, casino) {
   // dance floor tiles
   const [dx, dy, dr] = STATION.dance.floor, n = 4, tw = dr * 2 / n;
   const cols = ['#ff5fa2', '#4fc3e8', '#ffd45e', '#7fe08a', '#b07cff'];
@@ -480,7 +480,7 @@ export function paintLive(c, t, soundOn, casino) {
 
 // What moves on a piece of furniture itself (drawn right after its picture, so it is not hidden behind it).
 export const OVER = new Set(['arcade', 'jukebox', 'slot1', 'slot2', 'slot3']);
-export function paintOver(c, id, t, soundOn, casino) {
+export function paintOver(c, id, t, music, casino) {
   if (id === 'arcade') {
   { const [x, y, w, d] = STATION.arcade.box, f = V(y + d, STATION.arcade.h), sx = x + 0.2, sy = f + 0.66, sw = w - 0.4, sh = 0.66;
     c.save(); rrect(c, sx, sy, sw, sh, 0.04); c.clip();
@@ -495,7 +495,7 @@ export function paintOver(c, id, t, soundOn, casino) {
   if (id === 'jukebox') {
   { const [x, y, w, d] = STATION.jukebox.box, f = V(y + d, STATION.jukebox.h), cx = x + w / 2;
     for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(cx, f + 0.56, w / 2 - 0.05 - i * 0.05, Math.PI, 0); c.lineWidth = 0.04; c.strokeStyle = 'hsl(' + ((t * 40 + i * 50) % 360) + ' 90% 65%)'; c.stroke(); }
-    if (soundOn) for (let i = 0; i < 2; i++) { const u = (t * 0.4 + i * 0.5) % 1; c.globalAlpha = Math.sin(u * Math.PI); text(c, i ? '♪' : '♫', cx - 0.3 + i * 0.6 + Math.sin(u * 5 + i) * 0.12, f - 0.1 - u * 0.6, 0.3, '#ffe9a8', 700); c.globalAlpha = 1; } }
+    if (music) for (let i = 0; i < 3; i++) { const u = (t * 0.4 + i / 3) % 1; c.globalAlpha = Math.sin(u * Math.PI); text(c, i % 2 ? '♪' : '♫', cx - 0.34 + i * 0.34 + Math.sin(u * 5 + i) * 0.12, f - 0.1 - u * 0.75, 0.3, '#ffe9a8', 700); c.globalAlpha = 1; } }
     return;
   }
   // a slot machine: three reels in the window. They turn slowly by themselves and fast while somebody plays.

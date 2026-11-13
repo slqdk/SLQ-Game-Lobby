@@ -170,6 +170,15 @@ label small { color: var(--mute); font-weight: 500; }
 .switch small { display: block; color: var(--mute); font-weight: 500; }
 .switch:disabled { cursor: default; }
 .switch:disabled i { opacity: .45; }
+
+/* the music box */
+.tunes { display: flex; flex-direction: column; gap: 8px; }
+.tune { display: flex; align-items: center; gap: 12px; background: var(--panel2); border: 2px solid transparent; border-radius: 14px; padding: 9px 13px; width: 100%; text-align: left; }
+.tune i { font-style: normal; width: 36px; height: 36px; border-radius: 50%; background: #171220; color: var(--amber); display: grid; place-items: center; flex: none; font-size: 1.05rem; }
+.tune small { display: block; color: var(--mute); font-weight: 500; }
+.tune.on { border-color: var(--amber); }
+.tune.on i { background: var(--amber); color: var(--amber-ink); animation: tune 0.55s ease-in-out infinite alternate; }
+@keyframes tune { to { transform: translateY(-3px) rotate(8deg); } }
 .pushrow { display: grid; gap: 8px; justify-items: start; }
 
 /* wardrobe */

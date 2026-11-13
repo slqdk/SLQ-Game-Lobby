@@ -50,6 +50,13 @@ export const PRANKS = {
 };
 export const PRANK_GAP = 1500;     // milliseconds between two teases from the same player
 
+// The music box: tunes of our own (the notes are in public/js/music.js). A tune plays for `secs` seconds for
+// everybody in the clubhouse, then the box is quiet again; `gap` is the milliseconds between two choices by one player.
+export const JUKE = {
+  secs: 180, gap: 1500,
+  tunes: { rag: 'Saloon-rag', waltz: 'Prærievalsen', blues: 'Sidste omgang-blues', fire: 'Ved lejrbålet' },
+};
+
 // ---------- the bar ----------
 // What the bar serves, paid with chips. `alc` is how merry one gets from it (below zero: it makes one fresher),
 // `glass`, `col` (and `col2`, `foam`, `steam`) say how it is drawn. The whole card is this one list: change it here.

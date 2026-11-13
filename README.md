@@ -9,6 +9,7 @@ What is in it:
 - **Avatars** you put together yourself (skin, hair, face, clothes), plus hats, glasses and more from the kiosk.
 - **Chips** (jetoner): one wallet per player. 100 for showing up each day, a reward for every finished game against a friend, and the pot when you play for a stake. Spent in the bar, in the kiosk and on teasing.
 - **Teasing**: snowball, tomato, water balloon, cream pie, banana peel, tickle feather, whoopee cushion, rain cloud, turning somebody into a hen; and the friendly ones, confetti and a hug. Only looks, and it wears off. "Forstyr ikke" switches it off both ways.
+- **The music box**: four tunes of our own (a saloon rag, a prairie waltz, a blues, a camp-fire tune), made in the browser without sound files. Whoever puts one on, everybody in the clubhouse hears it at the same place; sound and music have a switch each.
 - **The bar**: sit on a stool and buy for yourself, for a friend, or a round for everybody. The glass stays in the avatar's hand, and a few too many show.
 - **4 på stribe** against a friend (live, or one move now and the next tomorrow), with or without a stake, or against the house robot in three strengths.
 - **EagleEye Commander** at the command table: the round-based strategy game, with the group's matches listed in the clubhouse and no codes or PINs (the lobby account is the general).

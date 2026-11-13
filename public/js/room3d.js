@@ -5,7 +5,7 @@
 // The room's own measure is kept: x across, y the depth from the back wall, z the height. On the way to the
 // graphics card that becomes (x, z, y).
 import * as THREE from '../shooter/vendor/three.module.min.js';
-import { ROOM, STATIONS, STATION, pathLen, posAt } from '../shared/room.js';
+import { ROOM, STATIONS, STATION, pathLen, posAt, isFree, nearestFree } from '../shared/room.js';
 import { PRANKS, EMOTES, BAR } from '../shared/defs.js';
 import { drawPrank, INK } from './avatar.js';
 import { play } from './sfx.js';
@@ -18,9 +18,10 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const WORDS = { snow: 'BRRR!', tomato: 'SPLAT!', water: 'PLASK!', pie: 'KLASK!', banana: 'HOVSA!', feather: 'KILDE KILDE!', fart: 'PRUUT!', cloud: 'ØV!', chicken: 'GOK!', confetti: 'HURRA!', hug: 'KRAM!' };
 const SOUNDS = { snow: 'puff', tomato: 'splat', water: 'splash', pie: 'splat', banana: 'slip', feather: 'giggle', fart: 'fart', cloud: 'rain', chicken: 'cluck', confetti: 'pop', hug: 'heart' };
 export const VIEWS = ['follow', 'eyes', 'over'];        // behind one's figure, through its eyes, the whole room from the front
+const SENS = 0.0022, REACH = 2.4;                       // the mouse as in the shooter; how near one must be to use a thing
 
 // canvas: where the saloon is drawn. over: a canvas on top of it for names, speech and signs.
-// hooks: { onActor(id), onStation(station), onFloor(x, y), onView(view) }
+// hooks: { onActor(id), onStation(station), onFloor(x, y), onStep(x, y), onSip(), onView(view), keysOn() }
 export function createRoom3D(canvas, over, hooks) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
@@ -39,7 +40,12 @@ export function createRoom3D(canvas, over, hooks) {
   const casino = { pot: 0, lines: [], spin: {} }, spins = [];
   // the camera: which view, where it looks (yaw: 0 looks at the back wall), how far behind the figure it hangs
   const cam = { view: 'follow', yaw: 0, pitch: 0.36, dist: 6.4, panX: ROOM.w / 2, free: false, eyeY: 1.75, upp: 0.03 };
-  const keys = new Set(); let walkAt = 0;
+  const keys = new Set();
+  // steering as in the shooter: `locked` when the mouse is caught and turns the view; `relock`: it was let go for a
+  // menu and is taken again when the menu closes; `noLock`: this browser will not hand the mouse over (dragging then)
+  const fine = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
+  let locked = false, relock = false, noLock = false, lockTry = '', lockedAt = -1e9, keyAt = -1e9, target = null, forced = false;
+  const steer = { on: false, at: 0, side: 1 };            // one walks by the keys; when the place was last told; which way round things
   const V = new THREE.Vector3(), V2 = new THREE.Vector3(), ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), HIT = new THREE.Vector3(), SPH = new THREE.Sphere();
 
   function resize() {
@@ -99,7 +105,7 @@ export function createRoom3D(canvas, over, hooks) {
           for (const s of STATIONS) { if (!s.use || !s.name) continue; const d = (s.use[0] - a.x) ** 2 + (s.use[1] - a.y) ** 2; if (d < best && d < 1.2) { best = d; const cx = s.box ? s.box[0] + s.box[2] / 2 : s.round ? s.round[0] : s.wall ? s.wall[0] + s.wall[2] / 2 : s.floor[0], cy = s.box ? s.box[1] + s.box[3] / 2 : s.round ? s.round[1] : s.wall ? 0 : s.floor[1]; if (!s.floor) a.want = Math.atan2(cx - a.x, cy - a.y); } }
         }
       }
-    } else a.moving = false;
+    } else if (!(a.id === me && steer.on)) a.moving = false;
     a.walk += ((a.moving ? 1 : 0) - a.walk) * Math.min(1, dt * 12);
     if (a.walk > 0.02) a.phase += dt * 11;
     let dh = a.want - a.head; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); a.head += dh * Math.min(1, dt * 10);
@@ -319,10 +325,17 @@ export function createRoom3D(canvas, over, hooks) {
     const dt = clamp((now - last) / 1000 || 0, 0, 0.1);
     last = now; T += dt;
     for (const a of actors.values()) step(a, dt);
-    walkKeys();
+    // a menu needs the mouse: let it go, and take it again when the menu is closed
+    const free = hooks.keysOn();
+    if (!free) keys.clear();
+    if (locked && (!free || cam.view === 'over')) { relock = cam.view !== 'over'; exitLock(); }
+    else if (!locked && relock && free && lockable() && !typing()) { relock = false; lockTry = 'auto'; lock(); }
+    steerBy(dt);
     for (let i = spins.length - 1; i >= 0; i--) if (T >= spins[i].at) { const q = spins[i]; spins.splice(i, 1); landSpin(q); }
     for (const a of actors.values()) show(a);
     aim(dt);
+    target = free && cam.view !== 'over' && (locked || T - keyAt < 30) ? aimed() : null;
+    if (locked || target) hover = target && target.station ? target.station.id : null;
     // the barkeeper looks at whoever stands nearest the bar
     let near = null, nd = 30;
     for (const a of actors.values()) { const d = (a.x - 10.9) ** 2 + (a.y - 2.4) ** 2; if (d < nd) { nd = d; near = [a.x, a.y]; } }
@@ -339,6 +352,7 @@ export function createRoom3D(canvas, over, hooks) {
     for (const [a] of list) drawTag(a, placed);
     const showAll = T < hintUntil;
     for (const sg of saloon.signs) if (hover === sg[0] || labels[sg[0]] || showAll) drawLabel(sg, hover === sg[0]);
+    drawHud(free);
   }
 
   // ---------- one's own hand with the glass, seen through one's own eyes ----------
@@ -381,8 +395,98 @@ export function createRoom3D(canvas, over, hooks) {
     }
     return best;
   }
-  canvas.addEventListener('pointerdown', e => { try { canvas.setPointerCapture(e.pointerId); } catch {} down = { x: e.clientX, y: e.clientY, yaw: cam.yaw, pitch: cam.pitch, pan: cam.panX, moved: false, id: e.pointerId }; });
+  // The mouse as in the shooter: a click in the room catches it, and then it turns the view; Esc lets it go. (Not in
+  // the overview, not on a touch screen, and not where the browser will not hand it over: there one drags.)
+  const lockable = () => fine && !noLock && cam.view !== 'over';
+  function lock() { try { const q = canvas.requestPointerLock(); if (q && q.catch) q.catch(() => {}); } catch { /* the browser said no */ } }
+  function exitLock() { if (forced) { forced = false; onLock(); } else if (document.pointerLockElement === canvas) document.exitPointerLock(); }
+  function onLock() {
+    const was = locked;
+    locked = forced || document.pointerLockElement === canvas;
+    if (locked && !was) { lockedAt = T; down = null; hover = null; }
+    if (!locked) keys.clear();
+  }
+  const onLockError = () => { if (lockTry === 'click') noLock = true; lockTry = ''; };
+  const onMouse = e => {
+    if (!locked) return;
+    const mx = clamp(e.movementX || 0, -250, 250), my = clamp(e.movementY || 0, -250, 250);
+    cam.yaw -= mx * SENS; cam.free = false;
+    if (cam.view === 'eyes') cam.pitch = clamp(cam.pitch - my * SENS, -1.35, 1.35); else cam.pitch = clamp(cam.pitch + my * SENS, -0.5, 1.3);
+  };
+  document.addEventListener('pointerlockchange', onLock); document.addEventListener('pointerlockerror', onLockError); document.addEventListener('mousemove', onMouse);
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+  // What E (or a click, with the mouse caught) would use: the thing or the member one looks at, if it is within reach;
+  // otherwise the nearest thing one stands by and faces.
+  const middleOf = st => st.box ? [st.box[0] + st.box[2] / 2, st.box[1] + st.box[3] / 2] : st.round ? [st.round[0], st.round[1]] : st.wall ? [st.wall[0] + st.wall[2] / 2, 0] : [st.floor[0], st.floor[1]];
+  function awayFrom(st, x, y) {                 // from a point on the floor to a thing's footprint
+    if (st.box) return Math.hypot(Math.max(st.box[0] - x, 0, x - st.box[0] - st.box[2]), Math.max(st.box[1] - y, 0, y - st.box[1] - st.box[3]));
+    if (st.round) { const dx = x - st.round[0], dy = y - st.round[1], k = Math.hypot(dx / st.round[2], dy / st.round[3]); return k <= 1 ? 0 : Math.hypot(dx, dy) * (1 - 1 / k); }
+    if (st.wall) return Math.hypot(Math.max(st.wall[0] - x, 0, x - st.wall[0] - st.wall[2]), y);
+    return Math.max(0, Math.hypot(x - st.floor[0], y - st.floor[1]) - st.floor[2]);
+  }
+  function aimed() {
+    const a = mine(); if (!a) return null;
+    const [ax, ay, az] = place(a), fx2 = -Math.sin(cam.yaw), fy = -Math.cos(cam.yaw);
+    // through one's own eyes: what is in the middle of the picture. From behind: straight ahead of the figure.
+    if (cam.view === 'eyes') { ndc.set(0, 0); ray.setFromCamera(ndc, camera); }
+    else { ray.ray.origin.set(ax, az + 1.3, ay); ray.ray.direction.set(fx2, -0.12, fy).normalize(); }
+    let best = null, bd = 1e9;
+    for (const b of actors.values()) {
+      if (b.id === me) continue;
+      const [x, y, z] = place(b);
+      if (Math.hypot(x - ax, y - ay) > REACH + 1) continue;
+      for (const [dy, r] of isHen(b) ? [[0.55, 0.5]] : [[z + (seatOf(b) ? 1.1 : 1.75), 0.5], [z + 0.8, 0.42]]) {
+        SPH.center.set(x, dy, y); SPH.radius = r;
+        if (ray.ray.intersectSphere(SPH, HIT)) { const d = HIT.distanceTo(ray.ray.origin); if (d < bd) { bd = d; best = { actor: b }; } }
+      }
+    }
+    for (const q of saloon.picks) {
+      const st = STATION[q.id];
+      if (!st.name || awayFrom(st, ax, ay) > REACH || !ray.ray.intersectBox(q.box, HIT)) continue;
+      const d = HIT.distanceTo(ray.ray.origin); if (d < bd - 0.01) { bd = d; best = { station: st }; }
+    }
+    if (best) return best;
+    bd = 1.3;
+    for (const st of STATIONS) {
+      if (!st.name) continue;
+      const d = awayFrom(st, ax, ay); if (d >= bd) continue;
+      const [cx, cy] = middleOf(st), l = Math.hypot(cx - ax, cy - ay) || 1;
+      if (((cx - ax) * fx2 + (cy - ay) * fy) / l > 0.3) { bd = d; best = { station: st }; }
+    }
+    return best;
+  }
+  // use what one looks at; with nothing there, a mouthful of what is in the glass
+  function act() {
+    if (target && target.actor) hooks.onActor(target.actor.id);
+    else if (target) hooks.onStation(target.station);
+    else if (hooks.onSip) hooks.onSip();
+  }
+  // the little that is drawn on top for it: a dot to aim with, what E would use, and how to take or let go of the mouse
+  function drawHud(free) {
+    if (cam.view === 'over' || !free) return;
+    const pill = (text, y, key) => {
+      c.font = `600 15px ${FONT}`;
+      const tw = c.measureText(text).width, kw = key ? 26 : 0, w = tw + kw + (key ? 30 : 24), x = (cw - w) / 2;
+      c.fillStyle = 'rgba(24,18,34,.82)'; c.beginPath(); c.roundRect(x, y, w, 32, 16); c.fill();
+      if (key) { c.fillStyle = '#ffc94d'; c.beginPath(); c.roundRect(x + 6, y + 5, 22, 22, 6); c.fill(); c.fillStyle = '#241a10'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 14px ${FONT}`; c.fillText(key, x + 17, y + 16.5); c.font = `600 15px ${FONT}`; }
+      c.fillStyle = '#fff'; c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillText(text, x + (key ? 36 : 12), y + 16.5);
+    };
+    if (locked && cam.view === 'eyes') { c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(cw / 2, ch / 2, 2.5, 0, TAU); c.fill(); c.strokeStyle = 'rgba(0,0,0,.45)'; c.lineWidth = 1; c.stroke(); }
+    const y = ch - 92;
+    if (target) pill(target.actor ? target.actor.name : target.station.name, y, 'E');
+    else if (lockable() && !locked && !typing()) pill('Klik for at styre med musen', y, '');
+    else if (locked && T - lockedAt < 5) pill('Esc slipper musen', y, '');
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    if (locked) { if (e.button === 0) act(); return; }
+    if (e.pointerType === 'mouse' && e.button === 0 && lockable() && hooks.keysOn()) { lockTry = 'click'; lock(); down = null; return; }
+    try { canvas.setPointerCapture(e.pointerId); } catch {}
+    down = { x: e.clientX, y: e.clientY, yaw: cam.yaw, pitch: cam.pitch, pan: cam.panX, moved: false, id: e.pointerId };
+  });
   canvas.addEventListener('pointermove', e => {
+    if (locked) return;
     if (down && down.id === e.pointerId) {
       const dx = e.clientX - down.x, dy = e.clientY - down.y;
       if (Math.abs(dx) + Math.abs(dy) > 9) down.moved = true;
@@ -398,10 +502,10 @@ export function createRoom3D(canvas, over, hooks) {
     hover = hit && hit.station ? hit.station.id : null;
     canvas.style.cursor = hit && (hit.station || hit.actor) ? 'pointer' : 'default';
   });
-  canvas.addEventListener('pointerleave', () => { hover = null; });
+  canvas.addEventListener('pointerleave', () => { if (!locked) hover = null; });
   canvas.addEventListener('pointerup', e => {
     const d = down; down = null;
-    if (!d || d.moved) return;
+    if (locked || !d || d.moved) return;
     const [px, py] = local(e), hit = pick(px, py);
     if (!hit) return;
     if (hit.actor) hooks.onActor(hit.actor.id, [px, py]);
@@ -410,27 +514,54 @@ export function createRoom3D(canvas, over, hooks) {
   });
   canvas.addEventListener('pointercancel', () => { down = null; });
   canvas.addEventListener('wheel', e => { if (cam.view === 'follow') { cam.dist = clamp(cam.dist * (e.deltaY > 0 ? 1.12 : 0.89), 2.2, 11); e.preventDefault(); } }, { passive: false });
-  // walking with the keys: a little way ahead at a time, the way the camera looks
+
+  // Walking by the keys, as in the shooter: one's own figure moves at once, the way the camera looks, and slides
+  // along whatever is in the way; the server is told where it is ten times a second (and everybody else by it).
   const KEY = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
-  function walkKeys() {
-    if (!keys.size || T < walkAt) return;
+  const tell = a => { steer.at = T; if (hooks.onStep) hooks.onStep(a.x, a.y); };
+  function steerBy(dt) {
     const a = mine(); if (!a) return;
     let sx = 0, sf = 0; for (const k of keys) { sx += KEY[k][0]; sf += KEY[k][1]; }
-    if (!sx && !sf) return;
-    const yaw = cam.view === 'over' ? 0 : cam.yaw, l = Math.hypot(sx, sf), fx2 = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
-    const [x, y] = place(a), tx = clamp(x + (fx2 * sf + rx * sx) / l * 1.7, 0.4, ROOM.w - 0.4), ty = clamp(y + (fz * sf + rz * sx) / l * 1.7, 0.4, ROOM.d - 0.4);
-    walkAt = T + 0.22; hooks.onFloor(tx, ty);
+    if (!sx && !sf) { if (steer.on) { steer.on = false; a.moving = false; tell(a); } return; }
+    if (!steer.on) {
+      // taking over from wherever the figure is: up from a seat, out of a walk the server sent it on
+      steer.on = true;
+      if (a.sit) { a.sit = null; if (a.seated) a.hop = 0.2; a.seated = false; }
+      if (!isFree(a.x, a.y)) [a.x, a.y] = nearestFree(a.x, a.y);
+    }
+    const yaw = cam.view === 'over' ? 0 : cam.yaw, l = Math.hypot(sx, sf), fx2 = -Math.sin(yaw), fy = -Math.cos(yaw), rx = Math.cos(yaw), ry = -Math.sin(yaw);
+    const d = ROOM.speed * dt, dx = (fx2 * sf + rx * sx) / l * d, dy = (fy * sf + ry * sx) / l * d;
+    let nx = a.x, ny = a.y;
+    if (isFree(a.x + dx, a.y + dy)) { nx += dx; ny += dy; }
+    else search: for (const ang of [0.4, 0.8, 1.2, 1.5]) for (const sg of [steer.side, -steer.side]) {
+      // not straight on: a little to one side, then more, the same way round as last time first
+      const cs = Math.cos(ang * sg), sn = Math.sin(ang * sg), k = Math.cos(ang) * 0.9 + 0.1, qx = (dx * cs - dy * sn) * k, qy = (dx * sn + dy * cs) * k;
+      if (isFree(a.x + qx, a.y + qy)) { nx += qx; ny += qy; steer.side = sg; break search; }
+    }
+    a.moving = nx !== a.x || ny !== a.y;
+    a.want = Math.atan2(dx, dy);
+    a.x = nx; a.y = ny; a.path = [[nx, ny]]; a.len = 0; a.dist = 0;
+    if (T - steer.at > 0.1) tell(a);
   }
   const typing = () => { const e = document.activeElement; return e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.isContentEditable); };
-  const keyDown = e => { if (!running || typing() || e.ctrlKey || e.metaKey || e.altKey || !hooks.keysOn()) return; if (KEY[e.code]) { keys.add(e.code); e.preventDefault(); } else if (e.code === 'KeyV') api.setView(VIEWS[(VIEWS.indexOf(cam.view) + 1) % VIEWS.length]); else if (e.code === 'KeyE' || e.code === 'Space') { if (hooks.onSip) hooks.onSip(); e.preventDefault(); } };
+  const keyDown = e => {
+    if (!running || typing() || e.ctrlKey || e.metaKey || e.altKey || !hooks.keysOn()) return;
+    keyAt = T;
+    if (KEY[e.code]) { keys.add(e.code); e.preventDefault(); }
+    else if (e.repeat) return;
+    else if (e.code === 'KeyV') api.setView(VIEWS[(VIEWS.indexOf(cam.view) + 1) % VIEWS.length]);
+    else if (e.code === 'KeyE') { act(); e.preventDefault(); }
+    else if (e.code === 'Space') { if (hooks.onSip) hooks.onSip(); e.preventDefault(); }
+  };
   const keyUp = e => keys.delete(e.code);
-  document.addEventListener('keydown', keyDown); document.addEventListener('keyup', keyUp); window.addEventListener('blur', () => keys.clear());
+  const onBlur = () => keys.clear();
+  document.addEventListener('keydown', keyDown); document.addEventListener('keyup', keyUp); window.addEventListener('blur', onBlur);
 
   // ---------- what main.js calls (the same as on the flat clubhouse) ----------
   const api = {
     resize,
     start() { if (running) return; running = true; resize(); last = performance.now(); raf = requestAnimationFrame(frame); },
-    stop() { running = false; cancelAnimationFrame(raf); keys.clear(); },
+    stop() { running = false; cancelAnimationFrame(raf); keys.clear(); relock = false; exitLock(); steer.on = false; },
     setMusic(on) { music = !!on; saloon.setMusic(music); },
     setName(name) { if (name !== groupName) { groupName = name; saloon.setName(name); } },
     setLabels(l) { labels = l; },
@@ -462,6 +593,7 @@ export function createRoom3D(canvas, over, hooks) {
     move(id, path, sit) {
       const a = actors.get(id);
       if (!a || !path || !path.length) return;
+      if (id === me) steer.on = false;                 // the server sends one somewhere (or back): the keys take over again from there
       const wasSeated = a.seated, dx = a.x - path[0][0], dy = a.y - path[0][1], off = Math.sqrt(dx * dx + dy * dy);
       a.path = !wasSeated && off > 0.05 && off < 2 ? [[a.x, a.y], ...path] : path;
       a.len = pathLen(a.path); a.dist = 0; a.sit = sit || null; a.seated = false;
@@ -509,8 +641,9 @@ export function createRoom3D(canvas, over, hooks) {
       return [...actors.values()].map(a => ({ id: a.id, name: a.name, look: a.look, dnd: a.dnd, on: true, p: a.dist < a.len ? [[a.x, a.y], a.path[a.path.length - 1]] : [[a.x, a.y]], sit: a.sit,
         fx: Object.keys(a.fxs).map(k => [k, Math.max(0, (PRANKS[k].dur - (T - a.fxs[k])) * 1000)]), drink: a.drink ? [a.drink.k, Math.max(0, (BAR.lasts - (T - a.drink.t0)) * 1000)] : null, buzz: buzzNow(a), busy: a.net !== null ? 'slot' : '', net: a.net || 0 }));
     },
-    dispose() { api.stop(); document.removeEventListener('keydown', keyDown); document.removeEventListener('keyup', keyUp); for (const a of actors.values()) drop(a); actors.clear(); saloon.dispose(); renderer.dispose(); },
-    _debug: { actors, fx, cam, camera, scene, renderer, pick, P, place, saloon, THREE },
+    dispose() { api.stop(); document.removeEventListener('keydown', keyDown); document.removeEventListener('keyup', keyUp); window.removeEventListener('blur', onBlur); document.removeEventListener('pointerlockchange', onLock); document.removeEventListener('pointerlockerror', onLockError); document.removeEventListener('mousemove', onMouse); for (const a of actors.values()) drop(a); actors.clear(); saloon.dispose(); renderer.dispose(); },
+    _debug: { actors, fx, cam, camera, scene, renderer, pick, P, place, saloon, THREE, keys, steer, target: () => target, locked: () => locked,
+      lock(v) { forced = !!v; onLock(); }, look(mx, my) { onMouse({ movementX: mx, movementY: my }); }, act },       // lock(true): as if the mouse were caught (a test has no mouse to catch)
   };
   return api;
 }

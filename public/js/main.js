@@ -417,8 +417,9 @@ $('#chatForm').addEventListener('submit', e => {
   e.preventDefault();
   const i = $('#chatInput'), s = i.value.trim();
   if (!s) return;
-  if (send({ t: 'say', s })) i.value = '';
+  if (send({ t: 'say', s })) { i.value = ''; if (document.pointerLockElement) i.blur(); }      // the mouse is caught, as in the shooter: back to walking by the keys
 });
+$('#chatInput').addEventListener('keydown', e => { if (e.key === 'Escape') e.target.blur(); });
 $('#btnChat').addEventListener('click', () => { app.classList.toggle('chat-open'); const log = $('#chatlog'); log.scrollTop = log.scrollHeight; });
 document.addEventListener('keydown', e => {
   if (st.view !== 'room' || sheet.isOpen || arenaOpen() || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -432,13 +433,15 @@ document.addEventListener('keydown', e => {
 const viewWanted = () => { const v = load('slq-room'); return ['follow', 'eyes', 'over', 'flat'].includes(v) ? v : matchMedia('(max-width: 760px), (pointer: coarse)').matches ? 'over' : 'follow'; };
 const keysOn = () => st.view === 'room' && !sheet.isOpen && !arenaOpen() && $('#embed').hidden;
 const sip = () => send({ t: 'emote', k: 'sip' });
+// the view was chosen (by a button, or by V in the saloon): remembered, and shown on the buttons
+function viewChosen(v) { save('slq-room', v); for (const b of $('#viewBar').children) b.classList.toggle('on', b.dataset.view === v); }
 let viewBusy = false;
 async function useView(v) {
   if (viewBusy) return;
   viewBusy = true;
   try {
     if (v !== 'flat' && !deep) {
-      try { const mod = await import('./room3d.js'); deep = mod.createRoom3D($('#room3d'), $('#roomOver'), { onActor, onStation, onFloor, keysOn, onSip: sip }); }
+      try { const mod = await import('./room3d.js'); deep = mod.createRoom3D($('#room3d'), $('#roomOver'), { onActor, onStation, onFloor, onStep, keysOn, onSip: sip, onView: viewChosen }); }
       catch (e) { console.error(e); toast('Saloonen i 3D kunne ikke starte i denne browser. Du får den flade klub.'); v = 'flat'; }
     }
     const next = v === 'flat' ? flat : deep;
@@ -453,9 +456,8 @@ async function useView(v) {
       musicSync();
     }
     if (v !== 'flat') { deep.setView(v); roomTips(); }
-    save('slq-room', v);
+    viewChosen(v);
     $('#viewBar').hidden = false;
-    for (const b of $('#viewBar').children) b.classList.toggle('on', b.dataset.view === v);
   } finally { viewBusy = false; }
 }
 
@@ -465,6 +467,8 @@ function onFloor(x, y) {
   if (app.classList.contains('chat-open')) app.classList.remove('chat-open');
   send({ t: 'move', x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
 }
+// walking by the keys: one's own figure has already moved; the server is told where it is now ("t" first: the server knows these by how they begin)
+function onStep(x, y) { if (st.view === 'room') send({ t: 'step', x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }); }
 function onActor(id) {
   if (st.view !== 'room') return;
   if (id === mine()) openSelf(); else openActor(id);
@@ -542,8 +546,12 @@ $('#btnChips').addEventListener('click', () => sheet.open({ title: 'Jetoner', ki
 // building a figure gets them afterwards.
 function roomTips() {
   if (!st.g || st.view !== 'room' || !room || (st.me && st.me.fresh)) return;
-  if (!st.hinted) { st.hinted = true; room.hint(9); toast('Tryk på gulvet for at gå. Tryk på møblerne og på de andre for at bruge dem.', { ms: 7000 }); }
-  if (room === deep && !load('slq-3d-tip')) { save('slq-3d-tip', '1'); toast('Træk for at se dig om. Gå ved at trykke på gulvet eller med W A S D. V skifter visning, E tager en tår af glasset.', { ms: 10000 }); }
+  if (!st.hinted) { st.hinted = true; room.hint(9); if (viewWanted() === 'flat' || viewWanted() === 'over' || !matchMedia('(pointer: fine)').matches) toast('Tryk på gulvet for at gå. Tryk på møblerne og på de andre for at bruge dem.', { ms: 7000 }); }
+  if (room === deep && load('slq-3d-tip') !== '2') {
+    save('slq-3d-tip', '2');
+    toast(matchMedia('(pointer: fine)').matches ? 'Styr som i skydespillet: klik i saloonen, så ser musen sig om. W A S D går, E bruger det, du ser på, mellemrum tager en tår. Esc slipper musen, V skifter visning.'
+      : 'Træk for at se dig om, og tryk på gulvet for at gå. Tryk på møblerne og på de andre for at bruge dem.', { ms: 12000 });
+  }
 }
 
 function openWardrobe(first = false) {

@@ -2,7 +2,7 @@
 // It knows nothing about sockets or files: server.js hands it a store, connections ({ send(text), close() })
 // and the messages that arrive. That also makes it easy to test (tools/selftest.mjs).
 import crypto from 'node:crypto';
-import { ECON, LIMITS, EMOTES, PRANKS, PRANK_GAP, ITEMS, DRINKS, BAR, cleanLook, randomLook, nameOk } from '../public/shared/defs.js';
+import { ECON, LIMITS, EMOTES, PRANKS, PRANK_GAP, JUKE, ITEMS, DRINKS, BAR, cleanLook, randomLook, nameOk } from '../public/shared/defs.js';
 import { ROOM, STATION, findPath, posAt, pathFrom, nearestFree } from '../public/shared/room.js';
 import { GAMES, GameError } from '../public/shared/games/index.js';
 import { hashText } from '../public/shared/util.js';
@@ -31,6 +31,7 @@ const keyOk = (k, n, first) => { if (typeof k !== 'string' || k.length > 120 || 
 export function createHub({ store, ee = null, arena = null, version = '', now = () => Date.now(), botDelay = [700, 1500], rand = Math.random, push = null, nudgeMs = 5000 }) {
   const conns = new Map();        // user id -> the connection that user is on (one at a time)
   const rooms = new Map();        // group id -> Map(user id -> presence): who is in that clubhouse right now
+  const jukes = new Map();        // group id -> { k, by, at }: the tune the music box is playing there (gone when it has played out)
   const invites = new Map();      // invite code -> group id
   const byName = new Map();       // lower-case name -> user
   const fails = new Map(), made = new Map();     // per address: wrong passwords and codes, new accounts
@@ -131,7 +132,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
 
   // ---------- connections ----------
   function connect(send, close, ip = '') {
-    return { send, close, ip, user: null, gid: null, away: false, testAt: 0, budget: 60, budgetAt: now(), fast: 150, fastAt: now(), said: [], emoAt: 0, prankAt: 0, drinkAt: 0, invAt: 0, badCodes: 0 };
+    return { send, close, ip, user: null, gid: null, away: false, testAt: 0, budget: 60, budgetAt: now(), fast: 150, fastAt: now(), said: [], emoAt: 0, prankAt: 0, jukeAt: 0, drinkAt: 0, invAt: 0, badCodes: 0 };
   }
 
   function message(conn, text) {
@@ -175,6 +176,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
   const need = conn => presOf(conn) || fail('Gå ind i klubhuset først.');
   const groupOf = conn => store.groups.get(conn.gid);
   const here = p => posAt(p.path, (now() - p.t0) / 1000 * ROOM.speed);
+  const jukeOf = gid => { const j = jukes.get(gid); if (j && now() - j.at >= JUKE.secs * 1000) jukes.delete(gid); return jukes.get(gid) || null; };
 
   function member(g, uid) {
     const u = store.users.get(uid), p = rooms.has(g.id) ? rooms.get(g.id).get(uid) : null;
@@ -676,7 +678,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       conn.send(J({
         t: 'room', g: { id: g.id, name: g.name, owner: g.owner, invite: isAdmin(g, u.id) ? g.invite : '' },
         mem: Object.keys(g.members).map(id => member(g, +id)), chat: g.chat.slice(-LIMITS.chatSend),
-        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), bj: g.bj ? bjSum(g.bj) : null, now: now(),
+        tables: Object.values(g.tables).map(tableSum), ee: ee ? ee.ofGroup(g.id).map(eeSum) : [], arenas: arena ? arena.ofGroup(g.id) : [], pot: potOf(g), bj: g.bj ? bjSum(g.bj) : null, juke: jukeOf(g.id), now: now(),
       }));
     },
 
@@ -737,6 +739,17 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       if (!presOf(conn) || !pick(EMOTES, m.k) || now() - conn.emoAt < 600) return;
       conn.emoAt = now();
       cast(conn.gid, { t: 'emo', u: conn.user.id, k: m.k });
+    },
+
+    // The music box: a tune for everybody in the clubhouse ('' stops it). Nothing is stored: after a restart it is quiet.
+    juke(conn, m) {
+      need(conn);
+      const k = m.k === '' ? '' : pick(JUKE.tunes, m.k) ? m.k : fail('Den melodi findes ikke.');
+      if (now() - conn.jukeAt < JUKE.gap) fail('Lige et øjeblik …');
+      conn.jukeAt = now();
+      const j = { k, by: conn.user.id, at: now() };
+      if (k) jukes.set(conn.gid, j); else jukes.delete(conn.gid);
+      cast(conn.gid, { t: 'juke', ...j });
     },
 
     prank(conn, m) {
@@ -1172,6 +1185,7 @@ export function createHub({ store, ee = null, arena = null, version = '', now = 
       }
     }
     for (const [ip, f] of fails) if (t0 - f.at >= 600e3) fails.delete(ip);
+    for (const gid of [...jukes.keys()]) jukeOf(gid);
     for (const [ip, m] of made) if (t0 - m.at >= HOUR) made.delete(ip);
   }
 

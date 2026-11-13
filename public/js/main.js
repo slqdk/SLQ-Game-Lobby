@@ -3,7 +3,8 @@ import { api, createSocket } from './net.js';
 import { createRoom } from './room.js';
 import { $, h, icon, bust, sheet, toast } from './ui.js';
 import { drawBust, drawFigure, drawPrank, drawEmote, drawGlass } from './avatar.js';
-import { play, unlock, soundOn, setSound } from './sfx.js';
+import { play, unlock, soundOn, setSound, musicOn, setMusic } from './sfx.js';
+import { playTune, stopTune, playing } from './music.js';
 import { pushStart, pushState, pushOn, pushOff, pushSync } from './push.js';
 import { renderC4 } from './games/c4.js';
 import { renderPoker } from './games/poker.js';
@@ -14,7 +15,7 @@ import { slotView } from './slots.js';
 import { renderBlackjack, resetBlackjack } from './blackjack.js';
 import { dealerMs } from '../shared/blackjack.js';
 import { MACHINES, MACHINE_IDS } from '../shared/slots.js';
-import { ECON, LIMITS, EMOTES, PRANKS, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
+import { ECON, LIMITS, EMOTES, PRANKS, JUKE, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
 import { ROOM, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
 import { MODES, MODE_IDS, LEVELS, FILLS } from '../shooter/rules.js';
@@ -26,11 +27,12 @@ const st = {
   token: load('slq-token'), gid: load('slq-group'), invite: '',
   me: null, groups: [], g: null, mem: new Map(), tables: new Map(), ee: new Map(), arenas: new Map(), game: null, gameQ: null,
   view: 'boot', sock: null, skew: 0, tv: null, everOpen: false, leaving: false, hinted: false,
+  juke: null,          // the tune the music box is playing: { k, by, at }
 };
 const RENDER = { c4: renderC4, ludo: renderLudo, poker: renderPoker, yatzy: renderYatzy, meyer: renderMeyer };
 const BUSY = { ee: 'EagleEye Commander', shooter: 'skydespillet' };
 const app = $('#app');
-let room = null, demoTimer = 0;
+let room = null, demoTimer = 0, jukeEnd = 0, jukeRetry = 0, jukeTries = 0;
 
 const now = () => Date.now() + st.skew;
 const send = m => st.sock && st.sock.send(m);
@@ -54,8 +56,9 @@ const cost = n => n ? String(n) : 'Gratis';
 
 function setView(v) {
   st.view = v; app.dataset.view = v;
-  if (v !== 'room') { sheet.close(); $('#friends').hidden = true; app.classList.remove('chat-open'); if (!$('#embed').hidden) { $('#embed').hidden = true; $('#embedBox').replaceChildren(); } }
+  if (v !== 'room') { st.juke = null; sheet.close(); $('#friends').hidden = true; app.classList.remove('chat-open'); if (!$('#embed').hidden) { $('#embed').hidden = true; $('#embedBox').replaceChildren(); } }
   requestAnimationFrame(() => room && room.resize());
+  musicSync();
 }
 
 // ---------- the clubhouse behind the welcome screen: a few made-up guests ----------
@@ -223,7 +226,7 @@ const on = {
     closeArena();
     room.setName(m.g.name);
     room.setRoom(m.mem, mine());
-    room.setSound(soundOn());
+    st.juke = m.juke || null;
     $('#groupName').textContent = m.g.name;
     $('#chatlog').replaceChildren();
     for (const c of m.chat) addChat(c, true);
@@ -256,6 +259,7 @@ const on = {
     if (m.m.u) { room.say(m.m.u, m.m.s); if (m.m.u !== mine()) play('chat'); }
   },
   emo(m) { room.emote(m.u, m.k); },
+  juke(m) { st.juke = m.k ? { k: m.k, by: m.by, at: m.at } : null; musicSync(); tablesChanged(); if (sheet.kind === 'juke') openJuke(); },
   prank(m) {
     room.prank(m.k, m.from, m.to);
     if (m.to === mine()) { const a = st.mem.get(m.from); toast((a ? a.name : 'Nogen') + ' ' + TEASED[m.k] + '!', { pic: icon(34, c => drawPrank(c, m.k)), ms: 3600 }); }
@@ -335,21 +339,31 @@ function tablesChanged() {
   const eeTurns = [...st.ee.values()].filter(eeMyTurn).length;
   const turns = [...st.tables.values()].filter(t => t.phase === 'play' && t.seats[t.turn] && t.seats[t.turn].u === mine()).length + eeTurns, b = $('#turnBadge');
   b.hidden = !turns; b.textContent = turns;
-  // what is going on at each piece of furniture, shown over it
-  const labels = {};
-  for (const t of st.tables.values()) {
-    const g = GAMES[t.game];
-    if (!g || t.phase === 'over') continue;
-    const names = t.seats.map(s => s.n.replace(/ \(.*/, ''));
-    labels[g.station] = g.max > 2 ? g.name + ': ' + (t.phase === 'open' ? names[0] + ' venter på spillere' : names.length + ' ved bordet') : t.phase === 'open' ? names[0] + ' venter på en modspiller' : names.join(' mod ');
-  }
-  if (st.bj && st.bj.n) labels.blackjack = 'Blackjack: ' + st.bj.n + ' ved bordet';
-  const wars = [...st.ee.values()].filter(x => x.phase === 'play');
-  if (wars.length) labels.command = wars.length === 1 ? '«' + wars[0].name + '» · runde ' + wars[0].round : wars.length + ' kampe i gang';
+  // what is going on at each piece of furniture, shown over it: of several tables the one that matters most to me
+  const labels = {}, at = {};
+  for (const t of st.tables.values()) { const g = GAMES[t.game]; if (g && t.phase !== 'over') (at[g.station] = at[g.station] || []).push(t); }
+  for (const [sid, ts] of Object.entries(at)) { ts.sort((p, q) => rank(p) - rank(q) || p.id - q.id); labels[sid] = tableSign(ts[0], ts.length - 1); }
+  if (st.bj && st.bj.n) labels.blackjack = { head: 'Blackjack', text: st.bj.n + ' ved bordet' };
+  const wars = [...st.ee.values()].filter(x => x.phase === 'play'), mineWar = wars.find(eeMyTurn);
+  if (mineWar) labels.command = { head: 'EagleEye Commander', text: 'Din tur i «' + mineWar.name + '»', hot: true };
+  else if (wars.length) labels.command = { head: 'EagleEye Commander', text: wars.length === 1 ? '«' + wars[0].name + '» · runde ' + wars[0].round : wars.length + ' kampe i gang' };
+  if (st.juke) labels.jukebox = { text: '♫ ' + JUKE.tunes[st.juke.k] };
   room.setLabels(labels);
   renderFriends();
 }
 const eeMyTurn = x => x.phase === 'play' && x.players.some(p => p.u === mine() && p.alive && !p.ready);
+// The sign over a table's furniture. The games are played over days and the chairs are mostly empty, so it says
+// what the game waits for (and for whom) rather than who "sits" there. `more`: other games at the same furniture.
+function tableSign(t, more) {
+  const g = GAMES[t.game], me = mine(), nm = x => x.n.replace(/ \(.*/, ''), seated = t.seats.some(x => x.u === me), many = g.max > 2, turn = t.seats[t.turn];
+  const others = t.seats.filter(x => x.u !== me).map(nm), all = t.seats.map(nm);
+  let text, hot = false;
+  if (t.phase === 'open') text = t.seats[0].u === me ? (many ? 'Du venter på spillere' : 'Du venter på en modspiller') : all[0] + (many ? ' søger spillere' : ' søger en modspiller');
+  else if (turn && turn.u === me) { text = 'Din tur' + (others.length === 1 ? ' mod ' + others[0] : ''); hot = true; }
+  else if (seated) text = turn ? nm(turn) + ' har turen' : 'I gang';
+  else text = all.length === 2 ? all.join(' mod ') : all.length === 3 ? all[0] + ', ' + all[1] + ' og ' + all[2] + ' spiller' : all.length + ' spiller';
+  return { head: g.name + (more ? ' · +' + more + ' spil' : ''), text, hot };
+}
 
 // ---------- who is here ----------
 function statusOf(m) {
@@ -428,7 +442,7 @@ function onStation(sn) {
   else if (sn.kind === 'blackjack') openBlackjack();
   else if (sn.kind === 'door') { goTo(sn); openMenu(); }
   else if (sn.kind === 'sit') send({ t: 'sit', st: sn.id });
-  else if (sn.kind === 'sound') { goTo(sn); setSound(!soundOn()); room.setSound(soundOn()); toast(soundOn() ? 'Lyden er slået til.' : 'Lyden er slået fra.'); }
+  else if (sn.kind === 'sound') { goTo(sn); openJuke(); }
   else if (sn.kind === 'dance') {
     const [cx, cy, r] = sn.floor, a = Math.random() * 6.28, d = Math.random() * r * 0.7, to = [cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.8];
     send({ t: 'move', x: to[0], y: to[1] });
@@ -558,6 +572,46 @@ function openBar() {
   barRefresh = () => { if (sheet.kind === 'bar') sheet.fill(build()); };
 }
 let barRefresh = () => {};
+
+// ---------- the music box ----------
+// The tune that is on in the clubhouse (st.juke) is heard by those who are in the room with sound and music
+// switched on; the notes over the box show for everybody. Called whenever any of that may have changed.
+function musicSync(again) {
+  clearTimeout(jukeEnd); clearTimeout(jukeRetry);
+  if (!again) jukeTries = 0;
+  let j = st.juke;
+  const into = j ? Math.max(0, (Date.now() + st.skew - j.at) / 1000) : 0;
+  if (j && into >= JUKE.secs) { j = st.juke = null; if (st.view === 'room') { tablesChanged(); if (sheet.kind === 'juke') openJuke(); } }      // it has played out
+  if (room) room.setMusic(!!j && st.view === 'room');
+  if (j) jukeEnd = setTimeout(musicSync, (JUKE.secs - into) * 1000 + 100);
+  const id = j && st.view === 'room' && $('#arena').hidden && soundOn() && musicOn() ? j.k + '@' + j.at : '';
+  if (!id) stopTune();
+  // (the sound may need a moment after it has been switched on: a few more tries)
+  else if (playing() !== id && !playTune(j.k, into, JUKE.secs, id) && jukeTries++ < 6) jukeRetry = setTimeout(() => musicSync(true), 250);
+}
+function soundSwitch(then) {
+  const b = h('button', { class: 'switch' + (soundOn() ? ' on' : ''), onclick: () => { setSound(!soundOn()); b.classList.toggle('on', soundOn()); musicSync(); if (then) then(); } }, h('span', {}, 'Lyd', h('small', {}, 'Alt, hvad der kan høres i klubhuset.')), h('i'));
+  return b;
+}
+function musicSwitch(then) {
+  const b = h('button', { class: 'switch' + (musicOn() ? ' on' : ''), onclick: () => { setMusic(!musicOn()); b.classList.toggle('on', musicOn()); musicSync(); if (then) then(); } }, h('span', {}, 'Musik', h('small', {}, 'Det, musikboksen spiller.')), h('i'));
+  return b;
+}
+function openJuke() {
+  const j = st.juke, by = j && st.mem.get(j.by), again = () => { if (sheet.kind === 'juke') openJuke(); };
+  const tunes = Object.entries(JUKE.tunes).map(([k, name]) => {
+    const on = !!j && j.k === k;
+    return h('button', { class: 'tune' + (on ? ' on' : ''), onclick: () => send({ t: 'juke', k }) }, h('i', {}, on ? '♫' : '▶'),
+      h('span', {}, h('b', {}, name), on ? h('small', {}, 'Spiller nu' + (by ? ' · sat på af ' + (by.id === mine() ? 'dig' : by.name) : '')) : null));
+  });
+  sheet.open({ title: 'Musikboksen', kind: 'juke', body: [
+    h('p', { class: 'hint' }, 'Sæt en melodi på. Alle i klubhuset hører den samme, og den spiller i ' + Math.round(JUKE.secs / 60) + ' minutter.'),
+    h('div', { class: 'tunes' }, tunes),
+    j ? h('button', { class: 'btn alt', onclick: () => send({ t: 'juke', k: '' }) }, 'Stop musikken') : null,
+    h('div', { class: 'sec' }, 'Hos dig'), soundSwitch(again), musicSwitch(again),
+    !soundOn() || !musicOn() ? h('p', { class: 'hint' }, 'Du har slået ' + (soundOn() ? 'musikken' : 'lyden') + ' fra, så du hører ikke, hvad boksen spiller.') : null,
+  ] });
+}
 
 // ---------- the notice board ----------
 function openScores() {
@@ -694,7 +748,7 @@ async function openArena(info) {
   if (st.game) { st.game.stop(); st.game = null; }
   root.replaceChildren(h('div', { class: 'sh-wait' }, 'Henter banen …'));
   root.hidden = false;
-  room.stop();
+  room.stop(); musicSync();
   const q = st.gameQ = [];
   try {
     const mod = await import('../shooter/game.js');
@@ -714,6 +768,7 @@ function closeArena(why) {
   if (root.hidden) return;
   root.hidden = true; root.replaceChildren();
   if (st.view === 'room') room.start();
+  musicSync();
   if (why === 'idle') toast('Du stod stille længe og er tilbage i klubhuset.');
   else if (why === 'error') toast('Kampen gik i stykker. Start en ny i arkaden.');
 }
@@ -787,8 +842,7 @@ function openMenu() {
     body.push(h('div', { class: 'sec' }, 'Gruppens navn'), h('div', { class: 'row' }, nm, h('button', { class: 'btn alt', style: 'flex:none', onclick: () => send({ t: 'grename', name: nm.value.trim() }) }, 'Gem')));
   }
   body.push(h('div', { class: 'sec' }, 'Dig'));
-  const snd = h('button', { class: 'switch' + (soundOn() ? ' on' : ''), onclick: () => { setSound(!soundOn()); room.setSound(soundOn()); snd.classList.toggle('on', soundOn()); } }, h('span', {}, 'Lyd'), h('i'));
-  body.push(snd, dndSwitch(), pushRow());
+  body.push(soundSwitch(), musicSwitch(), dndSwitch(), pushRow());
   const pw = h('form', { hidden: true, onsubmit: e => { e.preventDefault(); send({ t: 'pass', old: e.currentTarget.old.value, pass: e.currentTarget.pass.value }); } },
     h('label', {}, 'Nuværende kodeord', h('input', { name: 'old', type: 'password', autocomplete: 'current-password', required: true })),
     h('label', {}, 'Nyt kodeord', h('input', { name: 'pass', type: 'password', autocomplete: 'new-password', minLength: LIMITS.passMin, required: true })), h('button', { class: 'btn' }, 'Skift kodeord'));
@@ -980,10 +1034,11 @@ on.ptest = m => {
 async function boot() {
   try { await Promise.race([document.fonts.load('600 16px Fredoka'), new Promise(r => setTimeout(r, 1500))]); } catch {}
   room = createRoom($('#room'), { onActor, onStation, onFloor });
-  room.setSound(soundOn());
   new ResizeObserver(() => room.resize()).observe($('#stage'));
-  document.addEventListener('pointerdown', unlock, { once: true });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') room.start(); else room.stop(); });
+  // Sound is made, or woken, by any press or key (see sfx.js). A tune that waited for that starts then.
+  const press = () => { unlock(); if (st.juke && !playing()) setTimeout(musicSync, 120); };
+  for (const ev of ['pointerdown', 'pointerup', 'touchend', 'keydown']) document.addEventListener(ev, press, { capture: true, passive: true });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { room.start(); musicSync(); } else room.stop(); });
   // an invitation in the address: remember it, and take it out of the address bar
   const q = new URLSearchParams(location.search), code = (q.get('i') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   try { if (code) sessionStorage.setItem('slq-invite', code); st.invite = code || sessionStorage.getItem('slq-invite') || ''; } catch { st.invite = code; }

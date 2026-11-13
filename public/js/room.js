@@ -18,7 +18,7 @@ export function createRoom(canvas, hooks) {
   let me = 0, T = 0, last = 0, raf = 0, running = false;
   let s = 40, dpr = 1, cw = 0, ch = 0, ox = 0, oy = 0, camX = 0, camFree = false;
   let bg = null, pieces = [], stools = {}, builtFor = '', groupName = '';
-  let labels = {}, hover = null, hintUntil = 0, soundOn = true, down = null;
+  let labels = {}, hover = null, hintUntil = 0, music = false, down = null;
   const casino = { pot: 0, lines: [], spin: {} }, spins = [];     // the jackpot, today's board, which machines turn; results that wait for the reels to stop
 
   // ---------- layout and the pictures that are kept ----------
@@ -172,15 +172,25 @@ export function createRoom(canvas, hooks) {
     }
   }
 
+  // The sign over a piece of furniture: its name, or what is going on there. A sign is a text, or { head, text, hot }:
+  // a small line over the text (the game), and `hot` for the one that waits for this player (it glows).
   function drawLabel(st, strong) {
-    const b = hitBox(st), text = labels[st.id] || st.name, size = clamp(s * 0.26, 11, 15);
-    c.font = '600 ' + size + 'px ' + FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+    const l = labels[st.id], lab = typeof l === 'string' ? { text: l } : l, b = hitBox(st);
+    const text = lab ? lab.text : st.name, head = lab && lab.head ? lab.head.toUpperCase() : '', size = clamp(s * 0.26, 11, 15), hs = Math.max(10, size * 0.74);
     const mid = X((b[0] + b[2]) / 2);
     if (mid < 12 || mid > cw - 12) return;                       // the furniture is outside the picture: no label piling up at the edge
-    const w = c.measureText(text).width + size * 1.4, h = size * 1.7, cx = clamp(mid, w / 2 + 4, cw - w / 2 - 4), y = Math.max(h + 2, oy + (b[1] - (st.lift || 0)) * s - 6);
-    c.globalAlpha = strong ? 1 : 0.9;
-    c.beginPath(); c.roundRect(cx - w / 2, y - h, w, h, h / 2); c.fillStyle = labels[st.id] ? '#ffb347' : 'rgba(28,23,40,.86)'; c.fill();
-    c.fillStyle = labels[st.id] ? '#2b1a08' : '#fff'; c.fillText(text, cx, y - h / 2 + 0.5);
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = '600 ' + size + 'px ' + FONT;
+    let tw = c.measureText(text).width;
+    if (head) { c.font = '700 ' + hs + 'px ' + FONT; tw = Math.max(tw, c.measureText(head).width); }
+    const w = tw + size * 1.4, h = size * 1.7 + (head ? hs * 1.1 : 0), cx = clamp(mid, w / 2 + 4, cw - w / 2 - 4), y = Math.max(h + 2, oy + (b[1] - (st.lift || 0)) * s - 6);
+    const hot = !!(lab && lab.hot), glow = hot ? 0.5 + 0.5 * Math.sin(T * 4.5) : 0;
+    c.globalAlpha = strong || hot ? 1 : 0.9;
+    if (hot) { c.shadowColor = 'rgba(255,196,84,' + (0.45 + 0.45 * glow) + ')'; c.shadowBlur = (5 + 11 * glow) * dpr; }
+    c.beginPath(); c.roundRect(cx - w / 2, y - h, w, h, Math.min(h / 2, size * 0.95)); c.fillStyle = hot ? '#ffd772' : lab ? '#ffb347' : 'rgba(28,23,40,.86)'; c.fill();
+    c.shadowBlur = 0;
+    if (head) { c.fillStyle = 'rgba(43,26,8,.7)'; c.fillText(head, cx, y - h + hs * 0.98); }
+    c.font = '600 ' + size + 'px ' + FONT; c.fillStyle = lab ? '#2b1a08' : '#fff'; c.fillText(text, cx, y - size * 0.85 + (head ? -0.5 : 0.5));
     c.globalAlpha = 1;
   }
 
@@ -201,14 +211,14 @@ export function createRoom(canvas, hooks) {
     if (!bg) return;
     c.drawImage(bg, ox, oy, roomW, VIEW_H * s);
     for (let i = spins.length - 1; i >= 0; i--) if (T >= spins[i].at) { const q = spins[i]; spins.splice(i, 1); landSpin(q); }
-    c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; paintLive(c, T, soundOn, casino); c.restore();
+    c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; paintLive(c, T, music, casino); c.restore();
     // furniture and people, the ones at the back first
     const list = pieces.map(p => ({ key: p.key, p }));
     for (const a of actors.values()) list.push({ key: place(a)[3], a });
     list.sort((u, v) => u.key - v.key);
     for (const it of list) {
       if (it.a) drawActor(it.a);
-      else if (it.p.live) { c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; if (it.p.live === 'bartender') paintBartender(c, T); else paintOver(c, it.p.live, T, soundOn, casino); c.restore(); }
+      else if (it.p.live) { c.save(); c.translate(ox, oy); c.scale(s, s); c.lineJoin = 'round'; c.lineCap = 'round'; if (it.p.live === 'bartender') paintBartender(c, T); else paintOver(c, it.p.live, T, music, casino); c.restore(); }
       else c.drawImage(it.p.stool ? stools[it.p.stool] : it.p.cv, X(it.p.x), oy + it.p.y * s, it.p.w * s, it.p.h * s);
     }
     drawFx(dt);
@@ -357,10 +367,11 @@ export function createRoom(canvas, hooks) {
     resize,
     start() { if (running) return; running = true; resize(); last = performance.now(); raf = requestAnimationFrame(frame); },
     stop() { running = false; cancelAnimationFrame(raf); },
-    setSound(on) { soundOn = on; },
+    setMusic(on) { music = !!on; },                 // the music box is playing: notes rise from it
     setName(name) { groupName = name; if (running) build(); },
     setLabels(l) { labels = l; },
     hint(seconds = 7) { hintUntil = T + seconds; },
+    spot: id => { const b = hitBox(STATION[id]); return [X((b[0] + b[2]) / 2), oy + (b[1] + b[3]) / 2 * s]; },      // where a piece of furniture is in the picture (for trying things out)
     here: id => actors.has(id),
     sitting: id => { const a = actors.get(id); return a && a.sit ? a.sit[0] : ''; },      // the furniture somebody sits at (or walks to)
     count: () => actors.size,

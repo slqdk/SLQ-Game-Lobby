@@ -1,18 +1,25 @@
-// Small sound effects, made on the spot with WebAudio (no sound files). Nothing plays until the player has
-// clicked or tapped once: browsers do not allow sound before that.
-let ctx = null, master = null, on = true;
-try { on = localStorage.getItem('slq-sound') !== '0'; } catch {}
+// Small sound effects, made on the spot with WebAudio (no sound files). Browsers allow no sound before the player
+// has pressed something, and some put the sound to sleep again when the page has been away: so `unlock` is called
+// on every press and key, and makes or wakes the sound as long as it is switched on.
+let ctx = null, master = null, on = true, music = true, pressAt = -1e9;
+try { on = localStorage.getItem('slq-sound') !== '0'; music = localStorage.getItem('slq-music') !== '0'; } catch {}
 
 export const soundOn = () => on;
-export function setSound(v) { on = !!v; try { localStorage.setItem('slq-sound', on ? '1' : '0'); } catch {} if (on) play('pop'); }
-export function unlock() { if (!on) return; try { audio(); } catch {} }
+export const musicOn = () => music;
+// Switching the sound on happens in a press, so the sound can be made right there (it used to wait for a first
+// press that had already been spent while the sound was off).
+export function setSound(v) { on = !!v; try { localStorage.setItem('slq-sound', on ? '1' : '0'); } catch {} if (on) { unlock(); play('pop'); } }
+export function setMusic(v) { music = !!v; try { localStorage.setItem('slq-music', music ? '1' : '0'); } catch {} }
+export function unlock() { pressAt = performance.now(); if (!on) return; try { audio(); } catch {} }
+// where the music goes: the running sound and its main volume, or nothing while there is no sound to play on
+export const output = () => on && ctx && ctx.state === 'running' ? { ctx, master } : null;
 
 function audio() {
   if (!ctx) {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     master = ctx.createGain(); master.gain.value = 0.45; master.connect(ctx.destination);
   }
-  if (ctx.state === 'suspended') ctx.resume();
+  if (ctx.state !== 'running') ctx.resume();
   return ctx;
 }
 
@@ -63,6 +70,11 @@ const SOUNDS = {
 };
 
 export function play(name) {
-  if (!on || !SOUNDS[name]) return;
-  try { if (!ctx || ctx.state !== 'running') { if (!ctx) return; audio(); } SOUNDS[name](); } catch {}
+  if (!on || !ctx || !SOUNDS[name]) return;
+  try {
+    // asleep: wake it, and only let through a sound that answers a press just made (the rest would all sound at
+    // once when it wakes)
+    if (ctx.state !== 'running') { ctx.resume(); if (performance.now() - pressAt > 800) return; }
+    SOUNDS[name]();
+  } catch {}
 }

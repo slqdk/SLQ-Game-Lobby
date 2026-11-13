@@ -21,7 +21,8 @@ import { createArena } from '../server/arena.js';
 import { buildNav } from '../server/arena-nav.js';
 import { buildWorld, nullThree, EYE, RAD, STEP } from '../public/shooter/world.js';
 import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, FLAG, dirAim, aimDir, falloff, zoneAt, flyShot, newShot } from '../public/shooter/rules.js';
-import { ECON, PRANKS, ITEMS, DRINKS, BAR, LOOK, cleanLook, randomLook } from '../public/shared/defs.js';
+import { ECON, PRANKS, JUKE, ITEMS, DRINKS, BAR, LOOK, cleanLook, randomLook } from '../public/shared/defs.js';
+import { tuneIds, tuneBeats } from '../public/js/music.js';
 import { ROOM, STATIONS, STATION, isFree, findPath, pathLen } from '../public/shared/room.js';
 import { GAMES } from '../public/shared/games/index.js';
 import { mulberry32 } from '../public/shared/util.js';
@@ -186,6 +187,33 @@ section('drillerier');
   clock += 40000;
   C.send({ t: 'enter', g: GID });
   check('hønen går over igen', C.last('room').mem.find(m => m.id === idB).fx.length === 0);
+}
+
+section('musikboksen');
+{
+  const idA = A.last('welcome').me.id;
+  check('hver melodi i listen har noder, og takterne går op', Object.keys(JUKE.tunes).join() === tuneIds().join() && tuneIds().every(k => tuneBeats(k) > 30));
+  clock += 2000;
+  A.send({ t: 'juke', k: 'waltz' });
+  const j = B.last('juke');
+  check('en melodi, der sættes på, når alle i klubhuset', j && j.k === 'waltz' && j.by === idA && j.at === clock && A.last('juke').k === 'waltz');
+  A.send({ t: 'juke', k: 'rag' });
+  check('man kan ikke skifte melodi hele tiden', /øjeblik/.test(A.err()) && B.last('juke').k === 'waltz');
+  B.send({ t: 'juke', k: 'tuba' });
+  check('en ukendt melodi afvises', /findes ikke/.test(B.err()));
+  clock += 60000;
+  C.send({ t: 'enter', g: GID });
+  const jr = C.last('room').juke;
+  check('en nyankommen får at vide, hvad der spiller, og hvornår det begyndte', jr && jr.k === 'waltz' && jr.at === clock - 60000 && jr.by === idA);
+  B.send({ t: 'juke', k: '' });
+  check('en anden kan stoppe musikken', A.last('juke').k === '');
+  C.send({ t: 'enter', g: GID });
+  check('og så er der stille for den næste, der kommer', C.last('room').juke === null);
+  clock += 2000;
+  B.send({ t: 'juke', k: 'blues' });
+  clock += JUKE.secs * 1000 + 1000;
+  C.send({ t: 'enter', g: GID });
+  check('en melodi spiller ud af sig selv', B.last('juke').k === 'blues' && C.last('room').juke === null);
 }
 
 section('kiosken');

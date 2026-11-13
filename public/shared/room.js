@@ -13,7 +13,7 @@ export const CASINO_X = 24;
 // seats     [x, y] of each seat; `on` means the seats are on the furniture itself (the sofa)
 export const STATIONS = [
   { id: 'wardrobe', kind: 'wardrobe', name: 'Garderoben', box: [0.9, 0.2, 2.2, 0.9], h: 2.7, use: [2.0, 1.9] },
-  { id: 'kiosk', kind: 'shop', name: 'Kiosken', box: [3.9, 0.2, 3.2, 1.1], h: 1.15, use: [5.5, 2.1] },
+  { id: 'kiosk', kind: 'shop', name: 'Tøjbutikken', box: [3.9, 0.2, 3.2, 1.1], h: 1.15, use: [5.5, 2.1] },
   { id: 'bar', kind: 'bar', name: 'Baren', box: [8.2, 0.2, 5.4, 1.2], h: 1.3, use: [10.9, 2.7], high: true,
     seats: [[8.95, 2.0], [10.25, 2.0], [11.55, 2.0], [12.85, 2.0]] },
   { id: 'board', kind: 'scores', name: 'Opslagstavlen', wall: [14.4, 1.2, 2.2, 1.55], use: [15.5, 1.3] },

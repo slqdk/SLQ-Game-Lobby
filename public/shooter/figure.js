@@ -31,13 +31,32 @@ const SWINGS = [
 ];
 const ARM = 0.55;      // from the shoulder to the middle of the hand
 
+// The torso's outline from the hips (0) to the shoulders (1), as a share of its half width: a man's is straight, a
+// woman's has a waist, a sturdy body a belly.
+const OUTLINE = {
+  straight: [[0, 1], [1, 1]],
+  waist: [[0, 0.97], [0.12, 1], [0.28, 0.97], [0.45, 0.89], [0.58, 0.86], [0.72, 0.9], [0.86, 0.96], [0.95, 0.96], [1, 0.9]],
+  belly: [[0, 0.93], [0.1, 1], [0.26, 1.05], [0.44, 1.05], [0.62, 0.99], [0.8, 0.92], [0.94, 0.88], [1, 0.82]],
+};
+function girth(shape, t) {
+  const o = OUTLINE[shape];
+  for (let i = 1; i < o.length; i++) if (t <= o[i][0]) return o[i - 1][1] + (o[i][1] - o[i - 1][1]) * (t - o[i - 1][0]) / (o[i][0] - o[i - 1][0]);
+  return o[o.length - 1][1];
+}
+
 // arsenal: makeArsenal() from weapons.js; without it the figures carry nothing.
 export function makeFigures(THREE, arsenal) {
+  const turned = o => new THREE.LatheGeometry([new THREE.Vector2(0, -0.5), ...o.map(([t, r]) => new THREE.Vector2(r, t - 0.5)), new THREE.Vector2(0, 0.5)], 16);
   // every shape is made once and shared by all figures
   const G = {
     sphere: new THREE.SphereGeometry(1, 18, 14), half: new THREE.SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2),
     cyl: new THREE.CylinderGeometry(1, 1, 1, 14), cone: new THREE.ConeGeometry(1, 1, 12), box: new THREE.BoxGeometry(1, 1, 1),
     torus: new THREE.TorusGeometry(1, 0.22, 8, 18), ring: new THREE.TorusGeometry(1, 0.1, 6, 18), open: new THREE.CylinderGeometry(1, 1, 1, 16, 1, true),
+    // a band of a cone (a poncho is a pile of them), a vest (open in front), a coat (open in front, wider at the hem), a badge
+    band: new THREE.CylinderGeometry(0.95, 1, 1, 18), vest: new THREE.CylinderGeometry(1, 1, 1, 16, 1, true, 0.32, Math.PI * 2 - 0.64),
+    coat: new THREE.CylinderGeometry(1, 1.22, 1, 16, 1, true, 0.26, Math.PI * 2 - 0.52), star: new THREE.CylinderGeometry(1, 1, 1, 5),
+    // bodies with a shape of their own, turned from their outline
+    waist: turned(OUTLINE.waist), belly: turned(OUTLINE.belly),
   };
   const mat = (c, rough = 0.8, extra) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: rough, metalness: 0 }, extra));
   // one part: a shape, scaled and placed
@@ -74,6 +93,8 @@ export function makeFigures(THREE, arsenal) {
     else if (id === 'tophat') { part(head, G.cyl, mat(0x2f333b), 0.52, 0.04, 0.52, 0, y - 0.04, 0); part(head, G.cyl, mat(0x2f333b), 0.3, 0.5, 0.3, 0, y + 0.22, 0); part(head, G.torus, mat(0xd8343c), 0.3, 0.3, 0.14, 0, y + 0.02, 0).rotation.x = Math.PI / 2; }
     else if (id === 'viking') { part(head, G.half, mat(0x9aa0a6, 0.4, { metalness: 0.6 }), 0.45, 0.42, 0.45, 0, 0.1, 0); for (const s of [-1, 1]) { const c = part(head, G.cone, mat(0xf4ead0), 0.08, 0.36, 0.08, s * 0.46, 0.4, 0); c.rotation.z = -s * 0.5; } }
     else if (id === 'wizard') { part(head, G.cyl, mat(0x4a5fd0), 0.6, 0.04, 0.6, 0, y - 0.05, 0); const c = part(head, G.cone, mat(0x4a5fd0), 0.34, 0.8, 0.34, 0, y + 0.35, -0.03); c.rotation.x = -0.12; part(head, G.sphere, mat(0xf2c33f), 0.05, 0.05, 0.05, 0.12, y + 0.3, 0.26); }
+    else if (id === 'bowler') { part(head, G.cyl, mat(0x1d1a22), 0.56, 0.035, 0.52, 0, y - 0.03, 0); part(head, G.half, mat(0x1d1a22), 0.34, 0.34, 0.34, 0, y - 0.03, 0); part(head, G.torus, mat(0x5a4a3a), 0.33, 0.33, 0.1, 0, y, 0).rotation.x = Math.PI / 2; }
+    else if (id === 'gambler') { part(head, G.cyl, mat(0x24222a), 0.7, 0.03, 0.66, 0, y - 0.03, 0); part(head, G.cyl, mat(0x24222a), 0.31, 0.2, 0.31, 0, y + 0.07, 0); part(head, G.torus, mat(0xb8323a), 0.31, 0.31, 0.1, 0, y + 0.01, 0).rotation.x = Math.PI / 2; }
     else if (id === 'halo') part(head, G.ring, mat(0xf2c33f, 0.3, { emissive: 0xd9a020, emissiveIntensity: 0.8 }), 0.3, 0.3, 0.3, 0, 0.66, 0).rotation.x = Math.PI / 2;
     else if (id === 'crown') { const gold = mat(0xf2c33f, 0.3, { metalness: 0.7 }); part(head, G.open, gold, 0.3, 0.16, 0.3, 0, y + 0.06, 0).material.side = THREE.DoubleSide; for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; part(head, G.cone, gold, 0.06, 0.16, 0.06, Math.cos(a) * 0.3, y + 0.2, Math.sin(a) * 0.3); } }
   }
@@ -93,46 +114,87 @@ export function makeFigures(THREE, arsenal) {
 
   const DOWN = new THREE.Vector3(0, -1, 0), V = new THREE.Vector3(), ch = [0, 0, 0];
 
-  // look: a clubhouse look. opt: { team: 'A' | 'B' | '', bot, name, tag: colour of the name or '' for none }
+  // look: a clubhouse look. opt: { team: 'A' | 'B' | '', bot, name, tag: colour of the name or '' for none,
+  // even: everybody the same height (the shooter: what one can hit is the same for all) }
   function make(look, opt = {}) {
     const L = look || {}, pick = (k) => LOOK[k][L[k]] !== undefined ? LOOK[k][L[k]] : LOOK[k][0];
     const skinC = opt.bot ? 0xc3ccd3 : hex(pick('skin')), topC = hex(pick('topCol')), botC = hex(pick('bottomCol')), shoeC = hex(pick('shoeCol')), hairC = hex(pick('hairCol'));
     const skin = mat(skinC, opt.bot ? 0.42 : 0.8, opt.bot ? { metalness: 0.25 } : null), top = mat(topC), bottom = mat(botC), shoe = mat(shoeC), hairM = mat(hairC, 0.9), ink = mat(0x1d1a22, 0.6);
     const root = new THREE.Group(), body = new THREE.Group();
     root.add(body);
+    // the body one chose: a man's or a woman's, slim, ordinary or sturdy, short, middling or tall
+    const fem = pick('sex') === 'f' && !opt.bot, build = opt.bot ? 'mid' : pick('build'), tall = opt.even || opt.bot ? 1 : { mid: 1, short: 0.93, tall: 1.07 }[pick('height')];
+    const wide = { mid: 1, slim: 0.88, big: 1.2 }[build] * (fem ? 0.95 : 1), deep = { mid: 1, slim: 0.9, big: 1.24 }[build], limb = { mid: 1, slim: 0.9, big: 1.12 }[build] * (fem ? 0.92 : 1);
+    body.scale.setScalar(tall);
 
     // legs (they swing from the hip)
     const legs = [];
     for (const s of [-1, 1]) {
-      const leg = new THREE.Group(); leg.position.set(s * 0.15, 0.75, 0); body.add(leg);
+      const leg = new THREE.Group(); leg.position.set(s * 0.15 * wide, 0.75, 0); body.add(leg);
       const style = pick('bottom');
-      if (style === 'pants') part(leg, G.cyl, bottom, 0.115, 0.62, 0.115, 0, -0.33, 0, true);
-      else { part(leg, G.cyl, bottom, 0.125, 0.26, 0.125, 0, -0.14, 0, true); part(leg, G.cyl, skin, 0.1, 0.38, 0.1, 0, -0.45, 0); }
-      part(leg, G.box, shoe, 0.2, 0.13, 0.32, 0, -0.69, 0.05);
+      if (style === 'pants') part(leg, G.cyl, bottom, 0.115 * limb, 0.62, 0.115 * limb, 0, -0.33, 0, true);
+      else { part(leg, G.cyl, bottom, 0.125 * limb, 0.26, 0.125 * limb, 0, -0.14, 0, true); part(leg, G.cyl, skin, 0.1 * limb, 0.38, 0.1 * limb, 0, -0.45, 0); }
+      // what is on the feet: one's own shoes, or something from the clothes shop
+      if (L.feet === 'boots' || L.feet === 'spurs') {
+        const hide = mat(0x6b3d1e, 0.6);
+        part(leg, G.box, hide, 0.2, 0.14, 0.34, 0, -0.685, 0.06); part(leg, G.cyl, hide, 0.13 * limb, 0.3, 0.13 * limb, 0, -0.5, 0); part(leg, G.box, mat(0x3a2110), 0.17, 0.07, 0.09, 0, -0.74, -0.07);
+        if (L.feet === 'spurs') { part(leg, G.torus, mat(0xd9b24a, 0.3, { metalness: 0.7 }), 0.1, 0.1, 0.05, 0, -0.66, -0.06).rotation.x = Math.PI / 2; part(leg, G.star, mat(0xd9b24a, 0.3, { metalness: 0.7 }), 0.05, 0.012, 0.05, 0, -0.66, -0.19).rotation.z = Math.PI / 2; }
+      } else if (L.feet === 'sneakers') {
+        part(leg, G.box, mat(0xf4f1ea), 0.2, 0.12, 0.32, 0, -0.685, 0.05); part(leg, G.box, mat(0xd8343c), 0.205, 0.035, 0.2, 0, -0.67, 0.02); part(leg, G.box, mat(0xfafafa, 0.5), 0.21, 0.04, 0.34, 0, -0.74, 0.05);
+      } else part(leg, G.box, shoe, 0.2, 0.13, 0.32, 0, -0.69, 0.05);
       legs.push(leg);
     }
-    if (pick('bottom') === 'skirt') part(body, G.cone, bottom, 0.42, 0.42, 0.42, 0, 0.72, 0, true);
+    if (pick('bottom') === 'skirt') part(body, G.cone, bottom, 0.42 * wide, 0.42, 0.42 * deep, 0, 0.72, 0, true);
 
     // the upper body leans with the aim
     const upper = new THREE.Group(); upper.position.y = 0.7; body.add(upper);
-    const torso = part(upper, G.cyl, top, 0.33, 0.68, 0.3, 0, 0.34, 0, true);
+    const TW = 0.33 * wide, TD = 0.3 * deep;                       // half the torso's width and depth
+    // a man's body is straight; a woman's narrows to the waist and widens again; a sturdy one has a belly
+    const shape = build === 'big' ? 'belly' : fem ? 'waist' : 'straight', TZ = shape === 'belly' ? 0.025 : 0;
+    const torso = part(upper, shape === 'belly' ? G.belly : shape === 'waist' ? G.waist : G.cyl, top, TW, 0.68, TD, 0, 0.34, TZ, true);
+    const rim = y => girth(shape, y / 0.68), front = y => TZ + TD * rim(y);      // the body's girth and its front at a height above the hips
     const style = pick('top');
-    if (style === 'hoodie') { part(upper, G.sphere, top, 0.26, 0.2, 0.2, 0, 0.7, -0.2); part(upper, G.box, mat(topC, 0.9), 0.3, 0.14, 0.04, 0, 0.2, 0.29); }
-    else if (style === 'shirt') { part(upper, G.box, mat(0xf4f1ea), 0.05, 0.56, 0.02, 0, 0.36, 0.3); for (let i = 0; i < 3; i++) part(upper, G.sphere, ink, 0.022, 0.022, 0.022, 0, 0.2 + i * 0.16, 0.315); }
-    else if (style === 'stripes') for (let i = 0; i < 3; i++) part(upper, G.torus, mat(0xf4f1ea), 0.305, 0.28, 0.16, 0, 0.16 + i * 0.18, 0).rotation.x = Math.PI / 2;
+    if (style === 'hoodie') { part(upper, G.sphere, top, 0.26, 0.2, 0.2, 0, 0.7, -0.2 * deep); part(upper, G.box, mat(topC, 0.9), 0.3, 0.14, 0.04, 0, 0.2, front(0.2) - 0.012); }
+    else if (style === 'shirt') {
+      const white = mat(0xf4f1ea);
+      for (let i = 0; i < 4; i++) part(upper, G.box, white, 0.05, 0.15, 0.02, 0, 0.11 + i * 0.15, front(0.11 + i * 0.15) - 0.004);
+      for (let i = 0; i < 3; i++) part(upper, G.sphere, ink, 0.022, 0.022, 0.022, 0, 0.2 + i * 0.16, front(0.2 + i * 0.16) + 0.008);
+    }
+    else if (style === 'stripes') for (let i = 0; i < 3; i++) { const y = 0.16 + i * 0.18, o = part(upper, G.ring, mat(0xf4f1ea), TW * rim(y) * 0.95, TD * rim(y) * 0.95, 0.34, 0, y, TZ); o.rotation.x = Math.PI / 2; }
+    // from the clothes shop, worn over it: vests, a poncho, jackets, a long coat
+    const OVER = { vest: [0x7a4a24, 0], sheriff: [0x24222a, 0], leather: [0x4a2c18, 1], duster: [0xb8a078, 1], tux: [0x1d1a22, 1] }[L.over];
+    let sleeveM = null;
+    if (OVER) {
+      const om = mat(OVER[0], 0.75, { side: THREE.DoubleSide }), long = L.over === 'duster', wideO = shape === 'belly' ? 1.06 : 1;
+      const OW = TW * wideO + 0.045, OD = TD * wideO + 0.045, onIt = x => TZ + OD * Math.sqrt(Math.max(0, 1 - (x / OW) ** 2));      // the cloth's front, x from the middle
+      part(upper, long ? G.coat : G.vest, om, OW, long ? 1.0 : L.over === 'leather' || L.over === 'tux' ? 0.6 : 0.52, OD, 0, long ? 0.16 : L.over === 'leather' || L.over === 'tux' ? 0.38 : 0.42, TZ, true);
+      for (const sd of [-1, 1]) part(upper, G.box, om, 0.12, 0.05, TD * 1.5, sd * TW * 0.62, 0.67, 0);                    // over the shoulders
+      if (OVER[1]) sleeveM = om;
+      if (L.over === 'sheriff') { const x = 0.2 * wide, star = part(upper, G.star, mat(0xf2c33f, 0.3, { metalness: 0.7 }), 0.07, 0.015, 0.07, x, 0.5, onIt(x) + 0.008); star.rotation.order = 'YXZ'; star.rotation.set(Math.PI / 2, Math.atan2(x / OW, onIt(x) / OD) * 0.8, 0); }
+      if (L.over === 'tux') { for (let i = 0; i < 3; i++) part(upper, G.box, mat(0xf8f6f0), 0.16, 0.17, 0.02, 0, 0.23 + i * 0.17, front(0.23 + i * 0.17) + 0.004); for (const sd of [-1, 1]) part(upper, G.cone, mat(0x1d1a22), 0.06, 0.12, 0.035, sd * 0.06, 0.62, front(0.62) + 0.03).rotation.z = sd * Math.PI / 2; }
+      if (L.over === 'leather') for (const sd of [-1, 1]) part(upper, G.box, mat(0x2e1a0e), 0.035, 0.5, 0.02, sd * 0.1, 0.4, onIt(0.1) + 0.004);
+    } else if (L.over === 'poncho') {
+      // from the shoulders out to the hem: a pile of bands, each a little narrower than the one below (the cloth with
+      // its woven stripes), and a yoke over the shoulders up to the neck
+      const R = TW + 0.34, D = TD + 0.3, n = 6, H = 0.66 / (1 - 0.95 ** n), base = mat(0xc8642a, 0.9), cols = [base, mat(0xf2c33f, 0.9), base, mat(0x2f6fb8, 0.9), mat(0xf4f1ea, 0.9), base];
+      let y = -0.04, k = 1;
+      for (const m of cols) { const hh = 0.05 * k * H; part(upper, G.band, m, R * k, hh, D * k, 0, y + hh / 2, TZ, true); y += hh; k *= 0.95; }
+      part(upper, G.cone, base, R * k, 0.2, D * k, 0, y + 0.1, TZ);
+    }
     // on a team: the team's vest
     let vest = null;
     if (opt.team && TEAM_COL[opt.team]) {
-      vest = part(upper, G.open, mat(TEAM_COL[opt.team], 0.6, { emissive: TEAM_COL[opt.team], emissiveIntensity: 0.25, side: THREE.DoubleSide }), 0.365, 0.46, 0.335, 0, 0.4, 0);
-      for (const s of [-1, 1]) part(upper, G.box, vest.material, 0.1, 0.06, 0.3, s * 0.2, 0.66, 0);
+      const k = shape === 'belly' ? 1.06 : 1;
+      vest = part(upper, G.open, mat(TEAM_COL[opt.team], 0.6, { emissive: TEAM_COL[opt.team], emissiveIntensity: 0.25, side: THREE.DoubleSide }), TW * k + 0.06, 0.46, TD * k + 0.06, 0, 0.4, TZ);
+      for (const s of [-1, 1]) part(upper, G.box, vest.material, 0.1, 0.06, TD, s * TW * 0.6, 0.66, 0);
     }
     // arms (they turn at the shoulder; the hand is at the end). arms[0] is the right one.
     const arms = [], hands = [];
     for (const s of [-1, 1]) {
-      const arm = new THREE.Group(); arm.position.set(s * 0.41, 0.6, 0); upper.add(arm);
-      const sleeve = style === 'tee' || style === 'stripes' ? 0.24 : 0.5;
-      part(arm, G.cyl, top, 0.092, sleeve, 0.092, 0, -sleeve / 2, 0, true);
-      if (sleeve < 0.5) part(arm, G.cyl, skin, 0.078, 0.5 - sleeve, 0.078, 0, -sleeve - (0.5 - sleeve) / 2, 0);
+      const arm = new THREE.Group(); arm.position.set(s * (TW * rim(0.6) + 0.08), 0.6, 0); upper.add(arm);
+      const sleeve = sleeveM ? 0.5 : style === 'tee' || style === 'stripes' ? 0.24 : 0.5;
+      part(arm, G.cyl, sleeveM || top, (sleeveM ? 0.102 : 0.092) * limb, sleeve, (sleeveM ? 0.102 : 0.092) * limb, 0, -sleeve / 2, 0, true);
+      if (sleeve < 0.5) part(arm, G.cyl, skin, 0.078 * limb, 0.5 - sleeve, 0.078 * limb, 0, -sleeve - (0.5 - sleeve) / 2, 0);
       hands.push(part(arm, G.sphere, skin, 0.1, 0.1, 0.1, 0, -ARM, 0));
       arms.push(arm);
     }
@@ -155,6 +217,7 @@ export function makeFigures(THREE, arsenal) {
       eyeParts.push(e);
     }
     const mouth = part(head, G.box, ink, 0.13, 0.028, 0.03, 0, -0.13, 0.39);
+    if (fem) for (const s of [-1, 1]) part(head, G.box, ink, 0.07, 0.016, 0.012, s * 0.2, 0.125, 0.372).rotation.z = s * 0.55;      // lashes
     if (!opt.bot) {
       hair(head, pick('hair'), hairM);
       const beard = pick('beard');
@@ -172,10 +235,12 @@ export function makeFigures(THREE, arsenal) {
     else if (L.glasses === 'patch') { part(head, G.sphere, ink, 0.1, 0.1, 0.03, 0.15, 0.06, 0.4); part(head, G.torus, ink, 0.425, 0.425, 0.08, 0, 0.1, 0).rotation.set(Math.PI / 2, 0.25, 0); }
     else if (L.glasses === 'monocle') part(head, G.ring, mat(0xf2c33f, 0.3, { metalness: 0.7 }), 0.11, 0.11, 0.11, 0.15, 0.06, 0.4);
     if (L.neck === 'scarf') part(upper, G.torus, mat(0xd8343c), 0.26, 0.26, 0.5, 0, 0.7, 0).rotation.x = Math.PI / 2;
-    else if (L.neck === 'bowtie') for (const s of [-1, 1]) part(upper, G.cone, mat(0xd8343c), 0.07, 0.14, 0.04, s * 0.07, 0.62, 0.3).rotation.z = s * Math.PI / 2;
+    else if (L.neck === 'bowtie') for (const s of [-1, 1]) part(upper, G.cone, mat(0xd8343c), 0.07, 0.14, 0.04, s * 0.07, 0.62, Math.max(0.3, front(0.62) + 0.02)).rotation.z = s * Math.PI / 2;
+    else if (L.neck === 'bandana') { part(upper, G.torus, mat(0xc8323c), 0.24, 0.24, 0.3, 0, 0.7, 0).rotation.x = Math.PI / 2; part(upper, G.cone, mat(0xc8323c), 0.2, 0.24, 0.05, 0, 0.58, front(0.58) + 0.02).rotation.x = Math.PI; }
+    else if (L.neck === 'bolo') { for (const s of [-1, 1]) part(upper, G.cyl, ink, 0.012, 0.3, 0.012, s * 0.035, 0.5, front(0.5) + 0.02).rotation.z = s * 0.1; part(upper, G.sphere, mat(0x2fb8a8, 0.3), 0.045, 0.055, 0.02, 0, 0.64, front(0.62) + 0.03); }
     else if (L.neck === 'chain') part(upper, G.ring, mat(0xf2c33f, 0.3, { metalness: 0.8 }), 0.24, 0.3, 0.24, 0, 0.56, 0.06).rotation.x = Math.PI / 2 - 0.5;
-    if (L.back === 'pack') part(upper, G.box, mat(0x58b85f), 0.4, 0.46, 0.2, 0, 0.36, -0.38, true);
-    else if (L.back === 'cape') { const c = part(upper, G.box, mat(0xa3262d, 0.9, { side: THREE.DoubleSide }), 0.62, 0.9, 0.03, 0, 0.14, -0.36); c.rotation.x = 0.16; }
+    if (L.back === 'pack') part(upper, G.box, mat(0x58b85f), 0.4, 0.46, 0.2, 0, 0.36, -0.08 - TD, true);
+    else if (L.back === 'cape') { const c = part(upper, G.box, mat(0xa3262d, 0.9, { side: THREE.DoubleSide }), 0.62, 0.9, 0.03, 0, 0.14, -0.06 - TD); c.rotation.x = 0.16; }
     else if (L.back === 'wings') for (const s of [-1, 1]) { const w = part(upper, G.sphere, mat(0xf8f6f0, 0.9), 0.3, 0.42, 0.05, s * 0.34, 0.5, -0.34); w.rotation.set(0, s * 0.5, s * 0.5); }
 
     const tag = opt.tag ? nameTag(opt.name || '', opt.tag) : null;
@@ -183,7 +248,7 @@ export function makeFigures(THREE, arsenal) {
 
     // ---- moving ----
     // parts: the pieces that move, for whoever poses the figure themselves (the clubhouse does; the shooter uses update)
-    const f = { group: root, weaponId: '', walk: 0, flashT: 0, shootT: 0, deadT: -1, tag, parts: { body, upper, head, legs, arms, hands, torso, skull, mouth, eyes: eyeParts } };
+    const f = { group: root, weaponId: '', walk: 0, flashT: 0, shootT: 0, deadT: -1, tag, tall, parts: { body, upper, head, legs, arms, hands, torso, skull, mouth, eyes: eyeParts } };
     let held = null, hold = HOLD.knife, swingT = -1, swingKind = 0, swingNo = 0, twist = 0, loadK = 0, loadT = 0;
     f.setWeapon = id => {
       if (id === f.weaponId) return;

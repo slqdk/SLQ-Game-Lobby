@@ -102,7 +102,7 @@ export function makePeople(THREE) {
       // the arms: hanging and swinging, unless something else is said below. [i] = [x rot, z rot] or a place for the hand
       let armR = [-legA * 0.8, -0.1], armL = [legA * 0.8, 0.1], handR = null, handL = null;
       if (o.seat) {
-        by = o.seatY - HIP + 0.06; legA = legB = o.seat === 'high' ? -0.95 : -1.3; legZ = 0.12;
+        by = o.seatY - HIP * f.tall + 0.06; legA = legB = o.seat === 'high' ? -0.95 : -1.3; legZ = 0.12;
         armR = [-0.55, -0.12]; armL = [-0.55, 0.12]; lean = 0.04;
         if (o.seat === 'sofa') { lean = -0.12; armR = [-0.25, -0.3]; armL = [-0.25, 0.3]; }
       }
@@ -167,12 +167,12 @@ export function makePeople(THREE) {
       if (fx.pie !== undefined) { const s = extra('pie', () => { const g = new THREE.Group(); head.add(g); part(g, G.sphere, M.cream, 0.36, 0.36, 0.09, 0, 0, 0.38); part(g, G.torus, mat(0xd9a05a), 0.33, 0.33, 0.12, 0, 0, 0.36); return g; }); s.visible = true; s.position.y = -Math.max(0, fx.pie - 1.6) * 0.06; s.rotation.z = Math.max(0, fx.pie - 1.6) * 0.03; } else hide('pie');
       if (fx.cloud !== undefined) {
         if (!cloud) cloud = makeCloud();
-        cloud.g.visible = true; cloud.g.position.set(0, (isHen ? 1.7 : 2.9 + by) + Math.sin(T * 1.5) * 0.03, 0); cloud.g.scale.setScalar(Math.min(1, fx.cloud * 3));
+        cloud.g.visible = true; cloud.g.position.set(0, (isHen ? 1.7 : 2.9 * f.tall + by) + Math.sin(T * 1.5) * 0.03, 0); cloud.g.scale.setScalar(Math.min(1, fx.cloud * 3));
         cloud.drops.forEach((d, i) => { const u = (T * 1.3 + i * 0.37) % 1; d.position.set(-0.3 + (i * 53 % 37) / 37 * 0.6, -0.2 - u * 0.9, ((i * 17) % 5 - 2) * 0.06); d.visible = u < 0.9; });
       } else if (cloud) cloud.g.visible = false;
     }
     function dispose() { f.dispose(); }
-    return { group: root, pose, dispose, parts: P };
+    return { group: root, pose, dispose, parts: P, tall: f.tall };
   }
   // the glass one sees in one's own hand when looking through one's own eyes
   return { person, vessel, materials: M };

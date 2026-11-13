@@ -1,7 +1,7 @@
 // SLQ Game Lobby — the browser side: screens, menus, and what each message from the server means.
 import { api, createSocket } from './net.js';
 import { createRoom } from './room.js';
-import { $, h, icon, bust, sheet, toast } from './ui.js';
+import { $, h, icon, bust, whole, sheet, toast } from './ui.js';
 import { drawBust, drawFigure, drawPrank, drawEmote, drawGlass } from './avatar.js';
 import { play, unlock, soundOn, setSound, musicOn, setMusic } from './sfx.js';
 import { playTune, stopTune, playing } from './music.js';
@@ -15,7 +15,7 @@ import { slotView } from './slots.js';
 import { renderBlackjack, resetBlackjack } from './blackjack.js';
 import { dealerMs } from '../shared/blackjack.js';
 import { MACHINES, MACHINE_IDS } from '../shared/slots.js';
-import { ECON, LIMITS, EMOTES, PRANKS, JUKE, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, STYLE_NAMES, SLOTS, SLOT_NAMES, randomLook } from '../shared/defs.js';
+import { ECON, LIMITS, EMOTES, PRANKS, JUKE, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, LOOK_PAGES, STYLE_NAMES, SLOT_NAMES, randomLook } from '../shared/defs.js';
 import { ROOM, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
 import { MODES, MODE_IDS, LEVELS, FILLS } from '../shooter/rules.js';
@@ -201,8 +201,9 @@ const on = {
     toast(m.msg, { kind: 'err' }); play('error');
   },
   me(m) {
-    const before = st.me ? st.me.chips : m.me.chips;
+    const before = st.me ? st.me.chips : m.me.chips, was = !!(st.me && st.me.fresh);
     st.me = m.me;
+    if (was && !m.me.fresh) roomTips();                 // the figure is built: now the first words about the room
     const mem = st.mem.get(mine());
     if (mem) { mem.chips = m.me.chips; mem.look = m.me.look; mem.stats = m.me.stats; mem.dnd = m.me.dnd; }
     updateMe(m.me.chips - before);
@@ -235,7 +236,11 @@ const on = {
     if (!st.hinted) $('#friends').hidden = true;                           // the room fills the screen now: the list opens from the top bar
     renderFriends(); tablesChanged();
     if (st.tv) send({ t: 'topen', id: st.tv.id });            // back after a lost connection: the game is still open here
-    if (!st.hinted) { st.hinted = true; room.hint(9); toast('Tryk på gulvet for at gå. Tryk på møblerne og på de andre for at bruge dem.', { ms: 7000 }); }
+    // a new account builds its figure first (the first words about the room wait for that); an old one is told
+    // once that there is more to choose now
+    roomTips();
+    if (st.me.fresh) setTimeout(() => { if (st.view === 'room' && st.me.fresh && !sheet.isOpen) openWardrobe(true); }, 400);
+    else if (!load('slq-figure-tip')) { save('slq-figure-tip', '1'); toast('Nyt i garderoben: vælg køn, krop og højde. Og der er veste, jakker og støvler i tøjbutikken.', { actions: [['Åbn garderoben', () => openWardrobe()]], ms: 14000 }); }
     goWant();
   },
   g(m) {
@@ -447,7 +452,7 @@ async function useView(v) {
       if (st.g) { tablesChanged(); casinoChanged(); }
       musicSync();
     }
-    if (v !== 'flat') { deep.setView(v); if (st.g && !load('slq-3d-tip')) { save('slq-3d-tip', '1'); toast('Træk for at se dig om. Gå ved at trykke på gulvet eller med W A S D. V skifter visning, E tager en tår af glasset.', { ms: 10000 }); } }
+    if (v !== 'flat') { deep.setView(v); roomTips(); }
     save('slq-room', v);
     $('#viewBar').hidden = false;
     for (const b of $('#viewBar').children) b.classList.toggle('on', b.dataset.view === v);
@@ -521,51 +526,77 @@ function openSelf() {
   sheet.open({ title: st.me.name, kind: 'self', body: [h('div', { class: 'sec' }, 'Fagter'), emoteTiles(),
     room.sitting(mine()) === 'bar' ? h('button', { class: 'btn', onclick: openBar }, 'Bestil i baren') : null,
     h('button', { class: 'btn alt', onclick: () => { sheet.close(); sip(); } }, 'Tag en tår af glasset'), dndSwitch(),
-    h('div', { class: 'row' }, h('button', { class: 'btn alt', onclick: openWardrobe }, 'Garderoben'), h('button', { class: 'btn alt', onclick: openShop }, 'Kiosken'))] });
+    h('div', { class: 'row' }, h('button', { class: 'btn alt', onclick: () => openWardrobe() }, 'Garderoben'), h('button', { class: 'btn alt', onclick: openShop }, 'Tøjbutikken'))] });
 }
 $('#btnEmote').addEventListener('click', () => sheet.open({ title: 'Fagter', kind: 'emote', body: emoteTiles() }));
 $('#btnMe').addEventListener('click', openSelf);
 $('#btnChips').addEventListener('click', () => sheet.open({ title: 'Jetoner', kind: 'chips', body: [
   h('div', { class: 'who2' }, chipIcon(56), h('div', {}, h('b', {}, st.me.chips + ' jetoner'), h('span', {}, 'Dine, i alle dine grupper'))),
   h('p', { class: 'hint' }, 'Du får ' + ECON.daily + ' hver dag, du kigger forbi, og ' + ECON.win + ' for at vinde et spil mod en ven (' + ECON.loss + ' for at være med). Spiller I om en indsats, tager vinderen puljen.'),
-  h('p', { class: 'hint' }, 'Brug dem i baren, i kiosken og på at drille de andre.')] }));
+  h('p', { class: 'hint' }, 'Brug dem i baren, i tøjbutikken og på at drille de andre.')] }));
 
-// ---------- the wardrobe ----------
-function openWardrobe() {
-  const look = { ...st.me.look }, fig = h('canvas');
-  let t0 = performance.now(), raf = 0, timer = 0;
-  const draw = () => { drawFigure(fig, look, 210, { t: (performance.now() - t0) / 1000 }); raf = requestAnimationFrame(draw); };
-  const push = () => { clearTimeout(timer); timer = setTimeout(() => send({ t: 'look', look }), 250); };
-  const opts = h('div');
-  const build = () => {
-    const rows = [];
-    for (const k of Object.keys(LOOK)) {
-      if (STYLE_NAMES[k]) rows.push(h('div', { class: 'opt' }, h('span', {}, LOOK_NAMES[k]), h('div', { class: 'pick' }, STYLE_NAMES[k].map((n, i) => h('button', { class: look[k] === i ? 'on' : '', onclick: () => { look[k] = i; push(); build(); } }, n)))));
-      else rows.push(h('div', { class: 'opt' }, h('span', {}, LOOK_NAMES[k]), h('div', { class: 'sw' }, LOOK[k].map((col, i) => h('button', { class: look[k] === i ? 'on' : '', style: 'background:' + col, 'aria-label': LOOK_NAMES[k] + ' ' + (i + 1), onclick: () => { look[k] = i; push(); build(); } })))));
-    }
-    for (const slot of SLOTS) {
-      const own = st.me.items.filter(k => ITEMS[k] && ITEMS[k].slot === slot);
-      rows.push(h('div', { class: 'opt' }, h('span', {}, SLOT_NAMES[slot]), own.length
-        ? h('div', { class: 'pick' }, h('button', { class: look[slot] ? '' : 'on', onclick: () => { look[slot] = ''; push(); build(); } }, 'Intet'), own.map(k => h('button', { class: look[slot] === k ? 'on' : '', onclick: () => { look[slot] = k; push(); build(); } }, ITEMS[k].name)))
-        : h('div', { class: 'hint' }, 'Du har ikke noget endnu. Kig i kiosken.')));
-    }
-    opts.replaceChildren(...rows);
-  };
-  build(); draw();
-  sheet.open({ title: 'Garderoben', wide: true, kind: 'wardrobe', closed: () => { cancelAnimationFrame(raf); clearTimeout(timer); send({ t: 'look', look }); },
-    body: h('div', { class: 'wardrobe' },
-      h('div', {}, h('div', { class: 'fig' }, fig), h('div', { class: 'row', style: 'margin-top:10px' },
-        h('button', { class: 'btn alt small', onclick: () => { const r = randomLook(Math.floor(Math.random() * 1e9)); for (const k of Object.keys(LOOK)) look[k] = r[k]; push(); build(); } }, 'Tilfældig'),
-        h('button', { class: 'btn alt small', onclick: openShop }, 'Kiosken'))),
-      opts) });
+// ---------- the wardrobe: where one builds one's figure ----------
+// Body, head and plain clothes are free; what was bought in the clothes shop is put on here too. The figure is shown
+// in 3D (figview.js) and can be turned; without WebGL it is the flat drawing. `first`: the first time (a new account).
+// The first words about the room, once: how to walk, and how to look round in three dimensions. A newcomer who is
+// building a figure gets them afterwards.
+function roomTips() {
+  if (!st.g || st.view !== 'room' || !room || (st.me && st.me.fresh)) return;
+  if (!st.hinted) { st.hinted = true; room.hint(9); toast('Tryk på gulvet for at gå. Tryk på møblerne og på de andre for at bruge dem.', { ms: 7000 }); }
+  if (room === deep && !load('slq-3d-tip')) { save('slq-3d-tip', '1'); toast('Træk for at se dig om. Gå ved at trykke på gulvet eller med W A S D. V skifter visning, E tager en tår af glasset.', { ms: 10000 }); }
 }
 
-// ---------- the kiosk ----------
+function openWardrobe(first = false) {
+  const look = { ...st.me.look }, fig2 = h('canvas', { hidden: true }), figBox = h('div', { class: 'fig' }, fig2), turnHint = h('p', { class: 'hint center', style: 'margin-top:8px' }, 'Træk i figuren for at dreje den.');
+  let raf = 0, timer = 0, view = null, page = 0, gone = false;
+  const t0 = performance.now(), draw2 = () => { drawFigure(fig2, look, 210, { t: (performance.now() - t0) / 1000 }); raf = requestAnimationFrame(draw2); };
+  // the figure in three dimensions, to be turned round; where the browser cannot do that, the drawn one
+  import('./figview.js').then(m => gone ? null : m.makeFigView(figBox, look)).then(v => { if (v && gone) v.dispose(); else view = v; }).catch(() => { if (!gone) { fig2.hidden = false; turnHint.hidden = true; draw2(); } });
+  const changed = () => { if (view) view.set(look); clearTimeout(timer); timer = setTimeout(() => send({ t: 'look', look }), 300); };
+  const opts = h('div', { class: 'opts' }), tabs = h('div', { class: 'seg' });
+  const PAGES = [...LOOK_PAGES, ['Udstyr', null]];
+  const build = () => {
+    tabs.replaceChildren(...PAGES.map(([name], i) => h('button', { class: i === page ? 'on' : '', onclick: () => { page = i; build(); } }, name)));
+    const rows = [], keys = PAGES[page][1];
+    if (keys) for (const k of keys) {
+      if (STYLE_NAMES[k]) rows.push(h('div', { class: 'opt' }, h('span', {}, LOOK_NAMES[k]), h('div', { class: 'pick' }, STYLE_NAMES[k].map((n, i) => h('button', { class: look[k] === i ? 'on' : '', onclick: () => { look[k] = i; changed(); build(); } }, n)))));
+      else rows.push(h('div', { class: 'opt' }, h('span', {}, LOOK_NAMES[k]), h('div', { class: 'sw' }, LOOK[k].map((col, i) => h('button', { class: look[k] === i ? 'on' : '', style: 'background:' + col, 'aria-label': LOOK_NAMES[k] + ' ' + (i + 1), onclick: () => { look[k] = i; changed(); build(); } })))));
+    } else {
+      for (const slot of SHOP_ORDER) {
+        const own = st.me.items.filter(k => ITEMS[k] && ITEMS[k].slot === slot);
+        if (own.length) rows.push(h('div', { class: 'opt' }, h('span', {}, SLOT_NAMES[slot]), h('div', { class: 'pick' }, h('button', { class: look[slot] ? '' : 'on', onclick: () => { look[slot] = ''; changed(); build(); } }, 'Intet'), own.map(k => h('button', { class: look[slot] === k ? 'on' : '', onclick: () => { look[slot] = k; changed(); build(); } }, ITEMS[k].name)))));
+      }
+      if (!rows.length) rows.push(h('p', { class: 'hint' }, 'Du har ikke købt noget endnu. Hatte, briller, veste, jakker og støvler findes i tøjbutikken.'));
+      rows.push(h('button', { class: 'btn alt', onclick: openShop }, 'Gå i tøjbutikken'));
+    }
+    if (first && page < PAGES.length - 1) rows.push(h('button', { class: 'btn', onclick: () => { page++; build(); $('#sheet').scrollTop = 0; } }, 'Næste: ' + PAGES[page + 1][0].toLowerCase()));
+    else if (first) rows.push(h('button', { class: 'btn', onclick: () => sheet.close() }, 'Færdig – ind i saloonen'));
+    opts.replaceChildren(...rows);
+  };
+  build();
+  if (first) save('slq-figure-tip', '1');
+  sheet.open({ title: first ? 'Lav din figur' : 'Garderoben', wide: true, kind: 'wardrobe',
+    closed: () => {
+      gone = true; cancelAnimationFrame(raf); clearTimeout(timer); if (view) view.dispose();
+      send({ t: 'look', look, done: true });
+      if (first && page < PAGES.length - 1) toast('Du kan altid lave din figur færdig i garderoben.', { actions: [['Åbn garderoben', () => openWardrobe()]], ms: 9000 });
+    },
+    body: h('div', { class: 'wardrobe' },
+      h('div', { class: 'figcol' }, figBox, h('div', { class: 'row', style: 'margin-top:10px' },
+        h('button', { class: 'btn alt small', onclick: () => { const r = randomLook(Math.floor(Math.random() * 1e9)); for (const k of Object.keys(LOOK)) look[k] = r[k]; changed(); build(); } }, 'Tilfældig'),
+        first ? null : h('button', { class: 'btn alt small', onclick: openShop }, 'Tøjbutikken')),
+        turnHint),
+      h('div', {}, first ? h('p', { class: 'hint' }, 'Velkommen! Vælg krop, hoved og tøj. Du kan altid lave det om i garderoben, og i tøjbutikken kan du købe mere for dine jetoner.') : null, tabs, opts)) });
+}
+
+// ---------- the clothes shop (the station is still called 'kiosk' in the code) ----------
+// clothes first; and which part of the figure a thing is shown on (the rest are shown on a face)
+const SHOP_ORDER = ['over', 'feet', 'hat', 'neck', 'glasses', 'back'], SHOP_PART = { over: 'body', back: 'body', neck: 'neck', feet: 'feet' };
 function openShop() {
   let asking = '';
   const build = () => {
     const body = [h('p', { class: 'hint' }, 'Du har ' + st.me.chips + ' jetoner. Det du køber, er dit for altid.')];
-    for (const slot of SLOTS) {
+    for (const slot of SHOP_ORDER) {
       body.push(h('div', { class: 'sec' }, SLOT_NAMES[slot]));
       body.push(tiles(Object.keys(ITEMS).filter(k => ITEMS[k].slot === slot).map(k => {
         const it = ITEMS[k], own = st.me.items.includes(k), worn = st.me.look[slot] === k, poor = !own && st.me.chips < it.cost;
@@ -574,13 +605,13 @@ function openShop() {
           else if (poor) { toast('Du mangler ' + (it.cost - st.me.chips) + ' jetoner til ' + it.name.toLowerCase() + '.', { kind: 'err' }); return; }
           else if (asking !== k) { asking = k; build(); return; }
           else { send({ t: 'buy', k, wear: true }); asking = ''; }
-        } }, bust({ ...st.me.look, [slot]: k }, 76, { bg: '#40365a' }), h('span', { class: 'n' }, it.name),
+        } }, SHOP_PART[slot] ? whole({ ...st.me.look, [slot]: k }, 76, SHOP_PART[slot]) : bust({ ...st.me.look, [slot]: k }, 76, { bg: '#40365a' }), h('span', { class: 'n' }, it.name),
         h('span', { class: 'c' + (own ? ' own' : '') }, own ? (worn ? 'Har du på' : 'Tag på') : asking === k ? 'Køb for ' + it.cost + '?' : String(it.cost)));
       }), true));
     }
     return body;
   };
-  sheet.open({ title: 'Kiosken', wide: true, kind: 'shop', body: build() });
+  sheet.open({ title: 'Tøjbutikken', wide: true, kind: 'shop', body: build() });
   shopRefresh = () => { if (sheet.kind === 'shop') sheet.fill(build()); };
 }
 let shopRefresh = () => {};

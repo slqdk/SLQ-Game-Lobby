@@ -123,7 +123,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     if (a.id === you) { my.team = a.team; }
     else {
       const friend = teams && a.team === my.team;
-      e.fig = figures.make(a.look, { team: a.team, bot: e.bot, name: a.n, tag: TAG[teams ? a.team : ''] });
+      e.fig = figures.make(a.look, { team: a.team, bot: e.bot, name: a.n, tag: TAG[teams ? a.team : ''], even: true });
       e.fig.friend = friend; e.fig.group.visible = false;
       scene.add(e.fig.group);
     }

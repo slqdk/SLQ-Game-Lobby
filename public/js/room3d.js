@@ -80,8 +80,9 @@ export function createRoom3D(canvas, over, hooks) {
   }
   const buzzNow = a => Math.max(0, a.buzz - (T - a.buzzAt) / (BAR.soberMin * 60));
   const isHen = a => a.fxs.chicken !== undefined && T >= a.fxs.chicken;
-  const topOf = a => isHen(a) ? 1.15 : (seatOf(a) ? SEAT_H[seatKind(seatOf(a))] + 1.5 : 2.25) + (a.look.hat ? 0.3 : 0);
-  const headOf = a => { const [x, y, z] = place(a); return [x, y, z + (isHen(a) ? 0.85 : seatOf(a) ? 1.1 : 1.78)]; };
+  // (a seated figure's hips are on the seat; a tall one's head is higher up)
+  const topOf = a => isHen(a) ? 1.15 : (seatOf(a) ? 1.5 * a.fig.tall : 2.25 * a.fig.tall) + (a.look.hat ? 0.3 : 0);
+  const headOf = a => { const [x, y, z] = place(a); return [x, y, z + (isHen(a) ? 0.85 : seatOf(a) ? 1.1 * a.fig.tall : 1.78 * a.fig.tall)]; };
 
   function step(a, dt) {
     if (a.dist < a.len) {
@@ -145,7 +146,7 @@ export function createRoom3D(canvas, over, hooks) {
       saloon.upper.visible = false; saloon.near.visible = false;
     } else if (cam.view === 'eyes' && a) {
       camera.fov = 68;
-      const ey = az + (seatOf(a) ? 1.2 : cam.eyeY) + (a.hop > 0 ? 0.05 : 0);
+      const ey = az + (seatOf(a) ? 1.2 : cam.eyeY) * a.fig.tall + (a.hop > 0 ? 0.05 : 0);
       camera.position.set(ax - Math.sin(cam.yaw) * 0.12, ey, ay - Math.cos(cam.yaw) * 0.12); camera.rotation.set(cam.pitch, cam.yaw, 0);
     } else {
       camera.fov = 52;

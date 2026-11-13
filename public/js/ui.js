@@ -1,6 +1,6 @@
 // Small building blocks for the pages around the clubhouse: elements, little drawings, sheets and toasts.
 // Everything a player has typed is put in as text, never as HTML.
-import { drawBust } from './avatar.js';
+import { drawBust, drawPart } from './avatar.js';
 
 export const $ = sel => document.querySelector(sel);
 
@@ -34,6 +34,14 @@ export function icon(size, draw, units = 30) {
 export function bust(look, size = 40, st) {
   const cv = document.createElement('canvas');
   drawBust(cv, look, size, st);
+  return cv;
+}
+
+// a part of the figure on a small square canvas (for clothes one cannot see in a face): 'all', 'body', 'neck', 'feet'
+export function whole(look, size = 76, part = 'all') {
+  const cv = document.createElement('canvas');
+  drawPart(cv, look, size, part);
+  cv.style.background = '#40365a'; cv.style.borderRadius = '14px';
   return cv;
 }
 

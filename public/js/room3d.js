@@ -12,6 +12,8 @@ import { play } from './sfx.js';
 import { makeKit } from './saloon/kit.js';
 import { buildSaloon, seatSpot, WALL_H, SEAT_H } from './saloon/place.js';
 import { mouse } from './mouse.js';
+import { buildCabin } from './saloon/cabin.js';
+import { CABIN, CABIN_THINGS, BED, cabinFree } from '../shared/cabin.js';
 import { makePeople } from './saloon/people.js';
 
 const TAU = Math.PI * 2, FONT = 'Fredoka, system-ui, sans-serif';
@@ -23,7 +25,7 @@ export const VIEWS = ['follow', 'eyes', 'over'];        // behind one's figure, 
 const SENS = 0.0022, REACH = 2.4;                       // the mouse as in the shooter; how near one must be to use a thing
 
 // canvas: where the saloon is drawn. over: a canvas on top of it for names, speech and signs.
-// hooks: { onActor(id), onStation(station), onFloor(x, y), onStep(x, y), onSip(), onView(view), keysOn() }
+// hooks: { onActor(id), onStation(station), onFloor(x, y), onStep(x, y), onSip(), onView(view), keysOn(), onHome(what): in one's cabin ('out', 'sleep', 'wake', 'wardrobe') }
 export function createRoom3D(canvas, over, hooks) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
@@ -33,7 +35,88 @@ export function createRoom3D(canvas, over, hooks) {
   const sun = new THREE.DirectionalLight(0xfff0d8, 1.5); sun.position.set(8, 13, 17); sun.target.position.set(16, 0, 5); scene.add(sun, sun.target);
   const kit = makeKit(THREE), saloon = buildSaloon(THREE, kit, ''), people = makePeople(THREE);
   scene.add(saloon.root);
-  for (const [x, y, z] of saloon.lamps) { const l = new THREE.PointLight(0xffc27a, 16, 13, 1.8); l.position.set(x, y + 0.2, z); scene.add(l); }
+  const lampLights = saloon.lamps.map(([x, y, z]) => { const l = new THREE.PointLight(0xffc27a, 16, 13, 1.8); l.position.set(x, y + 0.2, z); scene.add(l); return { l, at: l.position.clone() }; });
+  // One's own cabin (saloon/cabin.js): drawn only while one is in it. `home` is then { sleep, seat, pending }: asleep
+  // in the bed, sitting on the sofa or the chair, on the way to use a thing. The saloon's lamps move in with one.
+  const cabin = buildCabin(THREE, kit); scene.add(cabin.group);
+  let home = null, fade = 0, fadeTo = 0, fadeThen = null, pendingMove = null;
+  const freeAt = (x, y) => home ? cabinFree(x, y) : isFree(x, y);
+  function freeNear(x, y) {
+    if (!home) return nearestFree(x, y);
+    if (cabinFree(x, y)) return [x, y];
+    for (let r = 0.2; r < 4; r += 0.2) for (let k = 0; k < 16; k++) { const a = k / 16 * TAU, qx = x + Math.cos(a) * r, qy = y + Math.sin(a) * r; if (cabinFree(qx, qy)) return [qx, qy]; }
+    return [CABIN.spawn[0], CABIN.spawn[1]];
+  }
+  const homePicks = CABIN_THINGS.filter(t => t.name).map(t => ({ t, box: new THREE.Box3(new THREE.Vector3(t.box[0], 0, t.box[1]), new THREE.Vector3(t.box[0] + t.box[2], t.h, t.box[1] + t.box[3])) }));
+  const awayBox = (b, x, y) => Math.hypot(Math.max(b[0] - x, 0, x - b[0] - b[2]), Math.max(b[1] - y, 0, y - b[1] - b[3]));
+  // a way across the cabin's floor (it is small: a grid of quarter steps will do)
+  function homeWay(from, to) {
+    const [x0, y0] = CABIN.in, S = 0.25, NX = Math.ceil((CABIN.in[2] - x0) / S), NY = Math.ceil((CABIN.in[3] - y0) / S), id = (i, j) => j * NX + i;
+    const cell = (x, y) => [clamp(Math.round((x - x0) / S), 0, NX - 1), clamp(Math.round((y - y0) / S), 0, NY - 1)], P2 = (i, j) => [x0 + i * S, y0 + j * S];
+    const [si, sj] = cell(...from), [gi, gj] = cell(...to), prev = new Map([[id(si, sj), -1]]), q = [[si, sj]];
+    while (q.length) {
+      const [i, j] = q.shift(); if (i === gi && j === gj) break;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const ni = i + di, nj = j + dj, k = id(ni, nj); if (ni < 0 || nj < 0 || ni >= NX || nj >= NY || prev.has(k) || !cabinFree(...P2(ni, nj))) continue; prev.set(k, id(i, j)); q.push([ni, nj]); }
+    }
+    if (!prev.has(id(gi, gj))) return null;
+    const out = []; for (let k = id(gi, gj); k !== -1; k = prev.get(k)) out.unshift(P2(k % NX, Math.floor(k / NX)));
+    out[0] = from.slice(); out[out.length - 1] = to.slice();
+    for (let i = out.length - 2; i > 0; i--) { const a = out[i - 1], b = out[i + 1], ok = [0.25, 0.5, 0.75].every(u => cabinFree(a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u)); if (ok) out.splice(i, 1); }      // straighten it
+    return out;
+  }
+  const useSpot = t => { const [bx, by, bw, bd] = t.box; return t.id === 'out' ? [CABIN.spawn[0], CABIN.spawn[1]] : freeNear(bx + bw / 2, by + bd / 2); };
+  // what the saloon looks like while one is at home: its outside only (seen from the cabin's windows), the lamps moved in
+  function homeLook(on) {
+    for (const ch of saloon.root.children) ch.visible = !on || ch === saloon.outside || ch === saloon.shell || ch === saloon.shellNear || ch === saloon.shellUp;
+    cabin.group.visible = on;
+    lampLights.forEach((q, i) => { const c2 = cabin.lights[i]; if (on && c2) { q.l.position.set(c2[0], c2[1], c2[2]); q.l.color.setHex(c2[3]); q.l.intensity = c2[4]; q.l.distance = c2[5]; } else { q.l.position.copy(q.at); q.l.color.setHex(0xffc27a); q.l.intensity = 16; q.l.distance = 13; } });
+  }
+  // into one's cabin (start: 'door' coming in from the saloon, 'bed' waking up there) and out of it again
+  function goHome(start) {
+    home = { sleep: start === 'bed', seat: null, pending: null };
+    const a = mine();
+    if (a) {
+      const [x, y, f] = CABIN.spawn;
+      a.x = x; a.y = y; a.path = [[x, y]]; a.len = a.dist = 0; a.sit = null; a.seated = false; a.moving = false; a.walk = 0; a.head = a.want = f; a.lie = 0; a.off = false; a.rest = null; a.inCabin = false;
+    }
+    steer.on = false; keys.clear();
+    cabin.sleeping(home.sleep);
+    if (cam.view === 'over') cam.view = 'follow';
+    cam.yaw = home.sleep ? Math.PI : Math.PI / 2; cam.pitch = cam.view === 'eyes' ? (home.sleep ? 0.55 : 0) : 0.3; cam.dist = Math.min(cam.dist, 4.5);
+    homeLook(true);
+    if (hooks.onView) hooks.onView(cam.view);                     // (the buttons: no overview and no flat clubhouse at home)
+  }
+  function leaveHome(path) {
+    home = null; cabin.sleeping(false);
+    const a = mine();
+    if (a) { const p = path && path.length ? path : [STATION.cabin.use]; a.x = p[0][0]; a.y = p[0][1]; a.path = [[a.x, a.y]]; a.len = a.dist = 0; a.head = a.want = Math.PI / 2; a.moving = false; }
+    steer.on = false; keys.clear();
+    cam.yaw = -Math.PI / 2; cam.pitch = cam.view === 'eyes' ? 0 : 0.36;
+    homeLook(false);
+    if (pendingMove) { const [p2, s2] = pendingMove; pendingMove = null; api.move(me, p2, s2); }      // (sent somewhere while the door was still between)
+    if (hooks.onView) hooks.onView(cam.view);
+  }
+  // the screen goes dark, then the change, then light again
+  const fadeDo = fn => { fadeTo = 1; fadeThen = fn; };
+  // using a thing in the cabin
+  function useThing(t) {
+    const a = mine(); if (!a || !home) return;
+    if (awayBox(t.box, a.x, a.y) > REACH && t.use !== 'out') { const w = homeWay([a.x, a.y], useSpot(t)); if (w) { a.path = w; a.len = pathLen(w); a.dist = 0; home.pending = t; } return; }
+    home.pending = null;
+    if (t.use === 'out') { if (hooks.onHome) hooks.onHome('out'); }
+    else if (t.use === 'wardrobe') { a.want = Math.atan2(t.box[0] + t.box[2] / 2 - a.x, t.box[1] - a.y); if (hooks.onHome) hooks.onHome('wardrobe'); }
+    else if (t.use === 'bed') { home.sleep = true; home.seat = null; cabin.sleeping(true); a.zAt = T + 1; if (cam.view === 'eyes') { cam.yaw = Math.PI; cam.pitch = 0.55; } if (hooks.onHome) hooks.onHome('sleep'); }
+    else if (t.use === 'sit') { home.seat = t; home.sleep = false; a.hop = 0.2; }
+    else if (t.use === 'fire') { const [fx3, fy3, fz3] = cabin.fire; burst(fx3, fz3, fy3, 16, { cols: ['#ffb347', '#ff7a2c', '#ffe08a'], speed: 0.9, up: 1.8, g: -0.2, size: 0.045, life: 1.4 }); play('pop'); }
+  }
+  // getting up again (from the bed or a seat), next to it
+  function getUp() {
+    const a = mine(); if (!a || !home || (!home.sleep && !home.seat)) return;
+    const was = home.sleep; home.sleep = false; home.seat = null; cabin.sleeping(false);
+    const t = was ? CABIN_THINGS.find(q => q.id === 'bed') : null, [x, y] = was ? freeNear(t.box[0] + t.box[2] + 0.35, t.box[1] + t.box[3] - 0.5) : freeNear(a.x, a.y);
+    a.x = x; a.y = y; a.path = [[x, y]]; a.len = a.dist = 0; a.hop = 0.2;
+    if (was && hooks.onHome) hooks.onHome('wake');
+  }
   const c = over.getContext('2d');
   const actors = new Map(), fx = [];
   const used = new Set();        // the seats somebody sits on or is on the way to: 'station:seat'
@@ -41,7 +124,7 @@ export function createRoom3D(canvas, over, hooks) {
   let labels = {}, hover = null, hintUntil = 0, music = false, down = null, groupName = '';
   const casino = { pot: 0, lines: [], spin: {} }, spins = [];
   // the camera: which view, where it looks (yaw: 0 looks at the back wall), how far behind the figure it hangs
-  const cam = { view: 'follow', yaw: 0, pitch: 0.36, dist: 6.4, panX: ROOM.w / 2, free: false, eyeY: 1.75, upp: 0.03 };
+  const cam = { view: 'follow', yaw: 0, pitch: 0.36, dist: 6.4, panX: ROOM.w / 2, free: false, eyeY: 1.75, upp: 0.03, close: false };
   const keys = new Set();
   // steering as in the shooter: `locked` when the mouse is caught and turns the view; `relock`: it was let go for a
   // menu and is taken again when the menu closes; `noLock`: this browser will not hand the mouse over (dragging then)
@@ -64,6 +147,7 @@ export function createRoom3D(canvas, over, hooks) {
     const off = !m.on && !!m.rest, p = m.p && m.p.length ? m.p : off ? [[m.rest[0], m.rest[1]]] : [[ROOM.spawn[0], ROOM.spawn[1]]];
     const a = { id: m.id, name: m.name, look: m.look, dnd: m.dnd, path: p, len: pathLen(p), dist: 0, x: p[0][0], y: p[0][1], sit: m.sit || null, seated: false,
       off, rest: m.rest || null, lie: off ? 1 : 0, lieFrom: null, zAt: 0,      // off: not here, asleep on the floor at rest ([x, y, which way the feet point]); lie: 0..1
+      inCabin: !!m.cabin && m.id !== me,                                    // in their own cabin (not to be seen here)
       moving: false, walk: 0, phase: 0, hop: 0, emote: '', emoteAt: 0, fxs: {}, drink: null, buzz: m.buzz || 0, buzzAt: T, bubble: null, net: m.busy === 'slot' || m.busy === 'bj' ? m.net || 0 : null,
       talkUntil: 0, seed: (m.id * 2.399) % 6.28, born: T, head: 0, want: 0, fig: people.person(m.look) };       // head: which way the figure looks (0: out into the room, at the viewer)
     if (a.sit && p.length < 2) { a.seated = true; faceSeat(a); a.head = a.want; }
@@ -75,6 +159,8 @@ export function createRoom3D(canvas, over, hooks) {
   }
   const drop = a => { scene.remove(a.fig.group); a.fig.dispose(); };
   const seatOf = a => a.seated && a.sit && STATION[a.sit[0]] ? STATION[a.sit[0]] : null;
+  // the middle of a thing on the floor (on a wall: the spot on the wall)
+  const middleOf = st => st.box ? [st.box[0] + st.box[2] / 2, st.box[1] + st.box[3] / 2] : st.round ? [st.round[0], st.round[1]] : st.wall ? [st.wall[0] + st.wall[2] / 2, 0] : st.west ? [0, st.west[0] + st.west[2] / 2] : [st.floor[0], st.floor[1]];
   const seatKind = st => st.on ? 'sofa' : st.high ? 'high' : 'low';
   function place(a) {            // where the figure stands or sits: [x, y, z] (asleep: the middle of the body)
     if (a.off) return [a.rest[0], a.rest[1], 0];
@@ -113,10 +199,11 @@ export function createRoom3D(canvas, over, hooks) {
       a.x = q[0]; a.y = q[1]; a.moving = a.dist < a.len;
       if (Math.abs(a.x - ox) + Math.abs(a.y - oy) > 1e-4) a.want = Math.atan2(a.x - ox, a.y - oy);
       if (!a.moving) {
-        if (a.sit) { a.seated = true; a.hop = 0.28; faceSeat(a); }
+        if (home && a.id === me) { if (home.pending) { const t = home.pending; home.pending = null; useThing(t); } }
+        else if (a.sit) { a.seated = true; a.hop = 0.28; faceSeat(a); }
         else {                                                        // stopped by a piece of furniture: turn to it
           let best = 2.3 * 2.3;
-          for (const s of STATIONS) { if (!s.use || !s.name) continue; const d = (s.use[0] - a.x) ** 2 + (s.use[1] - a.y) ** 2; if (d < best && d < 1.2) { best = d; const cx = s.box ? s.box[0] + s.box[2] / 2 : s.round ? s.round[0] : s.wall ? s.wall[0] + s.wall[2] / 2 : s.floor[0], cy = s.box ? s.box[1] + s.box[3] / 2 : s.round ? s.round[1] : s.wall ? 0 : s.floor[1]; if (!s.floor) a.want = Math.atan2(cx - a.x, cy - a.y); } }
+          for (const s of STATIONS) { if (!s.use || !s.name) continue; const d = (s.use[0] - a.x) ** 2 + (s.use[1] - a.y) ** 2; if (d < best && d < 1.2) { best = d; const [cx, cy] = middleOf(s); if (!s.floor) a.want = Math.atan2(cx - a.x, cy - a.y); } }
         }
       }
     } else if (!(a.id === me && steer.on)) a.moving = false;
@@ -131,6 +218,10 @@ export function createRoom3D(canvas, over, hooks) {
     if (a.id === me && a.moving) cam.free = false;
   }
   function show(a) {
+    a.fig.group.visible = home ? a.id === me : !a.inCabin;
+    if (a.id === me && cam.close && !(home && (home.sleep || home.seat))) a.fig.group.visible = false;      // (the camera behind is pushed up against it)
+    if (!a.fig.group.visible) return;
+    if (a.id === me && home && (home.sleep || home.seat)) return showHome(a);
     const [x, y, z] = place(a), st = seatOf(a), fxs = {};
     for (const key of Object.keys(a.fxs)) if (T >= a.fxs[key]) fxs[key] = T - a.fxs[key];
     let fill = 1, sip = 0;
@@ -153,13 +244,47 @@ export function createRoom3D(canvas, over, hooks) {
       { T, seat: st && !e ? seatKind(st) : '', seatY: z, fill, sip, buzz: buzzNow(a), fx: fxs, et: T - a.emoteAt, hen: isHen(a), first: cam.view === 'eyes' && a.id === me, lie: e });
   }
 
+  // one's own figure in the cabin's bed (on its back, the covers over it) or on the sofa or the chair
+  function showHome(a) {
+    const g = a.fig.group, first = cam.view === 'eyes';
+    if (home.sleep) { g.position.set(BED.x, BED.top, BED.y); g.rotation.y = BED.a; g.scale.setScalar(1); a.head = a.want = BED.a; }
+    else { const q = home.seat.sit; g.position.set(q[0], 0, q[1]); g.rotation.y = q[2]; g.scale.setScalar(1); a.head = a.want = q[2]; }
+    a.fig.pose({ phase: 0, walk: 0, seed: a.seed, emote: '', drink: a.drink, talk: T < a.talkUntil },
+      { T, seat: home.sleep ? '' : 'sofa', seatY: home.sleep ? 0 : home.seat.sit[3], fill: a.fillNow || 1, sip: a.sipNow || 0, buzz: buzzNow(a), fx: {}, et: 0, hen: false, first, lie: home.sleep ? 1 : 0 });
+  }
+
   // ---------- the camera ----------
   const mine = () => actors.get(me);
   function aim(dt) {
     const a = mine(), W = ROOM.w, D = ROOM.d;
     const [ax, ay, az] = a ? place(a) : [W / 2, D / 2, 0];
+    cam.close = false;
+    if (home) {
+      // in one's cabin: through one's eyes, or from behind, inside the log walls and under the roof
+      const [ix0, iz0, ix1, iz1] = CABIN.in;
+      if (cam.view === 'eyes' && a) {
+        camera.fov = 68;
+        if (home.sleep) camera.position.set(BED.x, BED.top + 0.32, BED.y - 1.5 * a.fig.tall);
+        else { const sitting = !!home.seat, ey = (sitting ? 1.2 : cam.eyeY) * a.fig.tall, hx = sitting ? home.seat.sit[0] : ax, hz = sitting ? home.seat.sit[1] : ay; camera.position.set(hx - Math.sin(cam.yaw) * 0.12, ey, hz - Math.cos(cam.yaw) * 0.12); }
+        camera.rotation.set(cam.pitch, cam.yaw, 0);
+      } else {
+        camera.fov = 58;
+        const sx = home.sleep ? BED.x : home.seat ? home.seat.sit[0] : ax, sz = home.sleep ? BED.y - 0.8 : home.seat ? home.seat.sit[1] : ay, ty = home.sleep ? 1.0 : home.seat ? 1.15 : 1.5;
+        const cp = Math.cos(cam.pitch), dx = Math.sin(cam.yaw) * cp, dy = Math.sin(cam.pitch), dz = Math.cos(cam.yaw) * cp;
+        let t = cam.dist;
+        if (dx > 0) t = Math.min(t, (ix1 - 0.3 - sx) / dx); else if (dx < 0) t = Math.min(t, (ix0 + 0.3 - sx) / dx);
+        if (dz > 0) t = Math.min(t, (iz1 - 0.3 - sz) / dz); else if (dz < 0) t = Math.min(t, (iz0 + 0.3 - sz) / dz);
+        if (dy > 0) t = Math.min(t, (cabin.roofY(sz + dz * t) - 0.35 - ty) / dy); else if (dy < 0) t = Math.min(t, (0.3 - ty) / dy);
+        t = Math.max(0.5, t); cam.close = t < 0.95;
+        camera.position.set(sx + dx * t, ty + dy * t, sz + dz * t); camera.rotation.set(-cam.pitch, cam.yaw, 0);
+      }
+      if (cam.fly) { camera.fov = cam.fly[5] || 60; camera.position.set(cam.fly[0], cam.fly[1], cam.fly[2]); camera.rotation.set(cam.fly[4], cam.fly[3], 0); }
+      camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
+      return;
+    }
     saloon.upper.visible = true; saloon.near.visible = true;
     saloon.outside.visible = cam.view !== 'over'; saloon.panes.visible = !saloon.outside.visible;      // the valley outside, or (from above) just daylight in the windows
+    saloon.shellNear.visible = true; saloon.shellUp.visible = true;
     if (cam.view === 'over') {
       // the whole room from the front: far away through a long lens, so that it looks nearly flat
       camera.fov = 26; const el = 0.5, vt = Math.tan(camera.fov / 2 * Math.PI / 180), hw = vt * camera.aspect;
@@ -170,7 +295,7 @@ export function createRoom3D(canvas, over, hooks) {
       cam.panX += (clamp(want, Math.min(half, W / 2), Math.max(W - half, W / 2)) - cam.panX) * (cam.free ? 1 : Math.min(1, dt * 5));
       const ty = 1.25, tz = D * 0.47;
       camera.position.set(cam.panX, ty + Math.sin(el) * dist, tz + Math.cos(el) * dist); camera.rotation.set(-el, 0, 0);
-      saloon.upper.visible = false; saloon.near.visible = false;
+      saloon.upper.visible = false; saloon.near.visible = false; saloon.shellNear.visible = false; saloon.shellUp.visible = false;
     } else if (cam.view === 'eyes' && a) {
       camera.fov = 68;
       const ey = az + (seatOf(a) ? 1.2 : cam.eyeY) * a.fig.tall + (a.hop > 0 ? 0.05 : 0);
@@ -183,10 +308,10 @@ export function createRoom3D(canvas, over, hooks) {
       if (dx > 0) t = Math.min(t, (W - 0.4 - tx) / dx); else if (dx < 0) t = Math.min(t, (0.4 - tx) / dx);
       if (dz < 0) t = Math.min(t, (0.45 - tz) / dz);
       if (dy < 0) t = Math.min(t, (0.3 - ty) / dy);
-      t = Math.max(0.6, t);
+      t = Math.max(0.6, t); cam.close = t < 0.95;
       camera.position.set(tx + dx * t, ty + dy * t, tz + dz * t); camera.rotation.set(-cam.pitch, cam.yaw, 0);
-      if (camera.position.z > D - 0.15) saloon.near.visible = false;
-      if (camera.position.y > WALL_H - 0.5) saloon.upper.visible = false;
+      if (camera.position.z > D - 0.15) saloon.near.visible = saloon.shellNear.visible = false;
+      if (camera.position.y > WALL_H - 0.5) saloon.upper.visible = saloon.shellUp.visible = false;
     }
     if (cam.fly) { camera.fov = cam.fly[5] || 60; camera.position.set(cam.fly[0], cam.fly[1], cam.fly[2]); camera.rotation.set(cam.fly[4], cam.fly[3], 0); }      // (for trying things out: [x, y, z, yaw, pitch, fov])
     camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
@@ -365,6 +490,7 @@ export function createRoom3D(canvas, over, hooks) {
     used.clear(); for (const a of actors.values()) if (a.sit) used.add(a.sit[0] + ':' + a.sit[1]);
     saloon.seats(used);
     saloon.tick(dt, T, near);
+    if (home) { cabin.tick(dt, T); lampLights[0].l.intensity = cabin.lights[0][4] * cabin.flicker(T); const a = mine(); if (a && home.sleep && T > a.zAt) { a.zAt = T + 1.6 + Math.random() * 0.8; fx.push({ kind: 'p', shape: 'note', text: 'z', x: BED.x, y: BED.y - 1.5, z: BED.top + 0.5, vx: 0.05, vy: 0.04, vz: 0.28, g: 0, t: 0, life: 2.6, col: '#d9d0ff', size: 0.045 + Math.random() * 0.02, rot: -0.2, vr: 0.15 }); } }
     for (const a of actors.values()) if (a.off && a.lie > 0.95 && T > a.zAt) { a.zAt = T + 1.5 + Math.random() * 0.9; const q = headOf(a); fx.push({ kind: 'p', shape: 'note', text: 'z', x: q[0], y: q[1], z: q[2] + 0.15, vx: 0.07, vy: 0, vz: 0.3, g: 0, t: 0, life: 2.6, col: '#d9d0ff', size: 0.045 + Math.random() * 0.025, rot: -0.2, vr: 0.15 }); }      // the sleepers snore
     if (music && (noteT += dt) > 0.45) { noteT = 0; const n = saloon.notes; fx.push({ kind: 'p', shape: 'note', text: Math.random() < 0.5 ? '♪' : '♫', x: n[0] + (Math.random() - 0.5) * 0.5, y: n[2], z: n[1] - 0.2, vx: (Math.random() - 0.5) * 0.4, vy: 0.2, vz: 0.7, g: 0, t: 0, life: 1.8, col: '#ffe9a8', size: 0.1, rot: 0, vr: 0 }); }
     hand.tick(dt);
@@ -373,10 +499,14 @@ export function createRoom3D(canvas, over, hooks) {
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, cw, ch); c.lineJoin = 'round'; c.lineCap = 'round';
     drawFx(dt);
     const placed = [], list = [...actors.values()].map(a => [a, camera.position.distanceToSquared(V.set(a.x, 1.5, a.y))]).sort((p, q) => q[1] - p[1]);
-    for (const [a] of list) drawTag(a, placed);
+    for (const [a] of list) if (a.fig.group.visible) drawTag(a, placed);
     const showAll = T < hintUntil;
-    for (const sg of saloon.signs) if (hover === sg[0] || labels[sg[0]] || showAll) drawLabel(sg, hover === sg[0]);
+    if (!home) for (const sg of saloon.signs) if (hover === sg[0] || labels[sg[0]] || showAll) drawLabel(sg, hover === sg[0]);
     drawHud(free);
+    // going through a door: dark, the change, light again
+    if (fadeTo > fade) { fade = Math.min(1, fade + dt / 0.3); if (fade >= 1 && fadeThen) { const f = fadeThen; fadeThen = null; f(); fadeTo = 0; } }
+    else if (fade > 0) fade = Math.max(0, fade - dt / 0.45);
+    if (fade > 0) { c.fillStyle = 'rgba(14,10,18,' + fade.toFixed(3) + ')'; c.fillRect(0, 0, cw, ch); }
   }
 
   // ---------- one's own hand with the glass, seen through one's own eyes ----------
@@ -403,9 +533,16 @@ export function createRoom3D(canvas, over, hooks) {
   const local = e => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
   function pick(px, py) {
     ndc.set(px / cw * 2 - 1, -(py / ch) * 2 + 1); ray.setFromCamera(ndc, camera);
+    if (home) {
+      let best = null, bd = 1e9;
+      for (const q of homePicks) if (ray.ray.intersectBox(q.box, HIT)) { const d = HIT.distanceTo(ray.ray.origin); if (d < bd) { bd = d; best = { thing: q.t }; } }
+      if (best) return best;
+      if (ray.ray.direction.y < -0.001) { const t = -ray.ray.origin.y / ray.ray.direction.y, fx2 = ray.ray.origin.x + ray.ray.direction.x * t, fz = ray.ray.origin.z + ray.ray.direction.z * t; if (cabinFree(fx2, fz)) return { floor: [fx2, fz] }; }
+      return null;
+    }
     let best = null, bd = 1e9;
     for (const a of actors.values()) {
-      if (cam.view === 'eyes' && a.id === me) continue;
+      if ((cam.view === 'eyes' && a.id === me) || !a.fig.group.visible) continue;
       const [x, y, z] = place(a), hen = isHen(a), lying = a.lie > 0.5 && a.rest, ux = lying ? Math.sin(a.rest[2]) * 0.6 : 0, uz = lying ? Math.cos(a.rest[2]) * 0.6 : 0;
       for (const [dy, r, s] of lying ? [[0.25, 0.42, 0], [0.25, 0.36, 1], [0.25, 0.36, -1]] : hen ? [[0.55, 0.5, 0]] : [[z + (seatOf(a) ? 1.1 : 1.75), 0.5, 0], [z + 0.8, 0.42, 0]]) {
         SPH.center.set(x + ux * s, dy, y + uz * s); SPH.radius = r;
@@ -443,22 +580,35 @@ export function createRoom3D(canvas, over, hooks) {
 
   // What E (or a click, with the mouse caught) would use: the thing or the member one looks at, if it is within reach;
   // otherwise the nearest thing one stands by and faces.
-  const middleOf = st => st.box ? [st.box[0] + st.box[2] / 2, st.box[1] + st.box[3] / 2] : st.round ? [st.round[0], st.round[1]] : st.wall ? [st.wall[0] + st.wall[2] / 2, 0] : [st.floor[0], st.floor[1]];
+
   function awayFrom(st, x, y) {                 // from a point on the floor to a thing's footprint
     if (st.box) return Math.hypot(Math.max(st.box[0] - x, 0, x - st.box[0] - st.box[2]), Math.max(st.box[1] - y, 0, y - st.box[1] - st.box[3]));
     if (st.round) { const dx = x - st.round[0], dy = y - st.round[1], k = Math.hypot(dx / st.round[2], dy / st.round[3]); return k <= 1 ? 0 : Math.hypot(dx, dy) * (1 - 1 / k); }
     if (st.wall) return Math.hypot(Math.max(st.wall[0] - x, 0, x - st.wall[0] - st.wall[2]), y);
+    if (st.west) return Math.hypot(x, Math.max(st.west[0] - y, 0, y - st.west[0] - st.west[2]));
     return Math.max(0, Math.hypot(x - st.floor[0], y - st.floor[1]) - st.floor[2]);
   }
   function aimed() {
     const a = mine(); if (!a) return null;
+    if (home) {
+      if (home.sleep || home.seat) return null;
+      const fx3 = -Math.sin(cam.yaw), fy3 = -Math.cos(cam.yaw);
+      if (cam.view === 'eyes') { ndc.set(0, 0); ray.setFromCamera(ndc, camera); }
+      else { ray.ray.origin.set(a.x, 1.3, a.y); ray.ray.direction.set(fx3, -0.12, fy3).normalize(); }
+      let best = null, bd = 1e9;
+      for (const q of homePicks) { if (awayBox(q.t.box, a.x, a.y) > REACH || !ray.ray.intersectBox(q.box, HIT)) continue; const d = HIT.distanceTo(ray.ray.origin); if (d < bd) { bd = d; best = { thing: q.t }; } }
+      if (best) return best;
+      bd = 1.3;
+      for (const q of homePicks) { const d = awayBox(q.t.box, a.x, a.y); if (d >= bd) continue; const cx = q.t.box[0] + q.t.box[2] / 2, cy = q.t.box[1] + q.t.box[3] / 2, l = Math.hypot(cx - a.x, cy - a.y) || 1; if (((cx - a.x) * fx3 + (cy - a.y) * fy3) / l > 0.3) { bd = d; best = { thing: q.t }; } }
+      return best;
+    }
     const [ax, ay, az] = place(a), fx2 = -Math.sin(cam.yaw), fy = -Math.cos(cam.yaw);
     // through one's own eyes: what is in the middle of the picture. From behind: straight ahead of the figure.
     if (cam.view === 'eyes') { ndc.set(0, 0); ray.setFromCamera(ndc, camera); }
     else { ray.ray.origin.set(ax, az + 1.3, ay); ray.ray.direction.set(fx2, -0.12, fy).normalize(); }
     let best = null, bd = 1e9;
     for (const b of actors.values()) {
-      if (b.id === me) continue;
+      if (b.id === me || !b.fig.group.visible) continue;
       const [x, y, z] = place(b);
       if (Math.hypot(x - ax, y - ay) > REACH + 1) continue;
       for (const [dy, r] of isHen(b) ? [[0.55, 0.5]] : [[z + (seatOf(b) ? 1.1 : 1.75), 0.5], [z + 0.8, 0.42]]) {
@@ -483,8 +633,10 @@ export function createRoom3D(canvas, over, hooks) {
   }
   // use what one looks at; with nothing there, a mouthful of what is in the glass
   function act() {
-    if (target && target.actor) hooks.onActor(target.actor.id);
-    else if (target) hooks.onStation(target.station);
+    const t = target || (cam.view !== 'over' ? aimed() : null);      // (after walking there with a click, nothing has been aimed at yet)
+    if (home) { if (home.sleep || home.seat) getUp(); else if (t && t.thing) useThing(t.thing); else if (hooks.onSip) hooks.onSip(); return; }
+    if (t && t.actor) hooks.onActor(t.actor.id);
+    else if (t) hooks.onStation(t.station);
     else if (hooks.onSip) hooks.onSip();
   }
   // the little that is drawn on top for it: a dot to aim with, what E would use, and how to take or let go of the mouse
@@ -499,7 +651,8 @@ export function createRoom3D(canvas, over, hooks) {
     };
     if (locked && cam.view === 'eyes') { c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(cw / 2, ch / 2, 2.5, 0, TAU); c.fill(); c.strokeStyle = 'rgba(0,0,0,.45)'; c.lineWidth = 1; c.stroke(); }
     const y = ch - 92;
-    if (target) pill(target.actor ? target.actor.name : target.station.name, y, 'E');
+    if (home && (home.sleep || home.seat)) pill(home.sleep ? 'E eller W A S D: stå op' : 'E eller W A S D: rejs dig', y, '');
+    else if (target) pill(target.actor ? target.actor.name : target.thing ? target.thing.name : target.station.name, y, 'E');
     else if (lockable() && !locked && !typing()) pill('Klik for at styre med musen', y, '');
     else if (locked && T - lockedAt < 5) pill('Esc slipper musen', y, '');
   }
@@ -525,7 +678,7 @@ export function createRoom3D(canvas, over, hooks) {
     if (e.pointerType !== 'mouse') return;
     const hit = pick(...local(e));
     hover = hit && hit.station ? hit.station.id : null;
-    canvas.style.cursor = hit && (hit.station || hit.actor) ? 'pointer' : 'default';
+    canvas.style.cursor = hit && (hit.station || hit.actor || hit.thing) ? 'pointer' : 'default';
   });
   canvas.addEventListener('pointerleave', () => { if (!locked) hover = null; });
   canvas.addEventListener('pointerup', e => {
@@ -533,6 +686,7 @@ export function createRoom3D(canvas, over, hooks) {
     if (locked || !d || d.moved) return;
     const [px, py] = local(e), hit = pick(px, py);
     if (!hit) return;
+    if (home) { const a = mine(); if (home.sleep || home.seat) getUp(); if (hit.thing) useThing(hit.thing); else if (hit.floor && a) { const w = homeWay([a.x, a.y], hit.floor); if (w) { a.path = w; a.len = pathLen(w); a.dist = 0; home.pending = null; } } return; }
     if (hit.actor) hooks.onActor(hit.actor.id, [px, py]);
     else if (hit.station) hooks.onStation(hit.station);
     else { hooks.onFloor(hit.floor[0], hit.floor[1]); fx.push({ kind: 'p', shape: 'dot', x: hit.floor[0], y: hit.floor[1], z: 0.03, vx: 0, vz: 0, g: 0, t: 0, life: 0.4, col: 'rgba(255,255,255,.75)', size: 0.09, rot: 0, vr: 0 }); }
@@ -547,26 +701,27 @@ export function createRoom3D(canvas, over, hooks) {
   function steerBy(dt) {
     const a = mine(); if (!a) return;
     let sx = 0, sf = 0; for (const k of keys) { sx += KEY[k][0]; sf += KEY[k][1]; }
-    if (!sx && !sf) { if (steer.on) { steer.on = false; a.moving = false; tell(a); } return; }
+    if (!sx && !sf) { if (steer.on) { steer.on = false; a.moving = false; if (!home) tell(a); } return; }
     if (!steer.on) {
       // taking over from wherever the figure is: up from a seat, out of a walk the server sent it on
       steer.on = true;
       if (a.sit) { a.sit = null; if (a.seated) a.hop = 0.2; a.seated = false; }
-      if (!isFree(a.x, a.y)) [a.x, a.y] = nearestFree(a.x, a.y);
+      if (home) { getUp(); home.pending = null; }
+      if (!freeAt(a.x, a.y)) [a.x, a.y] = freeNear(a.x, a.y);
     }
     const yaw = cam.view === 'over' ? 0 : cam.yaw, l = Math.hypot(sx, sf), fx2 = -Math.sin(yaw), fy = -Math.cos(yaw), rx = Math.cos(yaw), ry = -Math.sin(yaw);
     const d = ROOM.speed * dt, dx = (fx2 * sf + rx * sx) / l * d, dy = (fy * sf + ry * sx) / l * d;
     let nx = a.x, ny = a.y;
-    if (isFree(a.x + dx, a.y + dy)) { nx += dx; ny += dy; }
+    if (freeAt(a.x + dx, a.y + dy)) { nx += dx; ny += dy; }
     else search: for (const ang of [0.4, 0.8, 1.2, 1.5]) for (const sg of [steer.side, -steer.side]) {
       // not straight on: a little to one side, then more, the same way round as last time first
       const cs = Math.cos(ang * sg), sn = Math.sin(ang * sg), k = Math.cos(ang) * 0.9 + 0.1, qx = (dx * cs - dy * sn) * k, qy = (dx * sn + dy * cs) * k;
-      if (isFree(a.x + qx, a.y + qy)) { nx += qx; ny += qy; steer.side = sg; break search; }
+      if (freeAt(a.x + qx, a.y + qy)) { nx += qx; ny += qy; steer.side = sg; break search; }
     }
     a.moving = nx !== a.x || ny !== a.y;
     a.want = Math.atan2(dx, dy);
     a.x = nx; a.y = ny; a.path = [[nx, ny]]; a.len = 0; a.dist = 0;
-    if (T - steer.at > 0.1) tell(a);
+    if (T - steer.at > 0.1 && !home) tell(a);
   }
   const typing = () => { const e = document.activeElement; return e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.isContentEditable); };
   const keyDown = e => {
@@ -574,7 +729,7 @@ export function createRoom3D(canvas, over, hooks) {
     keyAt = T;
     if (KEY[e.code]) { keys.add(e.code); e.preventDefault(); }
     else if (e.repeat) return;
-    else if (e.code === 'KeyV') api.setView(VIEWS[(VIEWS.indexOf(cam.view) + 1) % VIEWS.length]);
+    else if (e.code === 'KeyV') { let i = (VIEWS.indexOf(cam.view) + 1) % VIEWS.length; if (home && VIEWS[i] === 'over') i = (i + 1) % VIEWS.length; api.setView(VIEWS[i]); }
     else if (e.code === 'KeyE') { act(); e.preventDefault(); }
     else if (e.code === 'Space') { if (hooks.onSip) hooks.onSip(); e.preventDefault(); }
   };
@@ -591,14 +746,15 @@ export function createRoom3D(canvas, over, hooks) {
     setName(name) { if (name !== groupName) { groupName = name; saloon.setName(name); } },
     setLabels(l) { labels = l; },
     hint(seconds = 7) { hintUntil = T + seconds; },
-    spot: id => { const sg = saloon.signs.find(q => q[0] === id), st = STATION[id]; const q = P(sg[1], sg[3], st.wall ? sg[2] - 0.6 : Math.max(0.3, (st.h || 0.4) * 0.6)); return [q[0], q[1]]; },
+    spot: id => { const sg = saloon.signs.find(q => q[0] === id), st = STATION[id]; const q = P(sg[1], sg[3], st.wall || st.west ? sg[2] - 0.6 : Math.max(0.3, (st.h || 0.4) * 0.6)); return [q[0], q[1]]; },
     here: id => actors.has(id) && !actors.get(id).off,
     sitting: id => { const a = actors.get(id); return a && a.sit ? a.sit[0] : ''; },
     count: () => [...actors.values()].filter(a => !a.off).length,
     view: () => cam.view,
-    setView(v) { if (!VIEWS.includes(v)) return; cam.view = v; cam.free = false; if (v === 'eyes') { const a = mine(); cam.pitch = 0; if (a) cam.yaw = a.head + Math.PI; } else if (v === 'follow') { cam.pitch = 0.36; } if (hooks.onView) hooks.onView(v); },
+    setView(v) { if (!VIEWS.includes(v) || (home && v === 'over')) return; cam.view = v; cam.free = false; if (v === 'eyes') { const a = mine(); cam.pitch = 0; if (a) cam.yaw = a.head + Math.PI; } else if (v === 'follow') { cam.pitch = 0.36; } if (hooks.onView) hooks.onView(v); },
     setRoom(members, myId) {
       me = myId; for (const a of actors.values()) drop(a); actors.clear(); fx.length = 0; cam.free = false;
+      if (home) { home = null; cabin.sleeping(false); homeLook(false); } fadeThen = null; fadeTo = 0; pendingMove = null;      // (the room anew: at home only if it says so)
       for (const m of members) if (m.on || m.rest) actors.set(m.id, actor(m));          // (and those who are not here: asleep where they were)
       const a = actors.get(me);
       if (a) { a.born = T - 1; cam.panX = a.x; }
@@ -631,6 +787,7 @@ export function createRoom3D(canvas, over, hooks) {
     spin(id, station, bet, win, net, ms) { casino.spin[station] = T + ms / 1000; saloon.spin(station, ms / 1000, T); spins.push({ at: T + ms / 1000, id, bet, win, net }); },
     result(id, bet, win, net, ms) { spins.push({ at: T + ms / 1000, id, bet, win, net }); },
     move(id, path, sit) {
+      if (id === me && (home || fadeThen)) { pendingMove = [path, sit]; return; }
       const a = actors.get(id);
       if (!a || !path || !path.length) return;
       if (id === me) steer.on = false;                 // the server sends one somewhere (or back): the keys take over again from there
@@ -641,6 +798,26 @@ export function createRoom3D(canvas, over, hooks) {
       if (a.len < 0.01 && a.sit) { a.seated = true; a.hop = 0.28; faceSeat(a); }
       if (wasSeated) a.hop = 0.2;
     },
+    // somebody goes into their own cabin or comes out of it (cabin: 0 out, 1 in, 2 asleep in the bed; path: where
+    // they come out). For oneself: the screen goes dark and one is at home, or back by the door in the saloon.
+    cabin(id, inn, path, instant) {
+      const a = actors.get(id);
+      if (id === me) {
+        if (inn && !home) { const go = () => goHome(inn === 2 ? 'bed' : 'door'); if (instant) { go(); fade = 1; fadeTo = 0; } else { fadeDo(go); play('door'); } saloon.swingWest(); }
+        else if (!inn && home) { fadeDo(() => { leaveHome(path); saloon.swingWest(); }); play('door'); }
+        else if (inn && home) { home.sleep = inn === 2 && home.sleep; }
+        return;
+      }
+      if (!a) return;
+      const was = a.inCabin; a.inCabin = !!inn;
+      if (!inn && path && path.length) { a.path = [path[0]]; a.len = a.dist = 0; a.x = path[0][0]; a.y = path[0][1]; a.sit = null; a.seated = false; a.head = a.want = Math.PI / 2; }
+      if (was !== a.inCabin && !home) { saloon.swingWest(); play('door'); }
+    },
+    homeNow: () => !!home,
+    where(id) { const a = actors.get(id); return a ? [a.x, a.y] : null; },
+    setCabins(list) { saloon.setCabins(list); },
+    // the owner's name on the board over the cabin's door
+    setOwner(name) { cabin.setOwner(name); },
     say(id, text) {
       const a = actors.get(id);
       if (!a) return;
@@ -679,10 +856,10 @@ export function createRoom3D(canvas, over, hooks) {
     // the members as they stand right now, in the shape the server sends them: for handing the room over to the other way of showing it
     snapshot() {
       return [...actors.values()].map(a => ({ id: a.id, name: a.name, look: a.look, dnd: a.dnd, on: !a.off, rest: a.off ? a.rest : undefined, p: a.dist < a.len ? [[a.x, a.y], a.path[a.path.length - 1]] : [[a.x, a.y]], sit: a.sit,
-        fx: Object.keys(a.fxs).map(k => [k, Math.max(0, (PRANKS[k].dur - (T - a.fxs[k])) * 1000)]), drink: a.drink ? [a.drink.k, Math.max(0, (BAR.lasts - (T - a.drink.t0)) * 1000)] : null, buzz: buzzNow(a), busy: a.net !== null ? 'slot' : '', net: a.net || 0 }));
+        fx: Object.keys(a.fxs).map(k => [k, Math.max(0, (PRANKS[k].dur - (T - a.fxs[k])) * 1000)]), drink: a.drink ? [a.drink.k, Math.max(0, (BAR.lasts - (T - a.drink.t0)) * 1000)] : null, buzz: buzzNow(a), busy: a.net !== null ? 'slot' : '', net: a.net || 0, cabin: a.inCabin ? 1 : 0 }));
     },
     dispose() { api.stop(); document.removeEventListener('keydown', keyDown); document.removeEventListener('keyup', keyUp); window.removeEventListener('blur', onBlur); document.removeEventListener('pointerlockchange', onLock); document.removeEventListener('pointerlockerror', onLockError); document.removeEventListener('mousemove', onMouse); for (const a of actors.values()) drop(a); actors.clear(); saloon.dispose(); renderer.dispose(); },
-    _debug: { actors, fx, cam, camera, scene, renderer, pick, P, place, saloon, THREE, keys, steer, target: () => target, locked: () => locked,
+    _debug: { actors, fx, cam, camera, scene, renderer, pick, P, place, saloon, THREE, keys, steer, target: () => target, locked: () => locked, cabin, home: () => home, useThing: id => useThing(CABIN_THINGS.find(t => t.id === id)), getUp,
       lock(v) { forced = !!v; onLock(); }, look(mx, my) { onMouse({ movementX: mx, movementY: my }); }, act },       // lock(true): as if the mouse were caught (a test has no mouse to catch)
   };
   return api;

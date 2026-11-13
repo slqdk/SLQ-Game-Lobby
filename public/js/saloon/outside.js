@@ -11,6 +11,8 @@
 // the house and to the left, and the blue of the sky in the shade), so that it is one evening out there. The house
 // throws its shadow over the yard behind it, where the door is; the pines throw theirs across the grass.
 
+import { CABIN } from '../../shared/cabin.js';
+
 export function buildOutside(THREE, kit, o) {
   const { batch, at, along, picture, wood } = kit, { W, D, H, RIDGE } = o, [DX, DW] = o.door, DC = DX + DW / 2;
   const CX = W / 2, CZ = D / 2, GROUND = -0.22, R = 232, TAU = Math.PI * 2;
@@ -123,6 +125,7 @@ export function buildOutside(THREE, kit, o) {
   const DV = (x, z, c, lift = 0.02) => [x, GROUND + lift, z, c];
   const lay = (...ps) => { for (let i = 1; i + 1 < ps.length; i++) tri(decalB, ps[0], ps[i], ps[i + 1], v => v[3]); };      // a flat piece; each corner [x, y, z, colour]
   const pathX = z => DC - 5 * sstep(-13.5, -47, z);                // the path: straight out of the door to the gate, then over to the barn
+  const WEST = o.west;                                             // the door in the saloon's west end: [z in the middle, width, height]
   const LAKE = [CX - 13, D + 41, 25, 8.5], inLake = (x, z) => ((x - LAKE[0]) / (LAKE[2] * 1.25)) ** 2 + ((z - LAKE[1]) / (LAKE[3] * 1.4)) ** 2 < 1;
   {
     const n = 22, ring = (grass, f) => Array.from({ length: n }, (_, i) => { const a = i / n * TAU, w = 1 + (hash(i, grass ? 901 : 900) - 0.5) * 0.3, x = DC + Math.cos(a) * 8 * f * w, z = -6 + Math.sin(a) * 5.2 * f * w; return DV(x, z, grass ? grassHere(x, z) : dirtHere(x, z)); });
@@ -133,6 +136,14 @@ export function buildOutside(THREE, kit, o) {
       const x = pathX(z) + (noise(z / 5, 3.3) - 0.5) * 0.5, wi = 0.62 + (hash(z * 8, 5) - 0.5) * 0.2, wo = wi + 0.55 + (hash(z * 8, 9) - 0.5) * 0.25;
       const row = [DV(x - wo, z, grassHere(x - wo, z), 0.03), DV(x - wi, z, dirtHere(x - wi, z), 0.03), DV(x + wi, z, dirtHere(x + wi, z), 0.03), DV(x + wo, z, grassHere(x + wo, z), 0.03)];
       if (prev) for (let i = 0; i < 3; i++) lay(prev[i], prev[i + 1], row[i + 1], row[i]);
+      prev = row;
+    }
+    // the path from the saloon's west door to the porch of the cabin
+    prev = null;
+    for (let x = -1.0; x >= CABIN.out[2] + CABIN.porch + 1.1; x -= 1.2) {
+      const u = (x + 1.0) / (CABIN.out[2] + CABIN.porch + 2.1), z = WEST[0] + (CABIN.door.y - WEST[0]) * u + Math.sin(u * Math.PI) * 1.1 + (noise(x / 4, 8.1) - 0.5) * 0.35, wi = 0.5 + (hash(x * 8, 15) - 0.5) * 0.16, wo = wi + 0.5 + (hash(x * 8, 19) - 0.5) * 0.2;
+      const row = [DV(x, z - wo, grassHere(x, z - wo), 0.03), DV(x, z - wi, dirtHere(x, z - wi), 0.03), DV(x, z + wi, dirtHere(x, z + wi), 0.03), DV(x, z + wo, grassHere(x, z + wo), 0.03)];
+      if (prev) for (let i = 0; i < 3; i++) lay(prev[i], row[i], row[i + 1], prev[i + 1]);
       prev = row;
     }
     const [lx, lz, rx, rz] = LAKE, m = 30, rim = Array.from({ length: m }, (_, i) => { const a = i / m * TAU, w = 1 + (hash(i, 700) - 0.5) * 0.28; return [Math.cos(a) * rx * w, Math.sin(a) * rz * w]; });
@@ -271,10 +282,104 @@ export function buildOutside(THREE, kit, o) {
     T.cyl(tx, GROUND + 1.9, tz, 1.25, 1.5, stave, 14, 1.3); T.cyl(tx, GROUND + 3.4, tz, 1.38, 0.5, lit([0.26, 0.22, 0.2]), 14, 0.08);
     for (const y of [2.2, 3.1]) T.cyl(tx, GROUND + y, tz, 1.3, 0.06, lit([0.08, 0.08, 0.09]), 14);
   }
+  // ---------- one's own cabin among the pines west of the saloon (its inside: cabin.js) ----------
+  // Round logs crossing at the corners, a roof that reaches out over a porch, boarded gables with a string of lights
+  // along the front, warm light in the windows, a stone chimney with smoke. Seen from the saloon's windows.
+  const smoke = [];
+  {
+    const [x0, z0, x1, z1] = CABIN.out, H2 = CABIN.wallH, R2 = H2 + CABIN.ridge, M = CABIN.mid, PO = CABIN.porch, half = M - z0, rY = z => H2 + CABIN.ridge * Math.max(0, 1 - Math.abs(z - M) / half);
+    const LOGC = lit(wood([0.5, 0.33, 0.18], 0.16)), END = lit([0.78, 0.6, 0.38]), TRIM = lit([0.86, 0.8, 0.68]), ROOF = lit([0.2, 0.19, 0.2]), BOARD = lit(wood([0.36, 0.24, 0.14], 0.2)), DECK = lit(wood([0.52, 0.36, 0.22], 0.22)), WARM = [1.35, 0.88, 0.42];
+    const holes = { front: [[CABIN.door.y - CABIN.door.w / 2, CABIN.door.y + CABIN.door.w / 2, 0, CABIN.door.h]], back: [], y0: [], y1: [] };
+    for (const [side, at2, w, y0, y1] of CABIN.windows) holes[side].push([at2 - w / 2, at2 + w / 2, y0, y1]);
+    // a row of logs along a wall, broken where the openings are; ends that reach past the corners
+    const logRow = (side, y) => {
+      const isX = side === 'front' || side === 'back', a0 = isX ? z0 - 0.3 : x0 - 0.3, a1 = isX ? z1 + 0.3 : x1 + 0.3, fixed = side === 'front' ? x1 - 0.13 : side === 'back' ? x0 + 0.13 : side === 'y0' ? z0 + 0.13 : z1 - 0.13;
+      let s0 = a0;
+      for (const [h0, h1, hy0, hy1] of holes[side].slice().sort((p, q) => p[0] - q[0])) {
+        if (y + 0.14 < hy0 || y - 0.14 > hy1) continue;
+        if (h0 - s0 > 0.05) put(s0, h0); s0 = h1;
+      }
+      if (a1 - s0 > 0.05) put(s0, a1);
+      function put(sa, sb) { if (isX) T.rod(fixed, y, sa, fixed, y, sb, 0.15, LOGC, 8); else T.rod(sa, y, fixed, sb, y, fixed, 0.15, LOGC, 8); }
+    };
+    for (let k = 0; k < 9; k++) { for (const side of ['front', 'back']) logRow(side, 0.15 + k * 0.3); for (const side of ['y0', 'y1']) logRow(side, 0.3 + k * 0.3 - (k === 8 ? 0.15 : 0)); }
+    // the log ends at the corners, lighter where they were cut
+    for (const [cx2, cz2] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) for (let k = 0; k < 9; k++) {
+      T.add(new THREE.CircleGeometry(0.14, 8), at(cx2 + 0.13 * Math.sign(cx2 - (x0 + x1) / 2), 0.15 + k * 0.3, cz2 + (cz2 > M ? 0.43 : -0.43), 0, cz2 > M ? 0 : Math.PI, 0), END);
+      T.add(new THREE.CircleGeometry(0.14, 8), at(cx2 + (cx2 > (x0 + x1) / 2 ? 0.43 : -0.43), 0.3 + k * 0.3, cz2 + 0.13 * Math.sign(cz2 - M), 0, cx2 > (x0 + x1) / 2 ? Math.PI / 2 : -Math.PI / 2, 0), END);
+    }
+    // a foundation of stones
+    T.box((x0 + x1) / 2, (GROUND - 0.06) / 2, (z0 + z1) / 2, x1 - x0 + 0.1, -GROUND - 0.02, z1 - z0 + 0.1, lit([0.36, 0.34, 0.32]));      // (its top a little under the floor inside)
+    // the boarded gables: at the back wall, at the front wall, and at the front of the porch
+    const gableAt = (x, face) => {
+      const pts = [[z0 - 0.05, H2], [z1 + 0.05, H2], [M, R2 - 0.05]];
+      if (face > 0) pts.reverse();                                  // (anticlockwise seen from outside)
+      for (const [z, y] of pts) T.vert(x, y, z, face, 0, 0, 0, 0, BOARD(x, y, z, { x: face, y: 0, z: 0 }));
+      for (let z = z0 + 0.3; z < z1; z += 0.42) { const top = rY(z) - 0.05; if (top > H2 + 0.15) T.box(x + face * 0.02, (H2 + top) / 2, z, 0.04, top - H2, 0.07, lit([0.26, 0.17, 0.1])); }
+    };
+    gableAt(x1 + 0.02, 1); gableAt(x0 - 0.02, -1); gableAt(x1 + PO + 0.02, 1);
+    T.rod(x1 + PO, H2, z0 - 0.1, x1 + PO, H2, z1 + 0.1, 0.13, LOGC, 8);                        // the beam across the porch's front
+    // the roof: two slopes from the ridge, out over the walls and over the porch; a light board along every edge
+    const rx0 = x0 - 0.45, rx1 = x1 + PO + 0.45, run = Math.hypot(half + 0.55, CABIN.ridge * (half + 0.55) / half), pitch = Math.atan2(CABIN.ridge, half);
+    for (const sd of [-1, 1]) {
+      const zc = M + sd * (half + 0.55) / 2, yc = R2 + 0.12 - CABIN.ridge * ((half + 0.55) / 2) / half;
+      T.box((rx0 + rx1) / 2, yc, zc, rx1 - rx0, 0.12, run, ROOF, sd * pitch, 0, 0);          // (a turn about x by +a tips the far end down)
+      for (let k = 1; k < 8; k++) { const u = k / 8 - 0.5; T.box((rx0 + rx1) / 2, yc + 0.08 - u * run * Math.sin(pitch), zc + sd * u * run * Math.cos(pitch), rx1 - rx0 - 0.02, 0.025, 0.05, lit([0.12, 0.11, 0.12]), sd * pitch, 0, 0); }      // rows of shingles
+      for (const x of [rx0, rx1]) T.box(x, yc - 0.08, zc, 0.06, 0.22, run, TRIM, sd * pitch, 0, 0);
+      // the string of lights along the front edge of the roof (Søren's photo had one)
+      for (let k = 0; k <= 12; k++) { const u = k / 12, z = M + sd * u * (half + 0.5), y = R2 + 0.02 - CABIN.ridge * u * (half + 0.5) / half; T.ball(rx1 + 0.04, y - 0.16, z, 0.055, (k % 3) ? [2.6, 1.9, 0.9] : [2.8, 1.4, 0.6]); }
+    }
+    T.box((rx0 + rx1) / 2, R2 + 0.1, M, rx1 - rx0, 0.12, 0.3, lit([0.16, 0.15, 0.16]));       // the ridge cap
+    // the windows: warm light inside, a light frame round it
+    const windowOut = (side, at2, w, y0, y1) => {
+      const isX = side === 'front' || side === 'back', n = side === 'front' ? 1 : side === 'back' ? -1 : side === 'y0' ? -1 : 1;
+      const x = side === 'front' ? x1 : side === 'back' ? x0 : at2, z = isX ? at2 : side === 'y0' ? z0 : z1;
+      const B = (du, y, bw, bh, out, col) => isX ? T.box(x + n * out, y, z + du, 0.04, bh, bw, col) : T.box(x + du, y, z + n * out, bw, bh, 0.04, col);
+      // the glass: one sheet that faces out (from inside the cabin one looks through it)
+      const Nx = isX ? n : 0, Nz = isX ? 0 : n, gx = x - Nx * 0.05, gz = z - Nz * 0.05, hw = w / 2;
+      T.quad([gx - Nz * hw, y0, gz + Nx * hw], [gx + Nz * hw, y0, gz - Nx * hw], [gx + Nz * hw, y1, gz - Nx * hw], [gx - Nz * hw, y1, gz + Nx * hw], WARM);
+      for (const s2 of [-1, 1]) B(s2 * (w / 2 + 0.05), (y0 + y1) / 2, 0.1, y1 - y0 + 0.2, 0.18, TRIM);
+      B(0, y1 + 0.06, w + 0.3, 0.12, 0.18, TRIM); B(0, y0 - 0.05, w + 0.3, 0.1, 0.2, TRIM);
+      B(0, (y0 + y1) / 2, 0.05, y1 - y0, 0.12, lit([0.2, 0.15, 0.1])); B(0, (y0 + y1) / 2, w, 0.05, 0.12, lit([0.2, 0.15, 0.1]));
+    };
+    for (const q of CABIN.windows) windowOut(...q);
+    // the door, a lantern beside it, and the porch: a deck, steps down, posts, a rail, a bench
+    { const dz = CABIN.door.y, dw = CABIN.door.w, dh = CABIN.door.h;
+      T.box(x1 + 0.08, dh / 2, dz, 0.05, dh, dw, lit(wood([0.3, 0.17, 0.08], 0.2)));
+      for (const s2 of [-1, 1]) T.box(x1 + 0.16, dh / 2, dz + s2 * (dw / 2 + 0.06), 0.06, dh + 0.1, 0.12, TRIM); T.box(x1 + 0.16, dh + 0.08, dz, 0.06, 0.14, dw + 0.36, TRIM);
+      T.box(x1 + 0.18, 1.6, dz + dw / 2 + 0.38, 0.14, 0.24, 0.14, lit([0.08, 0.08, 0.09])); T.box(x1 + 0.2, 1.6, dz + dw / 2 + 0.38, 0.1, 0.17, 0.1, [2.8, 1.8, 0.7]);
+      for (let z = z0 + 0.1; z < z1 - 0.05; z += 0.3) T.box(x1 + PO / 2, -0.02, z + 0.14, PO, 0.08, 0.28, DECK);
+      for (let k = 0; k < 3; k++) T.box(x1 + PO + 0.18 + k * 0.3, -0.07 - k * 0.06 + 0.0, dz, 0.3, 0.06, 1.2, DECK);
+      const POST = lit(wood([0.42, 0.28, 0.16], 0.18));
+      for (const z of [z0 + 0.2, z1 - 0.2]) { const top = rY(z) - 0.12; T.cyl(x1 + PO - 0.12, -0.05, z, 0.11, top + 0.05, POST, 8); }
+      for (const [za, zb] of [[z0 + 0.2, dz - 0.65], [dz + 0.65, z1 - 0.2]]) {
+        for (const y of [0.45, 0.9]) T.rod(x1 + PO - 0.12, y, za, x1 + PO - 0.12, y, zb, 0.04, POST, 5);
+        for (let z = za; z <= zb + 0.01; z += (zb - za) / Math.max(1, Math.round((zb - za) / 0.9))) T.cyl(x1 + PO - 0.12, 0, z, 0.06, 0.95, POST, 6);
+      }
+      for (const z of [z0 + 0.2, z1 - 0.2]) { T.rod(x1, 0.9, z, x1 + PO - 0.12, 0.9, z, 0.04, POST, 5); T.rod(x1, 0.45, z, x1 + PO - 0.12, 0.45, z, 0.04, POST, 5); }
+      T.box(x1 + 0.35, 0.42, z1 - 1.3, 0.4, 0.06, 1.4, DECK); for (const s2 of [-1, 1]) T.box(x1 + 0.35, 0.2, z1 - 1.3 + s2 * 0.6, 0.36, 0.4, 0.06, POST);
+      for (let k = 0; k < 4; k++) T.add(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 7), at(x1 + 0.4, 0.1 + (k > 1 ? 0.17 : 0), z0 + 0.6 + (k % 2) * 0.2 + (k > 1 ? 0.1 : 0), Math.PI / 2, 0, 0), lit([0.55, 0.36, 0.2]));       // firewood
+    }
+    // the chimney: stones up the back wall and out above the ridge, and smoke
+    { const cz = M, cw = 1.0, cd = 0.75, top = R2 + 0.9;
+      for (let y = GROUND, k = 0; y < top; y += 0.32, k++) T.box(x0 - cd / 2, y + 0.16, cz, cd + (k % 2 ? 0.04 : 0), 0.32, cw + (k % 2 ? 0 : 0.04), lit([0.42 - (k % 3) * 0.04, 0.39 - (k % 3) * 0.03, 0.36 - (k % 2) * 0.03]));
+      T.box(x0 - cd / 2, top + 0.06, cz, cd + 0.16, 0.12, cw + 0.16, lit([0.3, 0.29, 0.28]));
+      const puffM = new THREE.SphereGeometry(1, 8, 6);
+      for (let i = 0; i < 7; i++) { const m = new THREE.Mesh(puffM, new THREE.MeshBasicMaterial({ color: 0xc9c4c8, transparent: true, opacity: 0.4, depthWrite: false })); m.renderOrder = 14; group.add(m); smoke.push({ m, u: i / 7, x: x0 - cd / 2, y: top + 0.1, z: cz }); }
+      smoke.geo = puffM;
+    }
+    shadow([[x0, 0, z0], [x1 + PO, 0, z0], [x1 + PO, 0, z1], [x0, 0, z1], [x0, H2 - GROUND, z0 - 0.5], [x1 + PO, H2 - GROUND, z0 - 0.5], [x1 + PO, H2 - GROUND, z1 + 0.5], [x0, H2 - GROUND, z1 + 0.5], [x0, R2 - GROUND, M], [x1 + PO, R2 - GROUND, M]]);
+    // a landing and two steps outside the saloon's west door
+    { const [wz, ww] = WEST;
+      T.box(-0.75, -0.06, wz, 0.95, 0.1, ww + 0.6, DECK); for (let k = 0; k < 2; k++) T.box(-1.38 - k * 0.3, -0.12 - k * 0.05, wz, 0.3, 0.06, ww, DECK);
+      T.box(-0.32, 1.95, wz + ww / 2 + 0.45, 0.12, 0.22, 0.12, lit([0.08, 0.08, 0.09])); T.box(-0.36, 1.95, wz + ww / 2 + 0.45, 0.08, 0.15, 0.08, [2.8, 1.8, 0.7]);
+    }
+  }
   // pines: three skirts and a trunk near by, a single cone far away; never where something else is
   const pines = [];
   const clearAt = (x, z) => {
     if (x > -11 && x < W + 11 && z > -9 && z < D + 16) return false;                         // the house, and the ground in front of it where the camera may be
+    if (x > CABIN.out[0] - 3 && x < 0 && z > CABIN.out[1] - 3 && z < CABIN.out[3] + 3) return false;     // the cabin, the path to it, and what one sees of it from the saloon
     if (x > -14 && x < W + 14 && z >= D + 16 && z < LAKE[1] + 14) return false;              // open grass from the front windows down to the lake
     if (z < 0 && z > -50 && Math.abs(x - pathX(z)) < 3.4) return false;                      // the path
     if (x > COR[0] - 1.5 && x < COR[2] + 1.5 && z > COR[1] - 1.5 && z < COR[3] + 1.5) return false;
@@ -292,7 +397,7 @@ export function buildOutside(THREE, kit, o) {
     }
     if (y < GROUND + 0.05 && !inShade(x, GROUND + h * 0.4, z)) shadow([[x - r, h * 0.17, z], [x + r, h * 0.17, z], [x, h * 0.17, z - r], [x, h * 0.17, z + r], [x, h, z], [x - 0.25, 0, z], [x + 0.25, 0, z]]);
   };
-  for (const [x, z, h] of [[-17, 2.5, 12], [-23, 10, 14.5], [-14, 15.5, 10], [-29, -5, 13], [W + 15, 1, 13], [W + 21, 8.5, 11], [W + 13, 14, 14], [W + 27, -3, 12],
+  for (const [x, z, h] of [[-15.5, -0.5, 12], [-31.5, 4.5, 14.5], [-32, 10.5, 13], [-25.5, 0.2, 11], [-23.5, 13.9, 12.5], [-14, 15.5, 10], [-29, -5, 13], [W + 15, 1, 13], [W + 21, 8.5, 11], [W + 13, 14, 14], [W + 27, -3, 12],
     [3, -19, 13], [-6, -15.5, 11], [W + 6, -17, 12.5], [W - 2, -21, 10], [-17, D + 19, 12], [-22, D + 31, 10.5], [W + 16, D + 20, 13], [W + 21, D + 32, 11], [-9, D + 62, 12], [W - 6, D + 60, 13.5]]) pine(x, z, h, false);
   for (let i = 0; i < 400 && pines.length < 96; i++) { const a = rnd() * TAU, r = 22 + rnd() * 58, x = CX + Math.cos(a) * r, z = CZ + Math.sin(a) * r; if (clearAt(x, z) && noise(x / 19 + 2, z / 19 + 7) > 0.42) pine(x, z, 8 + rnd() * 6.5, false); }
   for (let i = 0; i < 900; i++) { const a = rnd() * TAU, r = 66 + rnd() * 74, x = CX + Math.cos(a) * r, z = CZ + Math.sin(a) * r; if (height(x, z) < 21 && noise(x / 17 + 3, z / 17 + 8) <= 0.66) pine(x, z, 7 + rnd() * 6, true); }
@@ -327,14 +432,17 @@ export function buildOutside(THREE, kit, o) {
   });
   function birds0() { return birds0.g || (birds0.g = birdB.mesh(flat).geometry); }
   const meshes = [sky, sun, land, decals, shadows, things, cloudMesh, wheel];
+  for (const p of smoke) meshes.push(p.m);
 
   return {
     group,
     tick(dt, t) {
       wheel.rotation.z = -t * 1.3;
       clouds.rotation.y = t * 0.004;
+      for (const p of smoke) { const u = (t * 0.09 + p.u) % 1; p.m.position.set(p.x + u * 2.2, p.y + u * 3.2, p.z + Math.sin(u * 5 + p.u * 9) * 0.25); p.m.scale.setScalar(0.2 + u * 0.75); p.m.material.opacity = 0.42 * Math.sin(Math.min(1, u * 6) * Math.PI / 2) * (1 - u); }       // smoke from the cabin's chimney
       birds.forEach((b, i) => { const a = t * b.w + b.a0; b.m.position.set(b.cx + Math.cos(a) * b.r, b.y + Math.sin(a * 0.37 + i) * 2, b.cz + Math.sin(a) * b.r); b.m.rotation.set(0, (b.w < 0 ? Math.PI : 0) - a, b.w < 0 ? 0.32 : -0.32); });
     },
-    dispose() { for (const m of meshes) { m.geometry.dispose(); if (m.material !== flat) m.material.dispose(); } birds0().dispose(); flat.dispose(); straws.dispose(); },
+    lit,                                              // the valley's light, for whatever else stands out in it (the saloon's outside)
+    dispose() { for (const m of meshes) { if (m.geometry !== smoke.geo) m.geometry.dispose(); if (m.material !== flat) m.material.dispose(); } if (smoke.geo) smoke.geo.dispose(); birds0().dispose(); flat.dispose(); straws.dispose(); },
   };
 }

@@ -229,6 +229,8 @@ const on = {
     room.setName(m.g.name);
     room.setRoom(m.mem, mine());
     if (m.up) room.wake(mine(), m.up);                                     // back again: one gets up from where one lay
+    room.setOwner(st.me.name); cabinsChanged();
+    if (m.home) homeGo(2, null, true);                                    // back again, and one was at home: one wakes up in one's bed
     st.juke = m.juke || null;
     useView(viewWanted());
     $('#groupName').textContent = m.g.name;
@@ -251,8 +253,14 @@ const on = {
     if (m.g.name) { $('#groupName').textContent = m.g.name; room.setName(m.g.name); }
     if (sheet.kind === 'menu') openMenu();
   },
-  on(m) { st.mem.set(m.m.id, m.m); room.join(m.m); renderFriends(); },
-  off(m) { const x = st.mem.get(m.u); if (x) { x.on = false; x.seen = m.seen; x.open = 0; x.rest = m.rest; } if (m.rest) room.sleep(m.u, m.rest); else room.leave(m.u); renderFriends(); },      // (gone: lies down and sleeps where they were)
+  on(m) { st.mem.set(m.m.id, m.m); room.join(m.m); renderFriends(); cabinsChanged(); },
+  // somebody goes into their own cabin, comes out of it, or goes to sleep in it
+  cabin(m) {
+    const x = st.mem.get(m.u); if (x) x.cabin = m.in;
+    if (m.u === mine()) homeGo(m.in, m.p, false); else room.cabin(m.u, m.in, m.p);
+    cabinsChanged();
+  },
+  off(m) { const x = st.mem.get(m.u); if (x) { x.on = false; x.seen = m.seen; x.open = 0; x.rest = m.rest; } if (m.rest) room.sleep(m.u, m.rest); else room.leave(m.u); renderFriends(); cabinsChanged(); },      // (gone: lies down and sleeps where they were, or in their cabin)
   mem(m) {
     const x = st.mem.get(m.m.id);
     if (x) Object.assign(x, m.m); else if (m.m.name) st.mem.set(m.m.id, m.m);
@@ -260,7 +268,7 @@ const on = {
     renderFriends();
     if (sheet.kind === 'menu') openMenu(); else if (sheet.kind === 'scores') openScores();
   },
-  gone(m) { st.mem.delete(m.u); room.leave(m.u); renderFriends(); if (sheet.kind === 'menu') openMenu(); },
+  gone(m) { st.mem.delete(m.u); room.leave(m.u); renderFriends(); cabinsChanged(); if (sheet.kind === 'menu') openMenu(); },
   mv(m) { room.move(m.u, m.p, m.sit); },
   chat(m) {
     addChat(m.m);
@@ -382,6 +390,7 @@ function statusOf(m) {
   if (m.busy === 'slot') return ['ved ' + (MACHINES[m.slot] ? MACHINES[m.slot].name : 'en slotmaskine') + net, 'play'];
   if (m.busy === 'bj') return ['ved blackjackbordet' + net, 'play'];
   if (m.busy) return ['spiller ' + (BUSY[m.busy] || 'et spil'), 'play'];
+  if (m.cabin) return [m.cabin === 2 ? 'sover i sin hytte' : 'hjemme i sin hytte', ''];
   return [m.dnd ? 'vil ikke forstyrres' : 'i klubhuset', ''];
 }
 const busts = new Map();
@@ -436,14 +445,17 @@ const viewWanted = () => { const v = load('slq-room'); return ['follow', 'eyes',
 const keysOn = () => st.view === 'room' && !sheet.isOpen && !arenaOpen() && $('#embed').hidden;
 const sip = () => send({ t: 'emote', k: 'sip' });
 // the view was chosen (by a button, or by V in the saloon): remembered, and shown on the buttons
-function viewChosen(v) { save('slq-room', v); for (const b of $('#viewBar').children) b.classList.toggle('on', b.dataset.view === v); }
+function viewChosen(v) { save('slq-room', v); viewMarks(v); }
+// which button is lit; in one's cabin there is no overview and no flat clubhouse
+function viewMarks(v) { const inHome = !!(deep && deep.homeNow()) || !!st.goingHome; for (const b of $('#viewBar').children) { b.classList.toggle('on', b.dataset.view === v); b.disabled = inHome && (b.dataset.view === 'over' || b.dataset.view === 'flat'); } }
 let viewBusy = false;
-async function useView(v) {
+async function useView(v, keep = true) {
   if (viewBusy) return;
+  if (deep && deep.homeNow() && (v === 'over' || v === 'flat')) return;
   viewBusy = true;
   try {
     if (v !== 'flat' && !deep) {
-      try { const mod = await import('./room3d.js'); deep = mod.createRoom3D($('#room3d'), $('#roomOver'), { onActor, onStation, onFloor, onStep, keysOn, onSip: sip, onView: viewChosen }); }
+      try { const mod = await import('./room3d.js'); deep = mod.createRoom3D($('#room3d'), $('#roomOver'), { onActor, onStation, onFloor, onStep, keysOn, onSip: sip, onView: v => { if (!(deep && deep.homeNow())) viewChosen(v); else viewMarks(v); }, onHome }); deep.setOwner(st.me ? st.me.name : ''); }
       catch (e) { console.error(e); toast('Saloonen i 3D kunne ikke starte i denne browser. Du får den flade klub.'); v = 'flat'; }
     }
     const next = v === 'flat' ? flat : deep;
@@ -451,14 +463,14 @@ async function useView(v) {
       const who = room.snapshot(), was = room;
       was.stop();
       room = next;
-      room.setName(st.g ? st.g.name : ''); room.setRoom(who, st.g ? mine() : 0);
+      room.setName(st.g ? st.g.name : ''); room.setRoom(who, st.g ? mine() : 0); cabinsChanged();
       $('#room').hidden = v !== 'flat'; $('#room3d').hidden = $('#roomOver').hidden = v === 'flat';
       room.start(); room.resize();
       if (st.g) { tablesChanged(); casinoChanged(); }
       musicSync();
     }
     if (v !== 'flat') { deep.setView(v); roomTips(); }
-    viewChosen(v);
+    if (keep) viewChosen(v); else viewMarks(v);
     $('#viewBar').hidden = false;
   } finally { viewBusy = false; }
 }
@@ -481,7 +493,8 @@ function onStation(sn) {
   if (sn.kind === 'game') { goTo(sn); openStation(sn); }
   else if (sn.kind === 'bar') { send({ t: 'sit', st: 'bar' }); openBar(); }
   else if (sn.kind === 'shop') { goTo(sn); openShop(); }
-  else if (sn.kind === 'wardrobe') { goTo(sn); openWardrobe(); }
+  else if (sn.kind === 'cabin') goCabin();
+  else if (sn.kind === 'cabins') { goTo(sn); openCabins(); }
   else if (sn.kind === 'scores') { goTo(sn); openScores(); }
   else if (sn.kind === 'slot') send({ t: 'sopen', m: sn.machine });
   else if (sn.kind === 'casino') { goTo(sn); openCasino(); }
@@ -494,6 +507,57 @@ function onStation(sn) {
     send({ t: 'move', x: to[0], y: to[1] });
     setTimeout(() => send({ t: 'emote', k: 'dance' }), 400 + pathLen(findPath(ROOM.spawn, to)) / ROOM.speed * 400);
   }
+}
+
+// ---------- one's own cabin ----------
+// Søren: "en dør i den ene ende af huset. Den dør skal føre figuren til ens egen personlige træhytte ... Man skal ikke
+// kunne gå ud af døren i klubhuset, men hvis man trykker E på døren, så kommer man direkte ind i sin egen hytte".
+// Who is in their cabin: whoever went in, and whoever is not in the clubhouse without lying asleep on its floor.
+function cabinList() {
+  const out = [];
+  for (const m of st.mem.values()) { if (m.on && m.cabin) out.push({ name: m.name, sleep: m.cabin === 2 }); else if (!m.on && !m.rest) out.push({ name: m.name, sleep: true }); }
+  return out.sort((a, b) => (a.sleep - b.sleep) || a.name.localeCompare(b.name, 'da'));
+}
+function cabinsChanged() { if (room && st.mem) room.setCabins(cabinList()); if (sheet.kind === 'cabins') openCabins(); }
+function openCabins() {
+  const list = cabinList();
+  sheet.open({ title: 'I hytterne', kind: 'cabins', body: [
+    list.length ? h('div', {}, list.map(r => h('div', { class: 'who2' }, h('b', {}, r.name), h('span', {}, r.sleep ? 'sover' : 'er i sin hytte')))) : h('p', { class: 'hint' }, 'Ingen er i deres hytte lige nu.'),
+    h('p', { class: 'hint' }, 'Døren ved siden af tavlen fører til din egen hytte.'),
+    h('button', { class: 'btn', onclick: () => { sheet.close(); goCabin(); } }, 'Gå hjem i din hytte')] });
+}
+// to the door, and in when one is there
+function goCabin() {
+  const sn = STATION.cabin, near = () => { const q = room.where(mine()); return q && Math.hypot(q[0] - sn.use[0], q[1] - sn.use[1]) < 1.6; };
+  clearInterval(st.cabinWait);
+  if (near()) return send({ t: 'cabin', in: 1 });
+  send({ t: 'move', x: sn.use[0], y: sn.use[1] });
+  let n = 0;
+  st.cabinWait = setInterval(() => { if (++n > 80 || st.view !== 'room') return clearInterval(st.cabinWait); if (near()) { clearInterval(st.cabinWait); send({ t: 'cabin', in: 1 }); } }, 200);
+}
+// the server says one goes in (1, or 2 asleep in the bed) or out (0). The cabin is only in 3D: from the flat
+// clubhouse, 3D is used while one is at home, and the flat one again after.
+async function homeGo(inn, path, instant) {
+  if (inn) {
+    if (room !== deep || !deep) {
+      st.homeFlat = room === flat; st.goingHome = true;
+      await useView(load('slq-room') === 'eyes' ? 'eyes' : 'follow', false);
+      st.goingHome = false;
+      if (room !== deep) { send({ t: 'cabin', in: 0 }); return; }        // (no 3D in this browser: straight out again)
+    }
+    room.cabin(mine(), inn, path, instant);
+    viewMarks(deep.view());
+    if (!load('slq-home-tip')) { save('slq-home-tip', '1'); toast('Velkommen hjem! Det her er din egen hytte. Klædeskabet har dit tøj, og du kan sove i sengen. Gå ud ad døren for at komme over i klubhuset.', { ms: 12000 }); }
+  } else {
+    room.cabin(mine(), 0, path);
+    setTimeout(() => { viewMarks(deep ? deep.view() : 'flat'); if (st.homeFlat) { st.homeFlat = false; useView('flat'); } }, 700);
+  }
+}
+function onHome(what) {
+  if (what === 'out') send({ t: 'cabin', in: 0 });
+  else if (what === 'sleep') send({ t: 'cabin', in: 1, sleep: 1 });
+  else if (what === 'wake') send({ t: 'cabin', in: 1, sleep: 0 });
+  else if (what === 'wardrobe') openWardrobe();
 }
 
 // ---------- sheets: other people, oneself, emotes ----------
@@ -509,7 +573,8 @@ function openActor(id) {
   if (id === mine()) return openSelf();
   const [text] = statusOf(m), wins = Object.values(m.stats || {}).reduce((n, s) => n + (s && s.w || 0), 0);
   const body = [h('div', { class: 'who2' }, bust(m.look, 60), h('div', {}, h('b', {}, text[0].toUpperCase() + text.slice(1)), h('span', {}, m.chips + ' jetoner · ' + wins + (wins === 1 ? ' sejr' : ' sejre'))))];
-  if (m.on && m.dnd) body.push(h('p', { class: 'hint' }, m.name + ' vil ikke forstyrres lige nu.'));
+  if (m.on && m.cabin) body.push(h('p', { class: 'hint' }, m.name + (m.cabin === 2 ? ' sover i sin hytte' : ' er hjemme i sin hytte') + '. Der er man i fred – men du kan stadig skrive i chatten.'));
+  else if (m.on && m.dnd) body.push(h('p', { class: 'hint' }, m.name + ' vil ikke forstyrres lige nu.'));
   else if (m.on) {
     const keys = Object.keys(PRANKS);
     body.push(h('div', { class: 'sec' }, 'Dril'), tiles(keys.filter(k => !PRANKS[k].nice).map(k => prankTile(k, id))));

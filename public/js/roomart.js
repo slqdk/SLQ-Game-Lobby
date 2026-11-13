@@ -158,6 +158,19 @@ export function paintBackground(c, groupName) {
     rrect(c, x + w / 2 - 0.36, V(0, h + 0.42), 0.72, 0.3, 0.05); paint(c, '#2f9e63', 0.035);
     text(c, 'UD', x + w / 2, V(0, h + 0.26), 0.2, '#eafff2', 700);
   }
+  // the door to the cabins (in 3D it is in the west end; here it is at the left of the back wall), and the board beside it
+  { const [x, , w, h] = STATION.cabin.flat;
+    rrect(c, x - 0.1, V(0, h), w + 0.2, h, 0.05); paint(c, '#3a2a1c');
+    rrect(c, x, V(0, h - 0.08), w, h - 0.08, 0.04); paint(c, '#9a6a3c', 0.04);
+    for (let i = 1; i < 5; i++) line(c, x + i * w / 5, V(0, h - 0.12), x + i * w / 5, V(0, 0.05), 'rgba(43,26,14,.5)', 0.025);
+    for (const y of [0.5, h - 0.5]) { rrect(c, x + 0.06, V(0, y + 0.05), w - 0.12, 0.1, 0.02); paint(c, '#2b2233', 0.02); }
+    ell(c, x + w - 0.2, V(0, 1.15), 0.07, 0.07); paint(c, '#2b2233', 0.03);
+    rrect(c, x + w / 2 - 0.62, V(0, h + 0.44), 1.24, 0.32, 0.05); paint(c, '#c88a4a', 0.035);
+    text(c, 'HYTTERNE', x + w / 2, V(0, h + 0.27), 0.19, '#3a2410', 700);
+    const [bx, bz, bw, bh] = STATION.cabins.flat;
+    rrect(c, bx - 0.06, V(0, bz + bh + 0.06), bw + 0.12, bh + 0.12, 0.05); paint(c, '#2b1a0e');
+    rrect(c, bx, V(0, bz + bh), bw, bh, 0.03); paint(c, '#4a2e18', 0.03);
+  }
   // the casino: a neon sign over the machines, the plate that shows the jackpot, and the board (their numbers are drawn live)
   { const a = STATION.slot1.box, b = STATION.slot3.box, cx = (a[0] + b[0] + b[2]) / 2;
     c.save(); c.shadowColor = '#ffb347'; c.shadowBlur = 22;
@@ -448,7 +461,7 @@ export function paintStool(c, x, y, high) {
 export const seatHeight = s => s.on ? 0.42 : s.high ? 0.7 : 0.44;
 
 // ---------- the things that move (drawn every frame) ----------
-export function paintLive(c, t, music, casino) {
+export function paintLive(c, t, music, casino, cabins) {
   // dance floor tiles
   const [dx, dy, dr] = STATION.dance.floor, n = 4, tw = dr * 2 / n;
   const cols = ['#ff5fa2', '#4fc3e8', '#ffd45e', '#7fe08a', '#b07cff'];
@@ -472,6 +485,15 @@ export function paintLive(c, t, music, casino) {
       const y = top + 0.5 + i * 0.3, short = name.length > 9 ? name.slice(0, 8) + '…' : name, col = net > 0 ? '#7fe08a' : net < 0 ? '#ff8f80' : '#e9e3f5';
       c.textAlign = 'left'; text(c, short, x + 0.12, y, 0.15, '#e9e3f5', 600); c.textAlign = 'right'; text(c, (net > 0 ? '+' : '') + net, x + w - 0.12, y, 0.16, col, 700); c.textAlign = 'center';
     });
+  }
+  // who is in their cabin: on the board by the door to the cabins
+  if (cabins) {
+    const [x, z, w, h] = STATION.cabins.flat, top = V(0, z + h);
+    text(c, 'I HYTTERNE', x + w / 2, top + 0.16, 0.13, '#f1d9a0', 700);
+    const rows = cabins.slice(0, 4);
+    if (!rows.length) text(c, 'Ingen', x + w / 2, top + h / 2 + 0.08, 0.12, '#a99579', 600);
+    rows.forEach((r, i) => { const y = top + 0.42 + i * 0.22, short = r.name.length > 9 ? r.name.slice(0, 8) + '…' : r.name; c.textAlign = 'left'; text(c, short, x + 0.1, y, 0.12, r.sleep ? '#a99579' : '#fff3d6', 600); c.textAlign = 'center'; if (r.sleep) text(c, 'z', x + w - 0.1, y, 0.12, '#9d97e6', 700); });
+    if (cabins.length > rows.length) text(c, '+' + (cabins.length - rows.length), x + w / 2, top + h - 0.08, 0.1, '#a99579', 600);
   }
   // the clock
   { const [x, , w] = STATION.jukebox.box, cx = x + w / 2, cy = V(0, 2.62), d = new Date(), hh = d.getHours() % 12 + d.getMinutes() / 60, mm = d.getMinutes() + d.getSeconds() / 60;

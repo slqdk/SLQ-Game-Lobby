@@ -9,10 +9,13 @@ export const CASINO_X = 24;
 // kind      what using it does (the browser decides how)
 // box       [x, y, w, d] footprint that blocks walking          round  [cx, cy, rx, ry] the same for round things
 // wall      [x, z, w, h] something hanging on the back wall     floor  [cx, cy, r] something painted on the floor
+// west      [y, z, w, h] something on the west end wall (x = 0): from y along it, z up; flat: where the drawn clubhouse has it on the back wall
 // h         height                                              use    where an avatar stands to use it
 // seats     [x, y] of each seat; `on` means the seats are on the furniture itself (the sofa)
 export const STATIONS = [
-  { id: 'wardrobe', kind: 'wardrobe', name: 'Garderoben', box: [0.9, 0.2, 2.2, 0.9], h: 2.7, use: [2.0, 1.9] },
+  { id: 'hall', kind: 'decor', box: [1.0, 0.2, 2.0, 0.55], h: 1.9 },                     // a bench and a row of coat pegs (the wardrobe moved into the cabin)
+  { id: 'cabin', kind: 'cabin', name: 'Hytterne', west: [5.75, 0, 1.3, 2.35], flat: [0.95, 0, 1.25, 2.3], use: [0.95, 6.4] },          // the door to one's own cabin
+  { id: 'cabins', kind: 'cabins', name: 'Hyttetavlen', west: [7.3, 1.05, 1.1, 1.35], flat: [2.35, 1.0, 1.05, 1.3], use: [0.95, 7.85] },  // who is in their cabin
   { id: 'kiosk', kind: 'shop', name: 'Tøjbutikken', box: [3.9, 0.2, 3.2, 1.1], h: 1.15, use: [5.5, 2.1] },
   // the bar is a U that opens towards the back wall: a counter along the front and down both sides, the keeper inside
   { id: 'bar', kind: 'bar', name: 'Baren', box: [7.7, 0.2, 6.4, 2.3], h: 1.3, use: [10.9, 3.5], high: true, counter: 0.62,

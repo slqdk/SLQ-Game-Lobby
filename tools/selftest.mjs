@@ -457,6 +457,41 @@ section('én forbindelse ad gangen, og at gå offline');
   check('stoppes serveren, lægger alle sig, hvor de er, og rejser sig dér igen bagefter', kept && Math.hypot(kept[0] - 16.2, kept[1] - 9.4) < 1.2);
 }
 
+section('hytten');
+{
+  // one's own cabin: in through the door in the west end, asleep in one's bed, out again; whoever is at home is not here
+  const idA = A.last('welcome').me.id, idB = B.last('welcome').me.id, door = STATION.cabin.use;
+  const at = c => c.last('room').mem.find(x => x.id === c.last('welcome').me.id);
+  A.send({ t: 'leave' }); A.send({ t: 'enter', g: GID });
+  A.send({ t: 'move', x: 16, y: 9 }); clock += 6000;
+  A.send({ t: 'cabin', in: 1 });
+  check('man skal stå ved døren til hytterne for at gå ind', /døren/.test(A.err()));
+  A.send({ t: 'move', x: door[0], y: door[1] }); clock += 8000; mark(B);
+  A.send({ t: 'cabin', in: 1 });
+  const went = B.since('cabin')[0];
+  check('ved døren går man ind i sin hytte, og de andre får det at vide', went && went.u === idA && went.in === 1 && A.since('cabin')[0] && A.since('cabin')[0].in === 1);
+  mark(B); A.send({ t: 'move', x: 12, y: 6 }); A.send({ t: 'step', x: 1.5, y: 6.6 }); A.send({ t: 'sit', st: 'sofa' }); clock += 3000;
+  B.send({ t: 'prank', k: 'snow', to: idA });
+  check('i hytten går man ikke rundt i klubhuset, og man kan ikke drilles der', B.since('mv').filter(q => q.u === idA).length === 0 && /hytte/.test(B.err()));
+  B.send({ t: 'leave' }); B.send({ t: 'enter', g: GID });
+  check('den, der kommer ind, kan se, hvem der er i sin hytte', B.last('room').mem.find(x => x.id === idA).cabin === 1);
+  mark(B); A.send({ t: 'cabin', in: 1, sleep: 1 });
+  check('man kan lægge sig til at sove i sin seng, og de andre kan se det', B.since('cabin')[0] && B.since('cabin')[0].in === 2);
+  // asleep at home when going offline: one wakes up in one's bed again
+  mark(B); A.conn.close();
+  check('går man offline i hytten, sover man videre dér og ligger ikke på gulvet', B.last('off').u === idA && !B.last('off').rest && store.groups.get(GID).home[idA] === 1 && !(store.groups.get(GID).rest || {})[idA]);
+  A = client(tokA); A.send({ t: 'enter', g: GID });
+  check('kommer man igen, vågner man i sin seng', A.last('room').home === 1 && at(A).cabin === 2 && B.last('on').m.cabin === 2);
+  mark(B); A.send({ t: 'cabin', in: 0 });
+  const out = B.since('cabin')[0];
+  check('ud ad døren er man tilbage i klubhuset ved døren', out && out.in === 0 && Math.hypot(out.p[0][0] - door[0], out.p[0][1] - door[1]) < 0.6);
+  A.send({ t: 'move', x: 15, y: 9 }); clock += 6000;
+  check('og så kan man gå rundt igen', B.last('mv').u === idA);
+  mark(B); A.send({ t: 'leave' });
+  check('går man fra klubhuset, ligger man på gulvet igen og ikke i hytten', !!B.last('off').rest && !store.groups.get(GID).home[idA]);
+  A.send({ t: 'enter', g: GID });
+}
+
 section('admin');
 {
   const idA = A.last('welcome').me.id, idB = B.last('welcome').me.id, idC = C.last('welcome').me.id;
@@ -936,8 +971,9 @@ section('klubhuset i 3D: saloonen og figurerne');
       return hit;
     };
     const ym = (WINDOWS.y0 + WINDOWS.y1) / 2, hw = WINDOWS.w / 2, [dx, , dw, dh] = STATION.door.wall, RW = ROOM.w, RD = ROOM.d;
-    const open = [...WINDOWS.ends.flatMap(z => [[0, ym, z], [RW, ym, z], [0, WINDOWS.y0 + 0.05, z - hw + 0.05], [RW, WINDOWS.y1 - 0.05, z + hw - 0.05]]), ...WINDOWS.front.flatMap(x => [[x, ym, RD], [x - hw + 0.05, WINDOWS.y1 - 0.05, RD]]), [dx + dw / 2, dh / 2, 0], [dx + 0.05, 0.05, 0], [dx + dw - 0.05, dh - 0.05, 0]];
-    const shut = [...WINDOWS.ends.flatMap(z => [[0, WINDOWS.y0 - 0.05, z], [RW, WINDOWS.y1 + 0.05, z], [0, ym, z + hw + 0.05], [RW, ym, z - hw - 0.05]]), ...WINDOWS.front.flatMap(x => [[x, WINDOWS.y0 - 0.05, RD], [x + hw + 0.05, ym, RD]]), [dx - 0.05, 1, 0], [dx + dw + 0.05, 1, 0], [dx + dw / 2, dh + 0.05, 0], [1, 0.5, 0], [RW - 1, 3, RD], [RW / 2, 4, 0]];
+    const [wz, , wwd, wh] = STATION.cabin.west;
+    const open = [...WINDOWS.ends.flatMap(z => [[0, ym, z], [RW, ym, z], [0, WINDOWS.y0 + 0.05, z - hw + 0.05], [RW, WINDOWS.y1 - 0.05, z + hw - 0.05]]), ...WINDOWS.front.flatMap(x => [[x, ym, RD], [x - hw + 0.05, WINDOWS.y1 - 0.05, RD]]), [dx + dw / 2, dh / 2, 0], [dx + 0.05, 0.05, 0], [dx + dw - 0.05, dh - 0.05, 0], [0, 1, wz + wwd / 2], [0, wh - 0.05, wz + 0.05]];
+    const shut = [[0, wh + 0.05, wz + wwd / 2], [0, 1, wz - 0.05], [0, 1, wz + wwd + 0.05], ...WINDOWS.ends.flatMap(z => [[0, WINDOWS.y0 - 0.05, z], [RW, WINDOWS.y1 + 0.05, z], [0, ym, z + hw + 0.05], [RW, ym, z - hw - 0.05]]), ...WINDOWS.front.flatMap(x => [[x, WINDOWS.y0 - 0.05, RD], [x + hw + 0.05, ym, RD]]), [dx - 0.05, 1, 0], [dx + dw + 0.05, 1, 0], [dx + dw / 2, dh + 0.05, 0], [1, 0.5, 0], [RW - 1, 3, RD], [RW / 2, 4, 0]];
     check('væggene har rigtige åbninger, hvor vinduerne og døren er, og er hele alle andre steder', open.every(q => !covered(...q)) && shut.every(q => covered(...q)), open.filter(q => covered(...q)).length + ' lukkede åbninger, ' + shut.filter(q => !covered(...q)).length + ' huller i væggen');
     let tall = 0, outTris = 0;
     sal.outside.traverse(m => {
@@ -947,8 +983,31 @@ section('klubhuset i 3D: saloonen og figurerne');
       const a = m.geometry.attributes.position.array;
       for (let i = 0; i < a.length; i += 3) if (a[i] > -8 && a[i] < RW + 8 && a[i + 2] > RD + 0.3 && a[i + 2] < RD + 13 && a[i + 1] > 0.3) tall++;
     });
-    check('udenfor står intet højere end græsset foran huset, hvor kameraet kan komme', tall === 0 && outTris > 15000 && outTris < 45000, tall + ' hjørner for højt; ' + Math.round(outTris) + ' trekanter udenfor');
+    check('udenfor står intet højere end græsset foran huset, hvor kameraet kan komme', tall === 0 && outTris > 15000 && outTris < 65000, tall + ' hjørner for højt; ' + Math.round(outTris) + ' trekanter udenfor');
     check('oversigten har lyse ruder i stedet for udsigten', sal.panes.visible === false && sal.outside.visible === true && sal.panes.children.length === 1 && sal.panes.children[0].geometry.attributes.position.count > 0);
+    // the saloon has an outside (seen from the cabin): walls, roof and windows, the front wall's and the roof's apart
+    let shellTris = 0; for (const g of [sal.shell, sal.shellNear, sal.shellUp]) g.traverse(m => { if (m.isMesh) shellTris += m.geometry.attributes.position.count / 3; });
+    check('saloonen har en yderside med vægge, tag og vinduer, og døren til hytterne går med', finite(sal.shell) && shellTris > 500 && sal.shellUp.children.length === 1 && sal.shellNear.children.length >= 1 && sal.shell.children.some(m => m.name === 'westDoor'));
+  }
+  // one's own cabin: its plan, and the cabin built from it
+  {
+    const { CABIN, CABIN_THINGS, BED, cabinFree } = await import('../public/shared/cabin.js'), { buildCabin } = await import('../public/js/saloon/cabin.js');
+    // from just inside the door, every thing in it can be walked up to (a grid of quarter steps)
+    const [x0, z0] = CABIN.in, S = 0.25, NX = Math.ceil((CABIN.in[2] - x0) / S), NZ = Math.ceil((CABIN.in[3] - z0) / S), seen = new Set(), q = [[Math.round((CABIN.spawn[0] - x0) / S), Math.round((CABIN.spawn[1] - z0) / S)]];
+    while (q.length) { const [i, j] = q.pop(), k = i + ',' + j; if (seen.has(k) || i < 0 || j < 0 || i >= NX || j >= NZ || !cabinFree(x0 + i * S, z0 + j * S)) continue; seen.add(k); q.push([i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]); }
+    const reach = t => { const [bx, bz, bw, bd] = t.box; for (const k of seen) { const [i, j] = k.split(',').map(Number), x = x0 + i * S, z = z0 + j * S; if (Math.hypot(Math.max(bx - x, 0, x - bx - bw), Math.max(bz - z, 0, z - bz - bd)) < 1.2) return true; } return false; };
+    const named = CABIN_THINGS.filter(t => t.name), inside = t => t.box[0] >= CABIN.in[0] - 1e-9 && t.box[1] >= CABIN.in[1] - 1e-9 && t.box[0] + t.box[2] <= CABIN.in[2] + 1e-9 && t.box[1] + t.box[3] <= CABIN.in[3] + 1e-9;
+    check('i hytten kan man gå hen til døren, sengen, klædeskabet, pejsen, sofaen og stolen, og alt står inden for væggene', cabinFree(CABIN.spawn[0], CABIN.spawn[1]) && named.length === 6 && named.every(reach) && CABIN_THINGS.every(inside) && seen.size > 120, named.filter(t => !reach(t)).map(t => t.id).join());
+    const bed = CABIN_THINGS.find(t => t.id === 'bed').box;
+    check('man sover i sengen og sidder i sofaen og stolen', BED.x > bed[0] && BED.x < bed[0] + bed[2] && BED.y > bed[1] + 1.5 && BED.y < bed[1] + bed[3] && CABIN_THINGS.filter(t => t.sit).every(t => t.sit[0] > t.box[0] && t.sit[0] < t.box[0] + t.box[2] && t.sit[1] > t.box[1] && t.sit[1] < t.box[1] + t.box[3]));
+    // west of the saloon, among the trees, its front to the saloon; one sees it from the west windows
+    check('hytten står vest for saloonen med fronten mod den, og man kan se den gennem vinduerne i enden', CABIN.out[2] < -15 && CABIN.out[2] > -26 && CABIN.out[1] < WINDOWS.ends[1] && CABIN.out[3] > WINDOWS.ends[0]);
+    if (!hadDoc) globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => N }) };
+    const cab = buildCabin(THREE, makeKit(THREE)); cab.setOwner('Mads'); cab.sleeping(true); for (let t = 0; t < 2; t += 0.1) cab.tick(0.1, t);
+    if (!hadDoc) delete globalThis.document;
+    let ct = 0; cab.group.traverse(m => { if (m.isMesh) ct += m.geometry.attributes.position.count / 3; });
+    check('hytten bygges uden skærm, med pejs, seng og klædeskab, og er ikke for tung', finite(cab.group) && ct > 3000 && ct < 25000 && cab.lights.length === 3 && cab.group.visible === false, Math.round(ct) + ' trekanter');
+    cab.dispose();
   }
   // the swing doors: held open outwards (towards z < 0) while somebody stands in the doorway, shut again afterwards
   {

@@ -240,29 +240,105 @@ export function buildSaloon(THREE, kit, groupName = '') {
   }
 
   // ---------- the bar ----------
-  { const [x, z, w, d] = STATION.bar.box, h = 1.22, cx = x + w / 2, fz = z + d;            // fz: the front of the counter
-    solid.box(cx, h / 2, fz - 0.28, w, h, 0.56, wood(OAK)); solid.box(cx, h + 0.035, fz - 0.24, w + 0.2, 0.07, 0.74, wood(DARK, 0.06));
-    for (let i = 0; i < 7; i++) { const px = x + 0.42 + i * (w - 0.84) / 6; solid.box(px, h / 2 + 0.02, fz + 0.012, 0.6, h - 0.34, 0.024, wood(tone(OAK, 0.78))); solid.box(px, h / 2 + 0.02, fz + 0.026, 0.44, h - 0.5, 0.012, wood(tone(OAK, 1.12))); }
-    solid.rod(x + 0.1, 0.24, fz + 0.2, x + w - 0.1, 0.24, fz + 0.2, 0.03, BRASS, 8);                                           // the foot rail
-    for (let i = 0; i < 5; i++) solid.rod(x + 0.3 + i * (w - 0.6) / 4, 0.24, fz + 0.2, x + 0.3 + i * (w - 0.6) / 4, 0.24, fz + 0.01, 0.018, BRASS, 5);
-    // taps, a row of glasses, a bowl of nuts
-    for (let i = 0; i < 3; i++) { const px = cx - 0.9 + i * 0.22; solid.cyl(px, h + 0.07, fz - 0.42, 0.028, 0.34, BRASS, 6); solid.rod(px, h + 0.4, fz - 0.42, px, h + 0.36, fz - 0.3, 0.02, BRASS, 5); solid.cyl(px, h + 0.41, fz - 0.42, 0.03, 0.12, [[0.7, 0.1, 0.1], [0.1, 0.1, 0.1], [0.85, 0.8, 0.7]][i], 6); }
-    solid.box(cx - 0.68, h + 0.09, fz - 0.42, 0.72, 0.04, 0.2, BRASS);
-    for (let i = 0; i < 5; i++) solid.cyl(cx + 0.5 + i * 0.16, h + 0.07, fz - 0.4, 0.05, 0.14, GLASS, 8, 0.06);
-    solid.cyl(cx + 1.9, h + 0.07, fz - 0.2, 0.13, 0.07, [0.5, 0.3, 0.15], 10, 0.16);
-    // the wall behind: a big mirror in a carved frame, shelves of bottles on either side, the name over it all
-    solid.box(cx, 2.42, z - 0.12, 2.5, 1.5, 0.08, wood(DARK)); glow.box(cx, 2.42, z - 0.07, 2.2, 1.2, 0.01, [0.42, 0.5, 0.52]);
-    solid.box(cx, 3.24, z - 0.1, 2.9, 0.16, 0.12, wood(OAK)); for (const s of [-1, 1]) solid.cyl(cx + s * 1.34, 1.62, z - 0.1, 0.08, 1.7, wood(OAK), 8);
+  // A U that opens towards the back wall: a counter along the front and down both sides, the keeper in the aisle
+  // inside, the back bar against the wall, and overhead a gantry on four posts where the beer mugs hang.
+  { const [x, z, w, d] = STATION.bar.box, CT = STATION.bar.counter, h = 1.22, cx = x + w / 2, x1 = x + w, fz = z + d;      // fz: the front of the counter
+    const BACK = 0.74, GATE = 1.42;                    // where the back bar ends; where the right arm begins (the keeper's way in lies between)
+    const oak = wood(OAK), dark = wood(DARK, 0.06), top = (px, pz, sx, sz) => { solid.box(px, h + 0.035, pz, sx, 0.07, sz, dark); };
+    // the counter: three bodies, their tops with a rounded lip outwards, panels on every outer face
+    solid.box(cx, h / 2, fz - CT / 2, w, h, CT, oak); top(cx, fz - CT / 2 + 0.04, w + 0.16, CT + 0.08);
+    solid.box(x + CT / 2, h / 2, (BACK + fz - CT) / 2, CT, h, fz - CT - BACK, oak); top(x + CT / 2 - 0.04, (BACK + fz - CT) / 2, CT + 0.08, fz - CT - BACK);
+    solid.box(x1 - CT / 2, h / 2, (GATE + fz - CT) / 2, CT, h, fz - CT - GATE, oak); top(x1 - CT / 2 + 0.04, (GATE + fz - CT) / 2, CT + 0.08, fz - CT - GATE);
+    solid.box(x1 - CT / 2 + 0.04, h + 0.035, (BACK + GATE) / 2, CT + 0.08, 0.05, GATE - BACK - 0.02, dark);                       // the flap over the way in
+    for (const s of [-1, 1]) solid.cyl(x1 - CT / 2 + s * 0.2, h + 0.045, GATE + 0.01, 0.022, 0.035, BRASS, 6);                    // its hinges
+    solid.rod(x - 0.08, h + 0.05, fz + 0.085, x1 + 0.08, h + 0.05, fz + 0.085, 0.045, dark, 8);
+    for (const [px, z0] of [[x - 0.085, BACK], [x1 + 0.085, BACK]]) solid.rod(px, h + 0.05, z0, px, h + 0.05, fz + 0.085, 0.045, dark, 8);
+    const panel = (px, pz, len, face) => {
+      const dx = face === 'z' ? 0 : face, sx = face === 'z' ? len : 0.024, sz = face === 'z' ? 0.024 : len;
+      solid.box(px + dx * 0.012, h / 2 + 0.03, pz + (face === 'z' ? 0.012 : 0), sx, h - 0.36, sz, wood(tone(OAK, 0.78)));
+      solid.box(px + dx * 0.026, h / 2 + 0.03, pz + (face === 'z' ? 0.026 : 0), face === 'z' ? len - 0.16 : 0.012, h - 0.52, face === 'z' ? 0.012 : len - 0.16, wood(tone(OAK, 1.14)));
+    };
+    for (let i = 0; i < 8; i++) panel(x + 0.5 + i * (w - 1.0) / 7, fz, 0.62, 'z');
+    for (const pz of [1.22, 1.9]) panel(x, pz, 0.52, -1);
+    panel(x1, 1.9, 0.52, 1);
+    solid.box(cx, 0.09, fz + 0.006, w, 0.18, 0.014, DARK);                                                                     // a dark foot to the counter
+    for (const px of [x + 0.03, x1 - 0.03]) solid.box(px, h / 2 - 0.01, fz - 0.03, 0.2, h - 0.02, 0.2, wood(DARK));      // the corner posts
+    // the foot rail, round the front and both corners
+    const rail = [[x - 0.22, 1.0], [x - 0.22, fz + 0.22], [x1 + 0.22, fz + 0.22], [x1 + 0.22, 1.5]];
+    for (let i = 0; i < 3; i++) solid.rod(rail[i][0], 0.24, rail[i][1], rail[i + 1][0], 0.24, rail[i + 1][1], 0.032, BRASS, 8);
+    for (const q of rail.slice(1, 3)) solid.ball(q[0], 0.24, q[1], 0.045, BRASS);
+    for (let i = 0; i < 6; i++) { const px = x + 0.5 + i * (w - 1.0) / 5; solid.rod(px, 0.24, fz + 0.22, px, 0.24, fz + 0.01, 0.018, BRASS, 5); }
+    for (const [px, sx] of [[x - 0.22, 1], [x1 + 0.22, -1]]) solid.rod(px, 0.24, 1.7, px + sx * 0.21, 0.24, 1.7, 0.018, BRASS, 5);
+    solid.cyl(x - 0.5, 0, fz + 0.45, 0.1, 0.16, BRASS, 10, 0.15);                                                              // a spittoon by the rail
+    // on the counter: the draught beer (a brass column with four taps towards the keeper, and a drip tray), and a smaller one
+    const zc = fz - CT / 2 - 0.04, HANDLES = [[0.7, 0.1, 0.1], [0.08, 0.08, 0.08], [0.85, 0.8, 0.68], [0.1, 0.36, 0.16]];
+    const taps = (px, n) => {
+      const half = (n - 1) * 0.085;
+      solid.cyl(px, h + 0.07, zc, 0.055, 0.44, BRASS, 10); solid.cyl(px, h + 0.07, zc, 0.09, 0.03, BRASS, 10);
+      solid.box(px, h + 0.52, zc, half * 2 + 0.2, 0.08, 0.1, BRASS); solid.ball(px, h + 0.6, zc, 0.045, BRASS);
+      for (let i = 0; i < n; i++) { const tx = px - half + i * 0.17; solid.rod(tx, h + 0.5, zc, tx, h + 0.42, zc - 0.13, 0.02, BRASS, 6); solid.cyl(tx, h + 0.56, zc + 0.02, 0.026, 0.15, HANDLES[i % 4], 6, 0.034); }
+      solid.box(px, h + 0.085, zc - 0.15, half * 2 + 0.3, 0.03, 0.2, [0.3, 0.3, 0.32]); solid.box(px, h + 0.102, zc - 0.15, half * 2 + 0.24, 0.006, 0.15, [0.12, 0.12, 0.13]);
+    };
+    taps(cx - 1.1, 4); taps(cx + 1.9, 2);
+    // glasses waiting to be filled, two that are full, nuts, a bell
+    const mug = (B, px, py, pz, full, turn = 0) => {
+      B.cyl(px, py, pz, 0.058, 0.15, full ? [0.82, 0.55, 0.12] : GLASS, 9, 0.062);
+      if (full) B.cyl(px, py + 0.15, pz, 0.064, 0.035, [0.97, 0.95, 0.88], 9);
+      B.add(new THREE.TorusGeometry(0.045, 0.012, 5, 10, Math.PI), at(px + Math.cos(turn) * 0.06, py + 0.075, pz + Math.sin(turn) * 0.06, 0, -turn, -Math.PI / 2), full ? [0.9, 0.88, 0.8] : GLASS);
+    };
+    for (let i = 0; i < 6; i++) mug(solid, cx - 0.35 + i * 0.15, h + 0.07, zc - 0.12, false, 0.6);
+    mug(solid, cx + 0.95, h + 0.07, fz - 0.2, true, 2.2); mug(solid, cx - 2.3, h + 0.07, fz - 0.22, true, 0.9);
+    for (const px of [cx + 0.2, cx - 2.75]) { solid.cyl(px, h + 0.07, fz - 0.2, 0.13, 0.07, [0.5, 0.3, 0.15], 10, 0.16); solid.cyl(px, h + 0.13, fz - 0.2, 0.13, 0.012, [0.72, 0.5, 0.26], 10); }
+    solid.add(new THREE.SphereGeometry(0.07, 10, 6, 0, 6.283, 0, 1.57), at(cx + 2.7, h + 0.07, fz - 0.24), BRASS); solid.cyl(cx + 2.7, h + 0.14, fz - 0.24, 0.012, 0.03, BRASS, 5);
+    solid.box(cx - 1.9, h + 0.09, fz - 0.2, 0.2, 0.04, 0.2, [0.92, 0.9, 0.84]);                                               // napkins
+    // down the left side: two that somebody left; down the right: an oil lamp at the corner
+    mug(solid, x + 0.3, h + 0.07, 1.5, false, 3.0);
+    for (const px of [x + 0.34, x1 - 0.34]) { solid.cyl(px, h + 0.07, fz - 0.34, 0.07, 0.06, BRASS, 8, 0.05); glow.cyl(px, h + 0.13, fz - 0.34, 0.05, 0.16, [1.5, 1.05, 0.5], 8, 0.03); solid.cyl(px, h + 0.29, fz - 0.34, 0.035, 0.02, BRASS, 6); }
+
+    // the back bar: cupboards with a worktop, the mirror between columns, shelves of bottles, a cornice and the name
+    const bw = w - 1.1, by = 0.98;
+    solid.box(cx, by / 2, z + 0.24, bw, by, 0.6, oak); solid.box(cx, by + 0.03, z + 0.26, bw + 0.1, 0.06, 0.68, dark);
+    for (let i = 0; i < 7; i++) { const px = cx - bw / 2 + 0.4 + i * (bw - 0.8) / 6; solid.box(px, by / 2 + 0.02, z + 0.546, 0.62, by - 0.3, 0.02, wood(tone(OAK, 0.8))); solid.box(px, by / 2 + 0.02, z + 0.56, 0.46, by - 0.46, 0.012, wood(tone(OAK, 1.14))); solid.ball(px + 0.24, by / 2, z + 0.575, 0.022, BRASS); }
+    solid.box(cx, 2.5, z - 0.12, 2.9, 1.9, 0.1, wood(DARK)); glow.box(cx, 2.5, z - 0.062, 2.56, 1.56, 0.01, [0.4, 0.48, 0.5]);
+    for (const [gx, gw] of [[-0.75, 0.16], [-0.45, 0.06], [0.55, 0.22]]) glow.quad([cx + gx - gw, 1.74, z - 0.055], [cx + gx + gw, 1.74, z - 0.055], [cx + gx + gw + 0.55, 3.26, z - 0.055], [cx + gx - gw + 0.55, 3.26, z - 0.055], [0.5, 0.58, 0.6]);      // the light in the glass
+    for (const s of [-1, 1]) for (const k of [1.56, 2.72]) { const px = cx + s * k; solid.cyl(px, by + 0.06, z + 0.02, 0.085, 2.34, wood(OAK), 10); solid.box(px, by + 0.13, z + 0.02, 0.24, 0.14, 0.24, wood(DARK)); solid.box(px, 3.32, z + 0.02, 0.26, 0.14, 0.26, wood(DARK)); for (const y of [1.6, 2.9]) solid.add(new THREE.TorusGeometry(0.09, 0.022, 5, 12), at(px, y, z + 0.02, Math.PI / 2, 0, 0), BRASS); }
     for (const s of [-1, 1]) for (let sh = 0; sh < 3; sh++) {
-      const y = 1.72 + sh * 0.52, sx = cx + s * 2.02;
-      solid.box(sx, y, z - 0.04, 1.3, 0.045, 0.24, wood(DARK));
-      for (let i = 0; i < 7; i++) bottle(sx - 0.54 + i * 0.18, y + 0.022, z - 0.03, BOTTLES[(i * 3 + sh + (s > 0 ? 2 : 0)) % BOTTLES.length], 1.15);
+      const y = 1.56 + sh * 0.56, sx = cx + s * 2.14;
+      solid.box(sx, y, z - 0.03, 0.98, 0.045, 0.28, wood(DARK));
+      for (let i = 0; i < 6; i++) bottle(sx - 0.4 + i * 0.16, y + 0.022, z - 0.02, BOTTLES[(i * 3 + sh + (s > 0 ? 2 : 0)) % BOTTLES.length], 1.2);
     }
-    solid.box(cx, 3.72, z - 0.08, 2.0, 0.6, 0.07, wood(DARK)); word('BAR', cx, 3.72, z - 0.04, 1.9, 0.52, 'z+', '#ffcf6a');
-    // a barrel at the end, and a spittoon by the rail
-    solid.cyl(x + w + 0.42, 0, z + 0.45, 0.36, 0.95, wood(PINE), 14, 0.3); for (const y of [0.18, 0.76]) solid.add(new THREE.TorusGeometry(0.37, 0.022, 5, 16), at(x + w + 0.42, y, z + 0.45, Math.PI / 2, 0, 0), IRON);
-    solid.cyl(x - 0.2, 0, fz + 0.5, 0.1, 0.16, BRASS, 10, 0.15);
-    live.bartender = [cx + 0.1, 0, z + 0.34];
+    solid.box(cx, 3.46, z + 0.0, bw + 0.5, 0.18, 0.34, wood(OAK)); solid.box(cx, 3.58, z + 0.02, bw + 0.7, 0.07, 0.4, wood(DARK, 0.06));
+    for (let i = 0; i < 22; i++) solid.box(cx - bw / 2 - 0.1 + i * (bw + 0.2) / 21, 3.34, z + 0.14, 0.1, 0.07, 0.06, wood(tone(OAK, 1.2)));        // dentils under the cornice
+    solid.box(cx, 3.93, z - 0.08, 2.3, 0.62, 0.08, wood(DARK)); solid.box(cx, 3.93, z - 0.05, 2.14, 0.48, 0.04, wood(tone(OAK, 0.8))); word('BAR', cx, 3.93, z - 0.025, 1.9, 0.5, 'z+', '#ffcf6a');
+    // on the worktop: three kegs on their sides with a tap each, the till, a row of bottles
+    for (let i = 0; i < 3; i++) {
+      const kx = cx - 2.1 + i * 0.6, ky = by + 0.3;
+      solid.rod(kx, ky, z + 0.0, kx, ky, z + 0.52, 0.22, wood(PINE), 12); solid.cyl(kx, by + 0.06, z + 0.26, 0.26, 0.06, wood(DARK), 4);
+      for (const kz of [0.1, 0.42]) solid.add(new THREE.TorusGeometry(0.225, 0.016, 5, 14), at(kx, ky, z + kz), IRON);
+      solid.rod(kx, ky - 0.1, z + 0.52, kx, ky - 0.1, z + 0.6, 0.02, BRASS, 6); solid.rod(kx, ky - 0.1, z + 0.6, kx, ky - 0.17, z + 0.6, 0.016, BRASS, 5);
+    }
+    solid.box(cx + 1.75, by + 0.2, z + 0.3, 0.44, 0.28, 0.4, BRASS); solid.box(cx + 1.75, by + 0.4, z + 0.2, 0.44, 0.14, 0.2, BRASS); solid.box(cx + 1.75, by + 0.5, z + 0.2, 0.3, 0.08, 0.02, [0.92, 0.9, 0.84]);
+    for (let i = 0; i < 12; i++) solid.ball(cx + 1.62 + (i % 4) * 0.085, by + 0.345, z + 0.4 + ((i / 4) | 0) * 0.045, 0.016, [0.9, 0.88, 0.8]);
+    for (let i = 0; i < 9; i++) bottle(cx - 0.6 + i * 0.16, by + 0.06, z + 0.12, BOTTLES[(i * 2 + 1) % BOTTLES.length], 1.25);
+    // two barrels in the corner inside, out of the keeper's way
+    for (const [px, pz, hh] of [[x + CT + 0.32, 1.02, 0.8]]) { solid.cyl(px, 0, pz, 0.28, hh, wood(PINE), 12, 0.24); for (const y of [0.16, hh - 0.16]) solid.add(new THREE.TorusGeometry(0.285, 0.02, 5, 14), at(px, y, pz, Math.PI / 2, 0, 0), IRON); }
+
+    // overhead: four posts carry a frame over the counter, and under it the beer mugs hang by their handles
+    const GY = 2.52, posts = [[x + 0.14, fz - 0.14], [x1 - 0.14, fz - 0.14], [x + 0.14, BACK + 0.16], [x1 - 0.14, GATE + 0.16]];
+    for (const [px, pz] of posts) { high.cyl(px, h + 0.07, pz, 0.055, GY - h - 0.07, wood(DARK), 8); for (const y of [h + 0.2, GY - 0.14]) high.add(new THREE.TorusGeometry(0.06, 0.024, 5, 10), at(px, y, pz, Math.PI / 2, 0, 0), BRASS); high.box(px, h + 0.1, pz, 0.16, 0.06, 0.16, wood(DARK)); }
+    high.box(cx, GY + 0.11, fz - 0.14, w + 0.2, 0.22, 0.3, oak); high.box(cx, GY + 0.245, fz - 0.14, w + 0.34, 0.05, 0.42, dark);
+    for (const px of [x + 0.14, x1 - 0.14]) { high.box(px, GY + 0.11, (z - 0.1 + fz - 0.29) / 2, 0.3, 0.22, fz - 0.29 - z + 0.1, oak); high.box(px, GY + 0.245, (z - 0.1 + fz - 0.29) / 2, 0.42, 0.05, fz - 0.29 - z + 0.1, dark); }
+    word('FADØL', cx, GY + 0.11, fz + 0.012, 1.5, 0.19, 'z+', '#ffcf6a', true);
+    const hang = (ax, az, bx, bz, n) => {
+      high.rod(ax, GY - 0.07, az, bx, GY - 0.07, bz, 0.014, BRASS, 6);
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n, px = ax + (bx - ax) * t, pz = az + (bz - az) * t, turn = az === bz ? 0 : Math.PI / 2;
+        high.rod(px, GY - 0.07, pz, px, GY - 0.185, pz, 0.008, BRASS, 4);
+        mug(high, px - Math.cos(turn) * 0.06, GY - 0.3, pz - Math.sin(turn) * 0.06, false, turn);
+      }
+    };
+    hang(x + 0.5, fz - 0.2, x1 - 0.5, fz - 0.2, 20); hang(x + 0.2, BACK + 0.5, x + 0.2, fz - 0.55, 4); hang(x1 - 0.2, GATE + 0.45, x1 - 0.2, fz - 0.55, 3);
+    live.bartender = [cx, 0, (BACK + fz - CT) / 2 + 0.02, 1.65]; live.aisle = [x + CT, BACK + 0.06, x1 - CT, fz - CT];      // (the aisle: the worktop's edge to the counter's back)      // where the keeper stands in the aisle, and how far to each side it goes
   }
 
   // ---------- the notice board, with the group's name on a board over it ----------
@@ -592,12 +668,12 @@ export function buildSaloon(THREE, kit, groupName = '') {
     swing() { for (const d of doors) d.v = 5 * d.s; },
     // which seats are in use (somebody sits there or is on the way): a Set of 'station:seat'
     seats(used) { for (const c of chairs) c.want = used.has(c.key) ? 1 : 0; },
-    chairs,
+    chairs, live,
     // who the barkeeper looks at: [x, z] or null
     tick(dt, t, look) {
       // the robots: the keeper goes to and fro and polishes a glass, the dealer shuffles
       const [bx, , bw] = STATION.bar.box;
-      keeper.g.position.x = bx + bw * 0.5 + Math.sin(t * 0.35) * 1.4;
+      keeper.g.position.x = live.bartender[0] + Math.sin(t * 0.3) * live.bartender[3];
       keeper.arms[0].rotation.set(-0.2 + Math.sin(t * 7) * 0.12, 0.5, 0); keeper.arms[1].rotation.set(-0.25, -0.45, 0);
       const want = look ? Math.atan2(look[0] - keeper.g.position.x, look[1] - keeper.z) : Math.sin(t * 0.5) * 0.4;
       keeper.head.rotation.y += (Math.max(-1.1, Math.min(1.1, want)) - keeper.head.rotation.y) * Math.min(1, dt * 4);

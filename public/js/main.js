@@ -16,7 +16,7 @@ import { renderBlackjack, resetBlackjack } from './blackjack.js';
 import { dealerMs } from '../shared/blackjack.js';
 import { MACHINES, MACHINE_IDS } from '../shared/slots.js';
 import { ECON, LIMITS, EMOTES, PRANKS, JUKE, ITEMS, DRINKS, DRINK_KINDS, LOOK, LOOK_NAMES, LOOK_PAGES, STYLE_NAMES, SLOT_NAMES, randomLook } from '../shared/defs.js';
-import { ROOM, pathLen, findPath } from '../shared/room.js';
+import { ROOM, STATION, pathLen, findPath } from '../shared/room.js';
 import { GAMES, SOON } from '../shared/games/index.js';
 import { MODES, MODE_IDS, LEVELS, FILLS } from '../shooter/rules.js';
 
@@ -66,7 +66,7 @@ function demo() {
   const mk = (id, name, p, extra = {}) => ({ id, name, on: true, look: randomLook(-id * 131 + 7), p, ...extra });
   room.setName('');
   room.setRoom([
-    mk(-1, 'Ane', [[10.25, 2]], { sit: ['bar', 1], drink: ['fadol', 70000] }), mk(-2, 'Bo', [[12.85, 2]], { sit: ['bar', 3], drink: ['filur', 60000] }),
+    mk(-1, 'Ane', [STATION.bar.seats[1]], { sit: ['bar', 1], drink: ['fadol', 70000] }), mk(-2, 'Bo', [STATION.bar.seats[4]], { sit: ['bar', 4], drink: ['filur', 60000] }),
     mk(-3, 'Cille', [[3.25, 6.4]], { sit: ['games', 0] }), mk(-4, 'Dan', [[7.35, 6.4]], { sit: ['games', 1] }),
     mk(-5, 'Eva', [[4.4, 10.6]]), mk(-6, 'Finn', [[20.25, 12.25]], { sit: ['sofa', 1] }), mk(-7, 'Gry', [[14.6, 8.4]]),
   ], 0);

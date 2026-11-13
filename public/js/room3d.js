@@ -338,7 +338,7 @@ export function createRoom3D(canvas, over, hooks) {
     if (locked || target) hover = target && target.station ? target.station.id : null;
     // the barkeeper looks at whoever stands nearest the bar
     let near = null, nd = 30;
-    for (const a of actors.values()) { const d = (a.x - 10.9) ** 2 + (a.y - 2.4) ** 2; if (d < nd) { nd = d; near = [a.x, a.y]; } }
+    for (const a of actors.values()) { const d = (a.x - 10.9) ** 2 + (a.y - 3.2) ** 2; if (d < nd) { nd = d; near = [a.x, a.y]; } }
     used.clear(); for (const a of actors.values()) if (a.sit) used.add(a.sit[0] + ':' + a.sit[1]);
     saloon.seats(used);
     saloon.tick(dt, T, near);

@@ -14,8 +14,9 @@ export const CASINO_X = 24;
 export const STATIONS = [
   { id: 'wardrobe', kind: 'wardrobe', name: 'Garderoben', box: [0.9, 0.2, 2.2, 0.9], h: 2.7, use: [2.0, 1.9] },
   { id: 'kiosk', kind: 'shop', name: 'Tøjbutikken', box: [3.9, 0.2, 3.2, 1.1], h: 1.15, use: [5.5, 2.1] },
-  { id: 'bar', kind: 'bar', name: 'Baren', box: [8.2, 0.2, 5.4, 1.2], h: 1.3, use: [10.9, 2.7], high: true,
-    seats: [[8.95, 2.0], [10.25, 2.0], [11.55, 2.0], [12.85, 2.0]] },
+  // the bar is a U that opens towards the back wall: a counter along the front and down both sides, the keeper inside
+  { id: 'bar', kind: 'bar', name: 'Baren', box: [7.7, 0.2, 6.4, 2.3], h: 1.3, use: [10.9, 3.5], high: true, counter: 0.62,
+    seats: [[8.4, 3.1], [9.4, 3.1], [10.4, 3.1], [11.4, 3.1], [12.4, 3.1], [13.4, 3.1]] },
   { id: 'board', kind: 'scores', name: 'Opslagstavlen', wall: [14.4, 1.2, 2.2, 1.55], use: [15.5, 1.3] },
   { id: 'arcade', kind: 'game', name: 'Arkaden', games: ['shooter'], box: [17.3, 0.2, 1.4, 1.1], h: 2.6, use: [18.0, 2.1] },
   { id: 'jukebox', kind: 'sound', name: 'Musikboksen', box: [19.2, 0.2, 1.1, 0.85], h: 1.9, use: [19.75, 1.8] },

@@ -55,7 +55,7 @@ export function createRoom(canvas, hooks) {
       for (const q of st.on ? [] : st.seats || []) pieces.push({ key: q[1], stool: st.high ? 'high' : 'low', x: q[0] - 0.5, y: V(q[1]) - 1.0, w: 1, h: 1.2 });
     }
     for (const kind of ['low', 'high']) stools[kind] = sheet(1, 1.2, k, g => { g.translate(0.5, 1.0 - V(0)); paintStool(g, 0, 0, kind === 'high'); });
-    pieces.push({ key: STATION.bar.box[1] + 0.3, live: 'bartender' });
+    pieces.push({ key: STATION.bar.box[1] + 1.2, live: 'bartender' });      // inside the U: behind the counter's front, in front of the wall
   }
 
   // ---------- actors ----------

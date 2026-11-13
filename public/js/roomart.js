@@ -252,23 +252,25 @@ const PIECES = {
   },
 
   bar(c, s) {
-    const [x, y, w, d] = s.box, h = s.h, f = V(y + d, h);
-    box(c, x, y, w, d, h, '#3f2318', '#6a3d27', 0.06);
-    for (let i = 0; i < 5; i++) { rrect(c, x + 0.16 + i * (w - 0.32) / 5 + 0.05, f + 0.26, (w - 0.32) / 5 - 0.1, h - 0.62, 0.05); paint(c, '#59311f', 0.03); }
+    // a U that opens towards the back wall: a counter down both sides and along the front; the keeper stands inside
+    const [x, y, w, d] = s.box, h = s.h, t = s.counter, fy = y + d - t, f = V(y + d, h);
+    box(c, x, y + 0.55, t, d - 0.55 - t, h, '#3f2318', '#6a3d27', 0.06); box(c, x + w - t, y + 1.2, t, d - 1.2 - t, h, '#3f2318', '#6a3d27', 0.06);
+    box(c, x, fy, w, t, h, '#3f2318', '#6a3d27', 0.06);
+    for (let i = 0; i < 6; i++) { rrect(c, x + 0.16 + i * (w - 0.32) / 6 + 0.05, f + 0.26, (w - 0.32) / 6 - 0.1, h - 0.62, 0.05); paint(c, '#59311f', 0.03); }
     rrect(c, x - 0.06, f - 0.03, w + 0.12, 0.17, 0.06); paint(c, '#4a2a1c');
-    line(c, x + 0.3, V(y, h) + 0.14, x + w - 0.9, V(y, h) + 0.14, 'rgba(255,255,255,.2)', 0.06);
+    line(c, x + 0.3, V(fy, h) + 0.12, x + w - 0.9, V(fy, h) + 0.12, 'rgba(255,255,255,.2)', 0.06);
     // foot rail
     line(c, x + 0.1, f + h - 0.2, x + w - 0.1, f + h - 0.2, INK, 0.1); line(c, x + 0.1, f + h - 0.2, x + w - 0.1, f + h - 0.2, '#e0b04a', 0.055);
-    for (let i = 0; i <= 4; i++) line(c, x + 0.25 + i * (w - 0.5) / 4, f + h - 0.2, x + 0.25 + i * (w - 0.5) / 4, f + h - 0.05, '#b88a30', 0.05);
-    // the tap
-    const tx = x + 0.95, ty = V(y + 0.45, h);
-    rrect(c, tx - 0.09, ty - 0.62, 0.18, 0.62, 0.04); paint(c, '#cfd6dd', 0.035); rrect(c, tx - 0.34, ty - 0.7, 0.68, 0.15, 0.06); paint(c, '#e6ebf0', 0.035);
-    for (const o of [-0.22, 0.22]) { rrect(c, tx + o - 0.045, ty - 0.98, 0.09, 0.3, 0.03); paint(c, o < 0 ? '#2f7d4f' : '#b8433c', 0.03); line(c, tx + o, ty - 0.55, tx + o, ty - 0.44, INK, 0.05); }
-    rrect(c, tx - 0.4, ty - 0.04, 0.8, 0.07, 0.02); paint(c, '#8c939c', 0.03);
+    for (let i = 0; i <= 5; i++) line(c, x + 0.25 + i * (w - 0.5) / 5, f + h - 0.2, x + 0.25 + i * (w - 0.5) / 5, f + h - 0.05, '#b88a30', 0.05);
+    // the taps: a brass column with four handles
+    const tx = x + w / 2 - 1.1, ty = V(fy + 0.3, h);
+    rrect(c, tx - 0.09, ty - 0.62, 0.18, 0.62, 0.04); paint(c, '#d9b04a', 0.035); rrect(c, tx - 0.46, ty - 0.7, 0.92, 0.15, 0.06); paint(c, '#e6c460', 0.035);
+    [['#b8433c', -0.33], ['#2a2a2e', -0.11], ['#e9e2cf', 0.11], ['#2f7d4f', 0.33]].forEach(([col, o]) => { rrect(c, tx + o - 0.045, ty - 0.98, 0.09, 0.3, 0.03); paint(c, col, 0.03); line(c, tx + o, ty - 0.55, tx + o, ty - 0.44, INK, 0.05); });
+    rrect(c, tx - 0.5, ty - 0.04, 1.0, 0.07, 0.02); paint(c, '#8c939c', 0.03);
     // glasses standing on the counter
-    for (const [gx, k] of [[2.0, 'fadol'], [2.3, 'fadol'], [w - 0.75, 'filur'], [w - 0.45, 'kirsebar']]) { c.save(); c.translate(x + gx, V(y + 0.75, h)); c.scale(0.021, 0.021); drawGlass(c, k, k === 'fadol' ? 1 : 0.8); c.restore(); }
+    for (const [gx, k] of [[w / 2 - 0.2, 'fadol'], [w / 2 + 0.1, 'fadol'], [w - 1.25, 'filur'], [w - 0.95, 'kirsebar']]) { c.save(); c.translate(x + gx, V(fy + 0.4, h)); c.scale(0.021, 0.021); drawGlass(c, k, k === 'fadol' ? 1 : 0.8); c.restore(); }
     // a bowl of peanuts
-    ell(c, x + w / 2 + 0.2, V(y + 0.7, h) - 0.03, 0.2, 0.08); paint(c, '#f4e6c8', 0.03); ell(c, x + w / 2 + 0.2, V(y + 0.7, h) - 0.06, 0.15, 0.05); c.fillStyle = '#c99a5e'; c.fill();
+    ell(c, x + w / 2 + 1.0, V(fy + 0.35, h) - 0.03, 0.2, 0.08); paint(c, '#f4e6c8', 0.03); ell(c, x + w / 2 + 1.0, V(fy + 0.35, h) - 0.06, 0.15, 0.05); c.fillStyle = '#c99a5e'; c.fill();
   },
 
   arcade(c, s) {
@@ -519,7 +521,7 @@ export function paintOver(c, id, t, music, casino) {
 
 // The bartender: the house robot, standing behind the counter and polishing a glass.
 export function paintBartender(c, t) {
-  const [x, y, w] = STATION.bar.box, cx = x + w * 0.62 + Math.sin(t * 0.35) * 0.5, by = V(y + 0.2, 0);
+  const [x, y, w] = STATION.bar.box, cx = x + w * 0.5 + Math.sin(t * 0.3) * 1.65, by = V(y + 1.15, 0);      // in the aisle inside the U
   c.save(); c.translate(cx, by); c.lineJoin = 'round'; c.lineCap = 'round';
   rrect(c, -0.36, -1.85, 0.72, 0.75, 0.16); paint(c, '#8fa3b8');                    // body
   for (const s of [-1, 1]) { poly(c, [[0, -1.72], [s * 0.19, -1.82], [s * 0.19, -1.62]]); paint(c, '#c8323c', 0.03); }

@@ -841,6 +841,12 @@ section('klubhuset i 3D: saloonen og figurerne');
     const back = at(c0);
     check('en tom stol er skubbet ind under bordet, og den trækkes ud til den, der sætter sig', Math.abs(Math.hypot(out[0] - before[0], out[1] - before[1]) - (GAP.sit - GAP.tucked)) < 1e-6 && Math.hypot(out[0] - sp[0], out[1] - sp[1]) < 1e-6 && Math.hypot(back[0] - before[0], back[1] - before[1]) < 1e-6, [before, out, back].map(q => q.map(v => v.toFixed(2)).join(',')).join(' -> '));
   }
+  // the bar: a U with the keeper inside. The robot (0.34 round the middle, hands half a step in front) never touches the counter
+  {
+    const bar = STATION.bar, [kx, , kz, reach] = sal.live.bartender, [ax0, az0, ax1, az1] = sal.live.aisle;
+    check('robotten står frit i gangen bag disken, hvor end den går hen', kz - 0.34 >= az0 && kz + 0.5 <= az1 && kx - reach - 0.34 >= ax0 && kx + reach + 0.34 <= ax1 && az1 - az0 >= 1, [kz - 0.34, az0, kz + 0.5, az1].map(v => v.toFixed(2)).join(' '));
+    check('baren har seks barstole foran disken, og man kan stå ved dem alle', bar.seats.length === 6 && bar.seats.every(q => isFree(q[0], q[1]) && q[1] > bar.box[1] + bar.box[3]) && isFree(bar.use[0], bar.use[1]));
+  }
   let tris = 0; sal.root.traverse(m => { if (m.isMesh) tris += m.geometry.attributes.position.count / 3; });
   check('saloonen bygges uden skærm og er ikke for tung', finite(sal.root) && tris > 8000 && tris < 60000 && (() => { sal.setCasino({ pot: 1234, lines: [['Søren', 40], ['Mads', -15]] }); sal.setName('En anden klub'); sal.setMusic(true); sal.spin('slot2', 2, 1); sal.swing(); for (let t = 0; t < 3; t += 0.1) sal.tick(0.1, t, t > 1 ? [10, 2] : null); return finite(sal.root); })(), Math.round(tris) + ' trekanter');
   const people = makePeople(THREE), who = people.person(randomLook(7)), base = { phase: 1.3, walk: 0, seed: 2, emote: '', drink: null, talk: false }, st0 = { T: 5, seat: '', seatY: 0, fill: 1, sip: 0, buzz: 0, fx: {}, et: 0.6, hen: false, first: false };

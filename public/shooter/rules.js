@@ -43,8 +43,10 @@ export const TEAMS = {
 };
 export const other = team => team === 'A' ? 'B' : 'A';
 
-// The dinos: a team's guards in Stjernejagt. Slow, a bad pistol, they stay near where they came out.
-export const DINO = { spd: 3.0, range: 34, hold: 15, fire: 0.8, dmg: 8, hp: 60, leash: 18, shot: { speed: 70, grav: 6, spread: 0.05, life: 2.5 } };
+// The dinos: a team's guards in Stjernejagt. Slow, a bad pistol, they stay near where they came out. When one sees
+// somebody to attack, it roars first (`roar` seconds: it stands, and does not shoot yet); it roars again the next
+// time only after `calm` seconds with nobody to attack.
+export const DINO = { spd: 3.0, range: 34, hold: 15, fire: 0.8, dmg: 8, hp: 60, leash: 18, roar: 1.1, calm: 6, shot: { speed: 70, grav: 6, spread: 0.05, life: 2.5 } };
 
 // What a state message says about somebody, besides where they are.
 export const FLAG = { ground: 1, sprint: 2, zoom: 4, use: 8, reload: 16 };

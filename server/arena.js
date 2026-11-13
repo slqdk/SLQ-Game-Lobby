@@ -339,6 +339,10 @@ export function createArena({ now = () => Date.now(), rand = Math.random, timer 
     for (const v of m.ents.values()) if (v.alive && v.team !== d.team) { const q = (d.x - v.x) * (d.x - v.x) + (d.z - v.z) * (d.z - v.z); if (q < bd) { bd = q; t = v; } }
     if (t && bd < DINO.range * DINO.range) {
       d.yaw = Math.atan2(t.x - d.x, t.z - d.z);
+      // it has seen somebody: first it roars (Søren: "Dinoen må gerne brøle inden den går til angreb"), then it attacks
+      if (!d.angry) { d.angry = true; d.roarT = DINO.roar; cast(m, { t: 'aroar', id: d.id }); }
+      d.calmT = DINO.calm;
+      if (d.roarT > 0) { d.roarT -= dt; return; }
       if (bd > DINO.hold * DINO.hold) moveDino(m, d, Math.sin(d.yaw) * DINO.spd, Math.cos(d.yaw) * DINO.spd, dt);
       d.fireCd -= dt;
       if (d.fireCd <= 0 && m.world.losClear(d.x, 1.5, d.z, t.x, t.y + 1.0, t.z)) {
@@ -349,6 +353,7 @@ export function createArena({ now = () => Date.now(), rand = Math.random, timer 
         d.fireCd = DINO.fire;
       }
     } else {
+      if (d.angry && (d.calmT -= dt) <= 0) d.angry = false;          // nobody about for a while: it has calmed down
       d.wanderT -= dt; if (d.wanderT <= 0) { d.wanderYaw = rand() * 6.28; d.wanderT = 1.5 + rand() * 2.5; }
       d.yaw = d.wanderYaw; moveDino(m, d, Math.sin(d.yaw) * DINO.spd * 0.6, Math.cos(d.yaw) * DINO.spd * 0.6, dt);
     }

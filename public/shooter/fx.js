@@ -91,6 +91,7 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
   // by colour and made once for all dinos. buildDino() hands back the group; in its userData:
   //   step(dt, speed, t)  every frame: speed over the ground in metres a second, t any even clock
   //   fire()              it shot: the arm kicks
+  //   roar(secs)          it roars for so long (before it attacks): it rears, throws its head back and opens its mouth
   //   body                the body's material, one per dino (the game makes it flash when the dino is hit)
   // The walk is driven by how far it has come, not by time, so the feet do not slide: a leg swings forward with the
   // knee bent and the foot lifted, is set down, and carries the body over it while the hips dip between two steps.
@@ -151,7 +152,7 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
     collar.scale.set(0.2, 0.2, 0.16); collar.position.set(0, 0.98 - HIP, 0.25); collar.rotation.x = Math.PI / 2 + 0.55;
     const arms = grp(hips, 0, 0.8 - HIP, 0.24); mesh(arms, G.arms, bodyMat);
     if (arsenal) { const w = arsenal.flat('badgun'); w.scale.setScalar(1.7); w.rotation.y = Math.PI; w.position.set(0.24, -0.1, 0.27); arms.add(w); }
-    const neck = grp(hips, 0, 0.92 - HIP, 0.2); mesh(neck, G.head, bodyMat, true); mesh(neck, G.headBelly, bellyMat); mesh(neck, G.headDark, dinoDark);
+    const neck = grp(hips, 0, 0.92 - HIP, 0.2); mesh(neck, G.head, bodyMat, true); const jaw = mesh(neck, G.headBelly, bellyMat); mesh(neck, G.headDark, dinoDark);
     const eyes = grp(neck, 0, 1.35 - 0.92, 0.6 - 0.2); mesh(eyes, G.eyeWhite, dinoWhite); mesh(eyes, G.eyeDark, dinoDark);
     const tail = []; let at = grp(hips, 0, 0.66 - HIP, -0.3);
     for (let i = 0; i < 3; i++) { mesh(at, G['tail' + i], bodyMat, i === 0); tail.push(at); if (i < 2) at = grp(at, 0, 0, -[0.32, 0.3][i]); }
@@ -163,9 +164,10 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
     g.scale.setScalar(DINO_SCALE);
     // ---- how it moves ----
     const seed = Math.random() * 20;
-    let ph = Math.random() * 6.28, amp = 0, kick = 0, blink = 2 + Math.random() * 3, born = 0;
+    let ph = Math.random() * 6.28, amp = 0, kick = 0, blink = 2 + Math.random() * 3, born = 0, roar = 0, roarLen = 1.1;
     g.userData.body = bodyMat;
     g.userData.fire = function () { kick = 1; };
+    g.userData.roar = function (secs) { roar = 1; roarLen = secs || 1.1; };
     g.userData.step = function (dt, speed, t) {
       amp += (Math.min(1, speed / 1.6) - amp) * Math.min(1, dt * 8);
       ph += speed / STRIDE * 6.2832 * dt;
@@ -183,6 +185,15 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
       // the head nods with the steps; standing, it looks about
       neck.rotation.set(-0.05 * Math.sin(2 * ph + 0.5) * amp - 0.07 * amp - kick * 0.08, 0.34 * Math.sin(t * 0.55 + seed) * idle - 0.05 * sn * amp, 0.04 * Math.sin(t * 0.8 + seed) * idle);
       arms.rotation.x = -kick * 0.55 + 0.05 * Math.sin(2 * ph) * amp;
+      // roaring: up on its toes, leaning back, the head thrown back and shaking, the mouth open, the arms out
+      if (roar > 0) {
+        roar = Math.max(0, roar - dt / roarLen);
+        const k = Math.min(1, (1 - roar) / 0.14) * Math.min(1, roar / 0.2), shake = Math.sin(t * 46 + seed) * 0.035 * k;
+        hips.rotation.x -= 0.24 * k; hips.position.y += 0.03 * k;
+        neck.rotation.x += -0.6 * k + shake; neck.rotation.z += shake * 0.8;
+        jaw.rotation.x = 0.34 * k; arms.rotation.x -= 0.7 * k;
+        tail.forEach(function (o, i) { o.rotation.x += 0.16 * k; });
+      } else jaw.rotation.x = 0;
       if (kick > 0) kick = Math.max(0, kick - dt / 0.16);
       blink -= dt; if (blink < -0.11) blink = 2.2 + Math.random() * 4;
       eyes.scale.y = blink < 0 ? 0.12 : 1;

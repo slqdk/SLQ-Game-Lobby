@@ -14,7 +14,7 @@ import { makeFigures } from './figure.js';
 import { mergeStatic } from './merge.js';
 import { dressWorld } from './scenery.js';
 import { LOOK } from '../shared/defs.js';
-import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, FLAG, LEVELS, other, aimDir, spreadDir, zoneAt, dinoAt, newShot, flyShot } from './rules.js';
+import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, DINO, FLAG, LEVELS, other, aimDir, spreadDir, zoneAt, dinoAt, newShot, flyShot } from './rules.js';
 
 const SENS = 0.0022, PITCH_MAX = 1.5, BASE_FOV = 78, ZOOM_FOV = 32, INTERP = 100;      // INTERP: how far behind the others are shown (ms)
 const DEG = Math.PI / 180;
@@ -95,6 +95,10 @@ export function startGame({ root, info, send, sound = true, leave }) {
   me.yaw = 0; me.pitch = 0;
   const my = { hp: 100, alive: false, seq: -1, owned: 1, w: 0, mags: WEAPON_IDS.map(id => WEAPONS[id].magMax || 0), fireCd: 0, reload: 0, zoom: false, protect: 0, team: '', deadT: 0, killer: '' };
   const sfx = makeSfx(me);
+  // Whose voice: a robot's for the arena's robots, else by the figure (a woman's is higher; big and tall are a little
+  // deeper), and no two quite alike.
+  const voiceOf = e => ({ kind: e.bot ? 'r' : LOOK.sex[(e.look || {}).sex] === 'f' ? 'f' : 'm', rate: (0.96 + ((e.id * 37) % 9) / 100) * ([1, 1.04, 0.94][(e.look || {}).build] || 1) * ([1, 1.05, 0.96][(e.look || {}).height] || 1) });
+  sfx.setVoice(voiceOf({ id: you, look: myLook, bot: false }));
   if (!sound && !sfx.isMuted()) sfx.toggleMute(); else if (sound && sfx.isMuted()) sfx.toggleMute();
   const keys = {};
   let running = false, forceRun = false, frozen = false, stopped = false, mouseDown = false, jumpBuf = 0, recoilLeft = 0, bobT = 0, dip = 0, shake = 0, kick = 0, swayX = 0, swayY = 0, stepAcc = 0, useHeld = 0;
@@ -444,7 +448,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
         const d = dinos.get(m.dino);
         if (d) d.group.userData.fire();
         addShot(newShot(m.o, m.d, 70, 6, 2.5), false, { hostile: !d || d.team !== my.team }, dinoBulletMat);
-        sfx.dinoShot(m.o[0], m.o[2]);
+        sfx.dinoShot(m.o[0], m.o[2], m.d);
         return;
       }
       const e = ents.get(m.by);
@@ -455,7 +459,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
       if (w && w.melee) { sfx.remoteSwish(e.pos.x, e.pos.z); return; }
       if (!w || !m.o) return;
       addShot(newShot(m.o, m.d, w.speed, w.grav), !!w.splash, {});
-      sfx.remoteShot(m.o[0], m.o[2], !!w.splash);
+      sfx.remoteShot(m.o[0], m.o[2], wid, m.d);
       // the fire is at the muzzle of the weapon they carry (or, when they are not shown, a little ahead of their eyes)
       if (!e.fig.group.visible || !e.fig.muzzle(V)) V.set(m.o[0] + m.d[0] * 0.9, m.o[1] + m.d[1] * 0.9, m.o[2] + m.d[2] * 0.9);
       fx.flashMuzzle(V, 14); fx.flashAt(V, V2.set(m.d[0], m.d[1], m.d[2]).normalize(), FLASH[wid]);
@@ -465,7 +469,12 @@ export function startGame({ root, info, send, sound = true, leave }) {
         my.hp = m.hp; healthHud(); dmgT = 0.5; shake = Math.max(shake, 0.25);
         if (my.hp > 0) sfx.hurt();
         if (m.from) { arrowT = 1.2; H.arrow.dataset.x = m.from[0]; H.arrow.dataset.z = m.from[1]; }
-      } else { const e = ents.get(m.to); if (e && e.fig) e.fig.flash(); }
+      } else {
+        // somebody else is hit: the bullet lands, and it is knocked out of them
+        const e = ents.get(m.to);
+        if (e && e.fig) e.fig.flash();
+        if (e && e.pos.y > -40) { sfx.remoteHit(e.pos.x, e.pos.z, !!m.hs); if (m.hp > 0 && performance.now() - (e.owT || 0) > 450) { e.owT = performance.now(); sfx.voice('grunt', e.pos.x, e.pos.z, voiceOf(e)); } }
+      }
       if (m.by === you && m.to !== you) {
         if (hitT <= 0) marker(!!m.hs);          // the knife and explosions are only known from here
         const e = ents.get(m.to);
@@ -480,6 +489,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
         addFeed(m.kd ? '🦖 Dino' : m.self ? '' : k ? k.name : '', m.kd || (k ? k.team : ''), wn, v.name, v.team, !!m.hs);
         v.d++; v.alive = false; if (k) { k.k++; if (teams && info.mode === 'tdm') tkills[k.team === 'A' ? 0 : 1]++; }
         if (v.fig) v.fig.die();
+        if (m.to !== you && v.pos.y > -40) sfx.voice('cry', v.pos.x, v.pos.z, voiceOf(v));
       }
       if (m.to === you) {
         my.alive = false; my.deadT = ARENA.respawn; my.hp = 0; healthHud(); setZoom(false); sfx.death();
@@ -505,17 +515,20 @@ export function startGame({ root, info, send, sound = true, leave }) {
       stars = m.s; trainStar = !!m.train; wait = m.wait; syncTowerStars(); scoreLine();
       const text = STAR_TEXT[m.ev] ? STAR_TEXT[m.ev](m) : '';
       if (text) note(text, 3);
-      if (m.ev === 'new' || m.ev === 'take') sfx.star(); else if (m.ev === 'score') sfx.deliver(); else if (m.ev === 'thief' && m.team === my.team) sfx.beep(1);
+      if (m.ev === 'new' || m.ev === 'take') sfx.star(); else if (m.ev === 'score') sfx.deliver(); else if (m.ev === 'thief' && m.team === my.team) sfx.thief();
     },
     ast(m) { applyState(m, false); },
     adino(m) {
       for (const a of m.add || []) setDino(a[0], a[1], a[2], a[3]);
-      for (const id of m.del || []) { const d = dinos.get(id); if (d) { dinos.delete(id); d.dying = 0; fallen.push(d); } }       // it falls over before it is gone
+      for (const id of m.del || []) { const d = dinos.get(id); if (d) { dinos.delete(id); d.dying = 0; fallen.push(d); if (performance.now() - (d.hitT || -1e9) < 600) sfx.dinoDie(d.x, d.z); } }       // it falls over before it is gone (with a cry, when it was shot down)
     },
+    // a dino has seen somebody: it roars first, and attacks when it has roared
+    aroar(m) { const d = dinos.get(m.id); if (d) { d.group.userData.roar(DINO.roar); sfx.dinoRoar(d.x, d.z); } },
     adh(m) {
       const d = dinos.get(m.id);
       if (!d) return;
-      d.flash = 0.1;
+      d.flash = 0.1; d.hitT = performance.now();
+      if (d.hitT - (d.owT || 0) > 380) { d.owT = d.hitT; sfx.dinoHurt(d.x, d.z); }
       if (m.by === you && WEAPONS[WEAPON_IDS[my.w]].melee) { if (hitT <= 0) marker(false); knifeHit(d.x, 0, d.z); }
     },
     ap(m) {
@@ -724,6 +737,6 @@ export function startGame({ root, info, send, sound = true, leave }) {
     on(m) { const f = on[m.t]; if (f) f(m); },
     stop,
     // for the test scripts: play without the mouse being caught
-    _debug: { me, my, ents, dinos, world, keys, shots, THREE, camera, scene, renderer, merged, fire, vm, arsenal, fx, figures, weaponHud, scenery, run(v) { forceRun = v; setRunning(v || document.pointerLockElement === canvas); }, freeze(v) { frozen = v; }, state: () => ({ state, left, stars, tkills, trainStar, wait, fps, ping, offset }) },
+    _debug: { me, my, ents, dinos, world, keys, shots, THREE, camera, scene, renderer, merged, fire, vm, arsenal, fx, figures, weaponHud, scenery, sfx, run(v) { forceRun = v; setRunning(v || document.pointerLockElement === canvas); }, freeze(v) { frozen = v; }, state: () => ({ state, left, stars, tkills, trainStar, wait, fps, ping, offset }) },
   };
 }

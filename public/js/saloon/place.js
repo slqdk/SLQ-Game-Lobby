@@ -60,6 +60,7 @@ export function buildSaloon(THREE, kit, groupName = '') {
   const root = new THREE.Group(), upper = new THREE.Group();     // `upper`: the ceiling and what hangs from it (hidden when one looks in from above)
   root.add(upper);
   const solid = batch(), glow = batch(), high = batch(), highGlow = batch(), near = batch(), nearGlow = batch(), floorB = batch(), carpetB = batch(), paperB = batch(), paper2B = batch(), wainB = batch();
+  const roofB = batch(), gableB = batch();          // the boards under the roof and on the two gables (both in `upper`)
   const W = ROOM.w, D = ROOM.d, CX = CASINO_X, H = WALL_H;
   const picks = [], signs = [];          // what one can click: { id, box }; where each sign hangs: station id -> [x, y, z]
   const live = {};                       // what moves: filled in below
@@ -119,10 +120,59 @@ export function buildSaloon(THREE, kit, groupName = '') {
     B2.box((x0 + x1) / 2 + inx, WAIN, (z0 + z1) / 2 + inz, dx ? len : 0.08, 0.09, dz ? len : 0.08, DARK);
     B2.box((x0 + x1) / 2 + inx, 0.09, (z0 + z1) / 2 + inz, dx ? len : 0.07, 0.18, dz ? len : 0.07, DARK);
   }
-  // the ceiling and its beams (in `upper`)
-  high.quad([0, H, 0], [W, H, 0], [W, H, D], [0, H, D], tone(PINE, 0.5));
-  for (let x = 2; x < W; x += 4) high.box(x, H - 0.14, D / 2, 0.3, 0.28, D, DARK);
-  high.box(W / 2, H - 0.3, D / 2, W, 0.12, 0.36, DARK);
+  // ---------- the roof, open to the ridge (all of it in `upper`) ----------
+  // Søren: "loft til kip i huset, så vi får en bedre træ stemning". Boards under the two slopes, and what carries
+  // them, all in the round: a log along the top of each long wall, a truss every four steps (a tie beam across, two
+  // rafters up to the ridge, a post in the middle and two struts), the ridge log and two more logs on each slope,
+  // and light rafters between. The two ends are boarded gables with a round window.
+  const RIDGE = H + 3.3, MID = D / 2, RUN = Math.hypot(MID, RIDGE - H), PITCH = Math.atan2(RIDGE - H, MID);
+  const roofY = z => H + (RIDGE - H) * (1 - Math.abs(z - MID) / MID);          // the height of the boards over a place
+  {
+    const BOARD = [1.5, 1.24, 0.92], log = wood(tone(PINE, 0.82), 0.1), old = wood(tone(OAK, 1.25), 0.1);
+    roofB.quad([0, H, 0], [W, H, 0], [W, RIDGE, MID], [0, RIDGE, MID], BOARD, 0, 0, W / 2.4, RUN / 2.4);
+    roofB.quad([W, H, D], [0, H, D], [0, RIDGE, MID], [W, RIDGE, MID], BOARD, 0, 0, W / 2.4, RUN / 2.4);
+    // the gables: upright boards, seen from inside
+    const gable = (x, flip) => {
+      const pts = flip ? [[D, H], [MID, RIDGE], [0, H]] : [[0, H], [MID, RIDGE], [D, H]];
+      for (const [z, y] of pts) gableB.vert(x, y, z, flip ? -1 : 1, 0, 0, z / 1.6, (y - H) / 1.2, [1.2, 1.05, 0.86]);
+      const e = flip ? -1 : 1, gx = x + e * 0.06;
+      // a round window with a cross in it, and the daylight behind
+      highGlow.add(new THREE.CircleGeometry(0.78, 20), at(gx - e * 0.02, H + 1.25, MID, 0, e * Math.PI / 2, 0), [2.2, 2.0, 1.55]);
+      high.add(new THREE.TorusGeometry(0.8, 0.07, 6, 24), at(gx, H + 1.25, MID, 0, Math.PI / 2, 0), old);
+      high.box(gx, H + 1.25, MID, 0.05, 1.6, 0.07, old); high.box(gx, H + 1.25, MID, 0.05, 0.07, 1.6, old);
+      // the last truss stands against the gable
+      truss(x + e * 0.2, true);
+    };
+    const truss = (x, half) => {
+      high.rod(x, H, 0.04, x, H, D - 0.04, 0.2, log, 10);                                                          // the tie beam
+      for (const sd of [-1, 1]) {
+        const z0 = MID + sd * (MID - 0.2), zm = MID + sd * MID / 2;
+        high.rod(x, roofY(z0) - 0.1, z0, x, RIDGE - 0.42, MID + sd * 0.12, 0.17, log, 10);                         // a rafter
+        high.rod(x, H + 0.16, MID + sd * 0.3, x, roofY(zm) - 0.42, zm, 0.11, log, 8);                              // a strut
+        high.box(x, roofY(z0) - 0.02, z0 + sd * 0.02, 0.44, 0.07, 0.3, IRON, -sd * PITCH);                        // an iron strap at its foot
+      }
+      high.rod(x, H + 0.1, MID, x, RIDGE - 0.3, MID, 0.15, log, 10);                                               // the post in the middle
+      high.box(x, H + 0.3, MID, 0.4, 0.09, 0.36, IRON); high.box(x, RIDGE - 0.62, MID, 0.4, 0.09, 0.4, IRON);      // straps round its foot and its head
+      if (!half) for (const sd of [-1, 1]) for (const dz of [-1, 1]) high.ball(x + sd * 0.2, H + 0.3, MID + dz * 0.1, 0.035, IRON);
+    };
+    for (let x = 4; x < W; x += 4) truss(x, false);
+    gable(0, false); gable(W, true);
+    // logs the whole length of the house: one on each long wall, the ridge, two on each slope
+    high.rod(0, H - 0.02, 0.14, W, H - 0.02, 0.14, 0.17, log, 10); near.rod(0, H - 0.02, D - 0.14, W, H - 0.02, D - 0.14, 0.17, log, 10);
+    high.rod(0, RIDGE - 0.26, MID, W, RIDGE - 0.26, MID, 0.17, log, 10);
+    for (const sd of [-1, 1]) for (const k of [1 / 3, 2 / 3]) { const z = MID + sd * MID * k; high.rod(0, roofY(z) - 0.2, z, W, roofY(z) - 0.2, z, 0.12, log, 8); }
+    // light rafters under the boards, one every step
+    for (let x = 1; x < W; x += 1) if (x % 4) for (const sd of [-1, 1]) high.box(x, (H + RIDGE) / 2 - 0.06, MID + sd * MID / 2, 0.09, 0.11, RUN - 0.1, old, -sd * PITCH);
+    // something over the casino's end: a pair of antlers on a shield (a hunting lodge has them)
+    for (const [x, e] of [[0.12, 1], [W - 0.12, -1]]) {
+      high.box(x, H + 0.1, MID, 0.05, 0.5, 0.42, old);
+      for (const sd of [-1, 1]) {
+        const pts = [[0, 0.06], [0.16, 0.34], [0.12, 0.66], [0.3, 0.92]];
+        for (let i = 0; i < 3; i++) high.rod(x + e * 0.05, H + 0.16 + pts[i][1], MID + sd * (0.08 + pts[i][0]), x + e * 0.07, H + 0.16 + pts[i + 1][1], MID + sd * (0.08 + pts[i + 1][0]), 0.028 - i * 0.004, [0.86, 0.8, 0.66], 5);
+        for (const [i, dy, dz] of [[1, 0.2, 0.2], [2, 0.22, -0.12]]) high.rod(x + e * 0.06, H + 0.16 + pts[i][1], MID + sd * (0.08 + pts[i][0]), x + e * 0.08, H + 0.16 + pts[i][1] + dy, MID + sd * (0.08 + pts[i][0] + dz), 0.018, [0.86, 0.8, 0.66], 5);
+      }
+    }
+  }
   // the opening to the casino: two posts and a beam with a sign
   solid.box(CX, H / 2, 0.2, 0.36, H, 0.36, wood(OAK)); near.box(CX, H / 2, D - 0.2, 0.36, H, 0.36, wood(OAK));
   high.box(CX, H - 0.55, D / 2, 0.3, 0.5, D, wood(OAK));
@@ -145,11 +195,12 @@ export function buildSaloon(THREE, kit, groupName = '') {
   const wheelLamp = (x, z, y, r, fine) => {
     high.add(new THREE.TorusGeometry(r, 0.05, 6, 28), at(x, y, z, Math.PI / 2, 0, 0), fine ? BRASS : wood(OAK));
     for (let k = 0; k < 6; k++) { const a = k / 6 * 6.283; high.rod(x, y, z, x + Math.cos(a) * r, y, z + Math.sin(a) * r, 0.03, fine ? BRASS : DARK); high.cyl(x + Math.cos(a) * r, y + 0.03, z + Math.sin(a) * r, 0.07, 0.2, fine ? BRASS : IRON, 8); highGlow.ball(x + Math.cos(a) * r, y + 0.3, z + Math.sin(a) * r, 0.055, [2.6, 1.5, 0.5], 1, 1.7, 1, 8); high.cyl(x + Math.cos(a) * r, y + 0.22, z + Math.sin(a) * r, 0.045, 0.2, [0.9, 0.86, 0.7], 8, 0.05); }
-    for (let k = 0; k < 3; k++) { const a = k / 3 * 6.283; high.rod(x + Math.cos(a) * r * 0.6, y, z + Math.sin(a) * r * 0.6, x, H - 0.3, z, 0.015, IRON, 4); }
+    for (let k = 0; k < 3; k++) { const a = k / 3 * 6.283; high.rod(x + Math.cos(a) * r * 0.6, y, z + Math.sin(a) * r * 0.6, x, H - 0.55, z, 0.015, IRON, 4); }
+    high.rod(x, H - 0.55, z, x, H - 0.2, z, 0.02, IRON, 5);                    // the chain up to the tie beam
     high.cyl(x, y - 0.08, z, 0.12, 0.16, fine ? BRASS : DARK, 8);
     lamps.push([x, y, z]);
   };
-  wheelLamp(7, 6.6, 3.15, 1.1); wheelLamp(16.5, 6.6, 3.15, 1.1); wheelLamp(28.2, 6.8, 3.2, 0.9, true);
+  wheelLamp(8, MID, 3.15, 1.1); wheelLamp(16, MID, 3.15, 1.1); wheelLamp(28, MID, 3.2, 0.9, true);      // each under a truss
 
   // ---------- small things used many times ----------
   const leg = (x, z, h, r = 0.045, col = DARK) => solid.cyl(x, 0, z, r, h, col, 6);
@@ -309,7 +360,7 @@ export function buildSaloon(THREE, kit, groupName = '') {
     }
     solid.box(cx, 3.46, z + 0.0, bw + 0.5, 0.18, 0.34, wood(OAK)); solid.box(cx, 3.58, z + 0.02, bw + 0.7, 0.07, 0.4, wood(DARK, 0.06));
     for (let i = 0; i < 22; i++) solid.box(cx - bw / 2 - 0.1 + i * (bw + 0.2) / 21, 3.34, z + 0.14, 0.1, 0.07, 0.06, wood(tone(OAK, 1.2)));        // dentils under the cornice
-    solid.box(cx, 3.93, z - 0.08, 2.3, 0.62, 0.08, wood(DARK)); solid.box(cx, 3.93, z - 0.05, 2.14, 0.48, 0.04, wood(tone(OAK, 0.8))); word('BAR', cx, 3.93, z - 0.025, 1.9, 0.5, 'z+', '#ffcf6a');
+    solid.box(cx, 3.88, z - 0.08, 2.3, 0.54, 0.08, wood(DARK)); solid.box(cx, 3.88, z - 0.05, 2.14, 0.42, 0.04, wood(tone(OAK, 0.8))); word('BAR', cx, 3.88, z - 0.025, 1.8, 0.44, 'z+', '#ffcf6a');
     // on the worktop: three kegs on their sides with a tap each, the till, a row of bottles
     for (let i = 0; i < 3; i++) {
       const kx = cx - 2.1 + i * 0.6, ky = by + 0.3;
@@ -539,6 +590,7 @@ export function buildSaloon(THREE, kit, groupName = '') {
   };
   for (const c of chairs) placeChair(c);
   const nearGroup = new THREE.Group(); root.add(nearGroup);                       // what is on the front wall (hidden when one looks in through it)
+  meshes.push(roofB.mesh(meshes[2].material, upper, 'roof'), gableB.mesh(meshes[6].material, upper, 'gables'));
   meshes.push(high.mesh(solidMat, upper, 'high'), highGlow.mesh(glowMat, upper, 'highGlow'), near.mesh(solidMat, nearGroup, 'near'), nearGlow.mesh(glowMat, nearGroup, 'nearGlow'), quadsHigh.mesh(meshes[7].material, upper, 'wordsHigh'));
 
   // ---------- what changes: boards one writes on, screens, reels, the piano's roll ----------

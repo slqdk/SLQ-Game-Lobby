@@ -102,7 +102,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
   const serverNow = () => performance.now() + offset;
 
   // ---------- the match ----------
-  const ents = new Map(), dinos = new Map(), shots = [], effects = [], feed = [];
+  const ents = new Map(), dinos = new Map(), fallen = [], shots = [], effects = [], feed = [];
   let state = 'countdown', left = 0, timeAt = 0, time0 = 0, stars = [0, 0], tkills = [0, 0], trainStar = false, wait = '', winner = null, rows = null, lastBeep = -1, noteT = 0, bigT = 0, hitT = 0, dmgT = 0, arrowT = 0, boardKey = false;
   const trainStarMesh = fx.makeStar(1.6); trainStarMesh.visible = false; scene.add(trainStarMesh);
   const towerStars = { A: [], B: [] };
@@ -441,6 +441,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     af(m) {
       if (m.dino) {
         const d = dinos.get(m.dino);
+        if (d) d.group.userData.fire();
         addShot(newShot(m.o, m.d, 70, 6, 2.5), false, { hostile: !d || d.team !== my.team }, dinoBulletMat);
         sfx.dinoShot(m.o[0], m.o[2]);
         return;
@@ -508,7 +509,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
     ast(m) { applyState(m, false); },
     adino(m) {
       for (const a of m.add || []) setDino(a[0], a[1], a[2], a[3]);
-      for (const id of m.del || []) { const d = dinos.get(id); if (d) { scene.remove(d.group); dinos.delete(id); } }
+      for (const id of m.del || []) { const d = dinos.get(id); if (d) { dinos.delete(id); d.dying = 0; fallen.push(d); } }       // it falls over before it is gone
     },
     adh(m) {
       const d = dinos.get(m.id);
@@ -610,12 +611,19 @@ export function startGame({ root, info, send, sound = true, leave }) {
       f.group.visible = !e.protect || Math.floor(nowT / 110) % 2 === 0;
       if (f.tag) f.tag.visible = f.friend || Math.hypot(x - me.x, z - me.z) < 22;
     }
+    // the dinos walk: their legs go by how far they have come, and they turn rather than snap round
     for (const d of dinos.values()) {
-      const k = 1 - Math.exp(-dt * 12), mv = Math.hypot(d.tx - d.x, d.tz - d.z) > 0.02;
-      d.x += (d.tx - d.x) * k; d.z += (d.tz - d.z) * k; d.yaw = angLerp(d.yaw, d.tyaw, k);
-      d.group.position.set(d.x, mv ? Math.abs(Math.sin(nowT * 0.008)) * 0.09 : 0, d.z); d.group.rotation.y = d.yaw;
-      const em = d.group.children[0].material.emissive;
+      const k = 1 - Math.exp(-dt * 12), ox = d.x, oz = d.z;
+      d.x += (d.tx - d.x) * k; d.z += (d.tz - d.z) * k; d.yaw = angLerp(d.yaw, d.tyaw, 1 - Math.exp(-dt * 8));
+      d.group.position.set(d.x, 0, d.z); d.group.rotation.y = d.yaw;
+      d.group.userData.step(dt, Math.hypot(d.x - ox, d.z - oz) / Math.max(dt, 0.001), nowT / 1000);
+      const em = d.group.userData.body.emissive;
       if (d.flash > 0) { d.flash -= dt; em.setRGB(Math.max(0, d.flash / 0.1) * 0.9, 0, 0); } else em.setRGB(0, 0, 0);
+    }
+    for (let i = fallen.length - 1; i >= 0; i--) {
+      const d = fallen[i], g = d.group; d.dying += dt;
+      g.rotation.z = Math.min(1, d.dying / 0.35) * 1.45; g.position.y = 0.25 * Math.min(1, d.dying / 0.35) - Math.max(0, d.dying - 0.9) * 1.2;
+      if (d.dying > 1.5) { scene.remove(g); fallen.splice(i, 1); }
     }
 
     // --- things ---

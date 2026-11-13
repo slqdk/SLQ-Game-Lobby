@@ -86,28 +86,42 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
     const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.16 * s, bevelEnabled: true, bevelSize: 0.03 * s, bevelThickness: 0.03 * s, bevelSegments: 1 }); geo.center();
     return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xffcf33, emissive: 0xd98a10, emissiveIntensity: 0.5, roughness: 0.3, metalness: 0.7 }));
   }
-  // A dino: round shapes, a long tail, the team's collar, and the bad pistol in its hand. Its shapes are joined
-  // into four pieces by colour (made once, shared by all dinos); the first is the body, with a material of its
-  // own per dino (the game makes it flash when it is hit).
+  // A dino that walks. It is a small rig of round shapes: hips that carry a body, a neck with the head, a tail in
+  // three pieces and two legs with a knee each; the bad pistol is in its hand. The shapes of each piece are joined
+  // by colour and made once for all dinos. buildDino() hands back the group; in its userData:
+  //   step(dt, speed, t)  every frame: speed over the ground in metres a second, t any even clock
+  //   fire()              it shot: the arm kicks
+  //   body                the body's material, one per dino (the game makes it flash when the dino is hit)
+  // The walk is driven by how far it has come, not by time, so the feet do not slide: a leg swings forward with the
+  // knee bent and the foot lifted, is set down, and carries the body over it while the hips dip between two steps.
+  const DINO_SCALE = 1.45, HIP = 0.65, THIGH = 0.3, SHIN = 0.33, STRIDE = 0.96 * DINO_SCALE;
   let dinoGeo = null;
   function dinoShapes() {
-    const ball = new THREE.SphereGeometry(1, 14, 10), tail = new THREE.ConeGeometry(1, 1, 10), limb = new THREE.CapsuleGeometry(1, 1, 3, 8), spike = new THREE.ConeGeometry(1, 1, 4);
-    const sets = { body: [], belly: [], dark: [], white: [] };
-    const put = function (set, geo, sx, sy, sz, x, y, z, rx) { sets[set].push([geo, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx || 0, 0, 0)), new THREE.Vector3(sx, sy, sz))]); };
-    put('body', ball, 0.3, 0.36, 0.46, 0, 0.74, 0, -0.2);                           // body
-    put('belly', ball, 0.24, 0.3, 0.36, 0, 0.68, 0.1, -0.2);
-    put('body', limb, 0.13, 0.2, 0.13, 0, 1.04, 0.3, 0.55);                         // neck
-    put('body', ball, 0.2, 0.19, 0.24, 0, 1.26, 0.5);                               // head
-    put('body', ball, 0.15, 0.12, 0.2, 0, 1.2, 0.72);                               // snout
-    put('belly', ball, 0.13, 0.07, 0.17, 0, 1.13, 0.7);                             // jaw
-    for (const sx of [-1, 1]) { put('white', ball, 0.06, 0.07, 0.05, sx * 0.13, 1.35, 0.6); put('dark', ball, 0.035, 0.045, 0.03, sx * 0.145, 1.355, 0.635); put('dark', ball, 0.012, 0.012, 0.012, sx * 0.05, 1.22, 0.9); }
-    put('body', tail, 0.2, 0.85, 0.2, 0, 0.66, -0.72, -Math.PI / 2 - 0.12);
-    for (let i = 0; i < 5; i++) put('belly', spike, 0.045, 0.11, 0.07, 0, 1.1 - i * 0.07 + (i > 1 ? -0.03 * i : 0), 0.12 - i * 0.2, -0.35);      // spikes down the back
-    for (const s of [-1, 1]) {
-      put('body', limb, 0.1, 0.2, 0.12, s * 0.17, 0.3, -0.02);                      // leg
-      put('body', ball, 0.11, 0.06, 0.17, s * 0.17, 0.06, 0.07);                    // foot
-      put('body', limb, 0.045, 0.12, 0.045, s * 0.24, 0.8, 0.34, -1.1);             // arm
-    }
+    const ball = new THREE.SphereGeometry(1, 14, 10), limb = new THREE.CapsuleGeometry(1, 1, 3, 8), spike = new THREE.ConeGeometry(1, 1, 4);
+    const S = {}, M4 = (x, y, z, sx, sy, sz, rx) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx || 0, 0, 0)), new THREE.Vector3(sx, sy, sz));
+    // a shape into a piece: where (from the piece's own joint), how big, tipped how far
+    const put = function (piece, geo, sx, sy, sz, x, y, z, rx) { (S[piece] || (S[piece] = [])).push([geo, M4(x, y, z, sx, sy, sz, rx)]); };
+    const taper = function (r0, r1, len) { return new THREE.CylinderGeometry(r1, r0, len, 10); };       // from r0 at the joint to r1 at the far end
+    // the body, from the hips
+    put('torso', ball, 0.3, 0.36, 0.46, 0, 0.74 - HIP, 0, -0.2);
+    put('torsoBelly', ball, 0.24, 0.3, 0.36, 0, 0.68 - HIP, 0.1, -0.2);
+    for (let i = 0; i < 4; i++) put('torsoBelly', spike, 0.045, 0.11, 0.07, 0, 1.09 - i * 0.075 - (i > 1 ? 0.03 * i : 0) - HIP, 0.1 - i * 0.19, -0.35);
+    for (const s of [-1, 1]) { put('arms', limb, 0.045, 0.1, 0.045, s * 0.24, 0, 0.1, -1.1); put('arms', ball, 0.055, 0.05, 0.06, s * 0.24, -0.075, 0.24); }       // from the shoulders
+    // neck and head, from the foot of the neck
+    const NX = 0.92, NZ = 0.2;
+    put('head', limb, 0.13, 0.2, 0.13, 0, 1.04 - NX, 0.3 - NZ, 0.55);
+    put('head', ball, 0.2, 0.19, 0.24, 0, 1.26 - NX, 0.5 - NZ);
+    put('head', ball, 0.15, 0.12, 0.2, 0, 1.2 - NX, 0.72 - NZ);
+    for (const s of [-1, 1]) put('head', ball, 0.075, 0.05, 0.07, s * 0.115, 1.415 - NX, 0.585 - NZ);                 // brows
+    put('headBelly', ball, 0.13, 0.07, 0.17, 0, 1.13 - NX, 0.7 - NZ);
+    for (const s of [-1, 1]) { put('eyeWhite', ball, 0.06, 0.07, 0.05, s * 0.13, 0, 0); put('eyeDark', ball, 0.035, 0.045, 0.03, s * 0.145, 0.005, 0.035); put('headDark', ball, 0.012, 0.012, 0.012, s * 0.05, 1.22 - NX, 0.9 - NZ); }
+    // the tail: three pieces, each from its own joint towards the back
+    [[0.2, 0.125, 0.32], [0.125, 0.065, 0.3], [0.065, 0.008, 0.3]].forEach(function (q, i) { put('tail' + i, taper(q[0], q[1], q[2]).rotateX(-Math.PI / 2), 1, 1, 1, 0, 0, -q[2] / 2); put('tail' + i, ball, q[0], q[0], q[0], 0, 0, 0); });
+    // a leg: the thigh from the hip, the shin from the knee, the foot from the ankle
+    put('thigh', taper(0.125, 0.085, THIGH), 1, 1, 1, 0, -THIGH / 2, 0); put('thigh', ball, 0.13, 0.13, 0.13, 0, 0, 0); put('thigh', ball, 0.088, 0.088, 0.088, 0, -THIGH, 0);
+    put('shin', taper(0.082, 0.055, SHIN), 1, 1, 1, 0, -SHIN / 2, 0); put('shin', ball, 0.06, 0.06, 0.06, 0, -SHIN, 0);
+    put('foot', ball, 0.085, 0.045, 0.16, 0, -0.02, 0.085);
+    for (const s of [-1, 0, 1]) put('footBelly', spike, 0.022, 0.07, 0.022, s * 0.05, -0.03, 0.235, Math.PI / 2 - 0.2);      // claws
     const join = function (list) {
       const P = [], N = [], v = new THREE.Vector3(), nm = new THREE.Matrix3();
       for (const part of list) {
@@ -120,20 +134,61 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
       out.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
       return out;
     };
-    const out = { body: join(sets.body), belly: join(sets.belly), dark: join(sets.dark), white: join(sets.white), collar: new THREE.TorusGeometry(1, 0.22, 6, 16) };
-    ball.dispose(); tail.dispose(); limb.dispose(); spike.dispose();
+    const out = { collar: new THREE.TorusGeometry(1, 0.22, 6, 16) };
+    for (const k of Object.keys(S)) out[k] = join(S[k]);
+    ball.dispose(); limb.dispose(); spike.dispose();
     return out;
   }
   const dinoDark = new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 0.3 }), dinoWhite = new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.5 });
   function buildDino(team) {
     const g = new THREE.Group(), acc = TEAM_COL[team] || 0x999999, G = dinoGeo || (dinoGeo = dinoShapes());
     const bodyMat = new THREE.MeshStandardMaterial({ color: team === 'A' ? 0xc23a44 : 0x3a58c2, roughness: 0.75 }), bellyMat = new THREE.MeshStandardMaterial({ color: team === 'A' ? 0xe98d94 : 0x8da3ea, roughness: 0.8 });
-    const body = new THREE.Mesh(G.body, bodyMat); body.castShadow = true; g.add(body);
-    g.add(new THREE.Mesh(G.belly, bellyMat), new THREE.Mesh(G.dark, dinoDark), new THREE.Mesh(G.white, dinoWhite));
-    const collar = new THREE.Mesh(G.collar, new THREE.MeshStandardMaterial({ color: acc, emissive: acc, emissiveIntensity: 0.4, roughness: 0.5 }));
-    collar.scale.set(0.2, 0.2, 0.16); collar.position.set(0, 0.98, 0.25); collar.rotation.x = Math.PI / 2 + 0.55; g.add(collar);
-    if (arsenal) { const w = arsenal.build('badgun'); w.group.scale.setScalar(1.7); w.group.rotation.y = Math.PI; w.group.position.set(0.24, 0.7, 0.5); g.add(w.group); }
-    g.scale.setScalar(1.45);
+    const grp = function (parent, x, y, z) { const o = new THREE.Group(); o.position.set(x, y, z); parent.add(o); return o; };
+    const mesh = function (parent, geo, m, shadow) { const o = new THREE.Mesh(geo, m); o.castShadow = !!shadow; parent.add(o); return o; };
+    const hips = grp(g, 0, HIP, 0);
+    mesh(hips, G.torso, bodyMat, true); mesh(hips, G.torsoBelly, bellyMat);
+    const collar = mesh(hips, G.collar, new THREE.MeshStandardMaterial({ color: acc, emissive: acc, emissiveIntensity: 0.4, roughness: 0.5 }));
+    collar.scale.set(0.2, 0.2, 0.16); collar.position.set(0, 0.98 - HIP, 0.25); collar.rotation.x = Math.PI / 2 + 0.55;
+    const arms = grp(hips, 0, 0.8 - HIP, 0.24); mesh(arms, G.arms, bodyMat);
+    if (arsenal) { const w = arsenal.flat('badgun'); w.scale.setScalar(1.7); w.rotation.y = Math.PI; w.position.set(0.24, -0.1, 0.27); arms.add(w); }
+    const neck = grp(hips, 0, 0.92 - HIP, 0.2); mesh(neck, G.head, bodyMat, true); mesh(neck, G.headBelly, bellyMat); mesh(neck, G.headDark, dinoDark);
+    const eyes = grp(neck, 0, 1.35 - 0.92, 0.6 - 0.2); mesh(eyes, G.eyeWhite, dinoWhite); mesh(eyes, G.eyeDark, dinoDark);
+    const tail = []; let at = grp(hips, 0, 0.66 - HIP, -0.3);
+    for (let i = 0; i < 3; i++) { mesh(at, G['tail' + i], bodyMat, i === 0); tail.push(at); if (i < 2) at = grp(at, 0, 0, -[0.32, 0.3][i]); }
+    const legs = [-1, 1].map(function (s) {
+      const thigh = grp(hips, s * 0.17, 0, -0.02), shin = grp(thigh, 0, -THIGH, 0), foot = grp(shin, 0, -SHIN, 0);
+      mesh(thigh, G.thigh, bodyMat, true); mesh(shin, G.shin, bodyMat); mesh(foot, G.foot, bodyMat); mesh(foot, G.footBelly, bellyMat);
+      return { thigh: thigh, shin: shin, foot: foot };
+    });
+    g.scale.setScalar(DINO_SCALE);
+    // ---- how it moves ----
+    const seed = Math.random() * 20;
+    let ph = Math.random() * 6.28, amp = 0, kick = 0, blink = 2 + Math.random() * 3, born = 0;
+    g.userData.body = bodyMat;
+    g.userData.fire = function () { kick = 1; };
+    g.userData.step = function (dt, speed, t) {
+      amp += (Math.min(1, speed / 1.6) - amp) * Math.min(1, dt * 8);
+      ph += speed / STRIDE * 6.2832 * dt;
+      const idle = 1 - amp, sn = Math.sin(ph);
+      legs.forEach(function (L, i) {
+        const p = ph + i * Math.PI, s = Math.sin(p) * amp, lift = Math.max(0, Math.cos(p)) * amp;
+        const rt = -0.5 - 0.45 * s, rs = 1.0 + 0.75 * lift;
+        L.thigh.rotation.x = rt; L.shin.rotation.x = rs; L.foot.rotation.x = -(rt + rs) + 0.55 * lift;
+      });
+      // the hips dip between two steps and are highest over the standing leg; they roll and turn a little with the legs
+      hips.position.y = HIP - 0.055 * sn * sn * amp + Math.sin(t * 2.1 + seed) * 0.006 * idle;
+      hips.rotation.set(0.07 * amp + Math.sin(t * 2.1 + seed) * 0.012 * idle, 0.07 * sn * amp, 0.05 * sn * amp);
+      // the tail swings against the steps, each piece a little after the one before, and never hangs quite still
+      tail.forEach(function (o, i) { o.rotation.y = (-0.16 * Math.sin(ph - 0.7 * i) - 0.05 * sn) * amp + 0.09 * Math.sin(t * 1.2 + seed - 0.6 * i) * (0.4 + 0.6 * idle); o.rotation.x = 0.1 - 0.02 * i + 0.05 * Math.sin(2 * ph - 0.5 * i) * amp + 0.02 * Math.sin(t * 0.9 + seed + i); });
+      // the head nods with the steps; standing, it looks about
+      neck.rotation.set(-0.05 * Math.sin(2 * ph + 0.5) * amp - 0.07 * amp - kick * 0.08, 0.34 * Math.sin(t * 0.55 + seed) * idle - 0.05 * sn * amp, 0.04 * Math.sin(t * 0.8 + seed) * idle);
+      arms.rotation.x = -kick * 0.55 + 0.05 * Math.sin(2 * ph) * amp;
+      if (kick > 0) kick = Math.max(0, kick - dt / 0.16);
+      blink -= dt; if (blink < -0.11) blink = 2.2 + Math.random() * 4;
+      eyes.scale.y = blink < 0 ? 0.12 : 1;
+      if (born < 1) { born = Math.min(1, born + dt / 0.35); const k = 1 - (1 - born) * (1 - born); g.scale.setScalar(DINO_SCALE * (0.3 + 0.7 * k)); }
+    };
+    g.userData.step(0, 0, 0);
     return g;
   }
 

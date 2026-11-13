@@ -580,6 +580,14 @@ export function dressWorld(THREE, scene, world, texLib, opt = {}) {
     for (const s of [-1, 1]) sheetOf(tunWall, n, 3, (u, v) => { const a = w.from + len * u, y = FY + (CY - FY) * v, e = w.fixed + s * 0.15; return w.along === 'x' ? [a, y, e, a, y] : [e, y, a, a, y]; }, BRICK);
     for (const a of [w.from, w.to]) sheetOf(tunWall, 1, 3, (u, v) => { const e = w.fixed - 0.15 + 0.3 * u, y = FY + (CY - FY) * v; return w.along === 'x' ? [a, y, e, e, y] : [e, y, a, e, y]; }, BRICK);
   }
+  // a frame of stone where a corridor meets a tower's shaft and is wider than the way in: two jambs from the floor
+  // to the street and a lintel. It closes the slit beside the shaft's wall (one saw the sky through it) and covers
+  // the wall's end, which lay in the same plane as the corridor's bricks and flickered.
+  for (const d of T.doors) {
+    const stone = (x, y, z, nn) => { const k = 0.5 + 0.26 * Math.abs(nn.x) + 0.08 * nn.y; return lightAt(x, y, z, [STONE[0] * k, STONE[1] * k, STONE[2] * k]); };
+    for (const [z0, z1] of [[d.from - 0.05, d.open + 0.05], [d.to - 0.07, d.to + 0.07]]) lit.add(new THREE.BoxGeometry(0.46, -FY, z1 - z0), at(d.x, FY / 2, (z0 + z1) / 2), { col: stone });
+    lit.add(new THREE.BoxGeometry(0.5, 0.66, d.to - d.from + 0.16), at(d.x, -0.33, (d.from + d.to) / 2), { col: stone });
+  }
   const SPRING = FY + 1.95, CROWN = CY - 0.1;
   T.runs.forEach((r, ri) => {
     const len = r.to - r.from, n = Math.ceil(len / 1.2), P = (c, y, a) => r.axis === 'z' ? [r.at + c, y, a] : [a, y, r.at + c];

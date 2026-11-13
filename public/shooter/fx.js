@@ -71,8 +71,8 @@ export function makeFx(THREE, scene, PICKUPS, HEALTH_PACKS, arsenal) {
     const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 }));
     box.castShadow = true; g.add(box);
     const cm = new THREE.MeshStandardMaterial({ color: 0xd23b3b, emissive: 0xd23b3b, emissiveIntensity: 0.35 });
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.4, 0.52), cm));   // rødt kors
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.52), cm));
+    // the red cross, on all four sides and on the lid (the pack turns, and one looks down on it)
+    for (const sz of [[0.16, 0.4, 0.52], [0.4, 0.16, 0.52], [0.52, 0.4, 0.16], [0.52, 0.16, 0.4], [0.16, 0.52, 0.4], [0.4, 0.52, 0.16]]) g.add(new THREE.Mesh(new THREE.BoxGeometry(sz[0], sz[1], sz[2]), cm));
     const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.05, 20), new THREE.MeshStandardMaterial({ color: h.col, transparent: true, opacity: 0.5, emissive: h.col, emissiveIntensity: 0.3 }));
     ring.position.y = -0.5; g.add(ring);
     g.position.set(h.x, 1.0, h.z); scene.add(g);

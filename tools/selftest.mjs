@@ -793,6 +793,14 @@ section('skydespillet: en kamp i arkaden');
   { const b = mine(B).e; go(A, b.x, b.y, b.z - 1.5, Math.PI, 0); tickFor(ARENA.protect);
     A.send({ t: 'af', w: 0, o: [b.x, b.y + EYE, b.z - 1.5], d: [0, 0, 1], i: ++shot }); }
   check('kniven rammer den, der står lige foran', mine(B).e.hp === 100 - WEAPONS.knife.dmg);
+  // first aid lies in the two team houses (under their roofs): the hurt get it by walking over it
+  { const hp = mine(A).m.world.HEALTH_PACKS[0];
+    mark(A); go(A, hp.x, 0, hp.z); tickFor(0.2);
+    check('den, der har fuldt liv, lader førstehjælpen ligge', mine(A).e.hp === 100 && !A.got.slice(A.mark).some(m => m.t === 'ahp'));
+    go(B, hp.x, 0, hp.z); tickFor(0.2);
+    check('den, der er såret, får liv af den ved at gå hen over den', mine(B).e.hp === 100 - WEAPONS.knife.dmg + ARENA.health && B.last('ahp').on === 0 && B.last('ahp').by === mine(B).e.id && B.last('ahp').hp === mine(B).e.hp);
+    tickFor(ARENA.healthBack + 0.2);
+    check('og den kommer igen', B.last('ahp').on === 1 || mine(B).e.hp === 100 - WEAPONS.knife.dmg + 2 * ARENA.health); }
   // standing still for a long time
   mark(C);
   for (let k = 0; k < 4; k++) { const a = mine(A).e; at(A, a.x + 0.2 * (k + 1), a.y, a.z, Math.PI); tickFor(ARENA.idleKick / 4 + 1); }

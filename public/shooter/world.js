@@ -41,7 +41,7 @@ export function buildWorld(THREE, scene, texLib) {
   const ceilings = [];    // {minX,maxX,minZ,maxZ, bot} — hovedstøds-grænse (tunneller)
   // (clubhouse) What scenery.js dresses up in the browser: the hedges, the houses and their roofs, the towers, the
   // tunnel. Where something is noted here, its plain box is not drawn (`hide`); the walls and floors are the same.
-  const decor = { hedges: [], houses: [], towers: [], tunnel: { floors: [], walls: [], runs: [] }, stairs: [], holes: null, subtract: null };
+  const decor = { hedges: [], houses: [], towers: [], tunnel: { floors: [], walls: [], runs: [], doors: [] }, stairs: [], holes: null, subtract: null };
 
   function rectOf(cx, cz, w, d) { return { minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2 }; }
   function mat(color, rough, tex, rx, ry) {
@@ -588,6 +588,10 @@ export function buildWorld(THREE, scene, texLib) {
     // there, and whoever walked along them fell into the tunnel
     if (gapSide === '+x') addBox(cx + W - 0.04, cz, 0.3, 6, TUN_CEIL - 0.01, -0.008, COL.wallLow, { tex: 'concrete', walkable: false });
     else addBox(cx - W + 0.04, cz - 3.85, 0.3, 1.7, TUN_CEIL - 0.01, -0.008, COL.wallLow, { tex: 'concrete', walkable: false });
+    // (clubhouse) On this side the corridor from the tunnel is 0.45 wider than the way into the shaft (it reaches
+    // past the shaft's corner), and beside the end of the shaft's wall one saw out under the street through a slit.
+    // scenery.js sets a frame of stone there: the corridor's width `from`..`to`, the way in from `open`.
+    if (gapSide !== '+x') decor.tunnel.doors.push({ x: cx - W, from: cz - 4.7, to: cz - 3, open: cz - W + 0.15 });
     // (gulv-ringen fjernet — spilleren går ind via dørens asfalt-kant og videre på spiralen)
     // skaktvægge (firkant ±W) fra bund til jord, med åbning på gren-siden
     const seg = function (fixed, from, to, axis) { if (to - from < 0.1) return; if (axis === 'x') addBox((from + to) / 2, fixed, to - from, 0.3, -TUN_D, 0, COL.wallLow, { tex: 'concrete', walkable: false }); else addBox(fixed, (from + to) / 2, 0.3, to - from, -TUN_D, 0, COL.wallLow, { tex: 'concrete', walkable: false }); };

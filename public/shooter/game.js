@@ -14,6 +14,7 @@ import { makeFigures } from './figure.js';
 import { mergeStatic } from './merge.js';
 import { dressWorld } from './scenery.js';
 import { LOOK } from '../shared/defs.js';
+import { mouse, mouseSlider } from '../js/mouse.js';
 import { WEAPONS, WEAPON_IDS, MODES, ARENA, TEAMS, DINO, FLAG, LEVELS, other, aimDir, spreadDir, zoneAt, dinoAt, newShot, flyShot } from './rules.js';
 
 const SENS = 0.0022, PITCH_MAX = 1.5, BASE_FOV = 78, ZOOM_FOV = 32, INTERP = 100;      // INTERP: how far behind the others are shown (ms)
@@ -219,6 +220,9 @@ export function startGame({ root, info, send, sound = true, leave }) {
       const r = el('div'); r.append(el('kbd', '', k), el('span', '', t)); keysList.append(r);
     }
     box.append(keysList);
+    const speeds = el('div', 'sh-sliders');
+    speeds.append(mouseSlider('look', 'Musehastighed', 'sh-slider'), mouseSlider('aim', 'Når man sigter (kikkert)', 'sh-slider'));
+    box.append(speeds);
     const go = el('button', 'btn big', my.seq < 0 ? 'Venter på banen …' : 'Spil');
     go.addEventListener('click', e => { e.stopPropagation(); lock(); });
     const row = el('div', 'row');
@@ -241,7 +245,7 @@ export function startGame({ root, info, send, sound = true, leave }) {
   const onLock = () => setRunning(document.pointerLockElement === canvas || forceRun);
   const onMove = e => {
     if (!running || !my.alive) return;
-    const k = SENS * (my.zoom ? ZOOM_FOV / BASE_FOV : 1);
+    const k = SENS * mouse.look * (my.zoom ? ZOOM_FOV / BASE_FOV * mouse.aim : 1);      // (the player's own speeds: the menu's sliders)
     me.yaw -= e.movementX * k; me.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, me.pitch - e.movementY * k));
     swayX = Math.max(-1, Math.min(1, swayX + e.movementX * 0.004)); swayY = Math.max(-1, Math.min(1, swayY + e.movementY * 0.004));
   };

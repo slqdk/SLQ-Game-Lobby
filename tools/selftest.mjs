@@ -808,6 +808,24 @@ section('skydespillet: banen, og hvor robotterne kan gå');
   check('en hurtig kugle springer ikke gennem en person eller ud gennem hækken', hit1 === 'body' && wall === 'wall' && s2.z < 55.5);
 }
 
+section('musehastighed');
+{
+  // a setting of the browser: read from localStorage (a stand-in here), kept within its bounds, changed in place
+  const store = new Map(), hadLS = 'localStorage' in globalThis;
+  globalThis.localStorage = { getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)) };
+  store.set('slq-mouse', '{"look": 1.5, "aim": "x"}');
+  const M = await import('../public/js/mouse.js');
+  check('musehastigheden læses fra browseren, og noget forkert bliver til 1', M.mouse.look === 1.5 && M.mouse.aim === 1);
+  const live = M.mouse;
+  M.setMouse('look', 10); M.setMouse('aim', 0.01);
+  const kept = JSON.parse(store.get('slq-mouse'));
+  M.setMouse('look', 0.734); M.setMouse('nose', 2);
+  check('den holdes inden for grænserne, i hele trin, gemmes og ændres samme sted, som spillene læser den', kept.look === M.MOUSE.max && kept.aim === M.MOUSE.min && live.look === 0.75 && M.mouse === live && !('nose' in live) && M.shown(0.75) === '0,75×');
+  store.set('slq-mouse', '{ikke json');
+  check('et ødelagt gemt tal giver de almindelige hastigheder', JSON.stringify(M.readMouse()) === '{"look":1,"aim":1}');
+  if (!hadLS) delete globalThis.localStorage;
+}
+
 section('skydespillet: lydene');
 {
   // every sound is worked out here as the browser does it (at half the rate: enough to judge them by, and quicker)

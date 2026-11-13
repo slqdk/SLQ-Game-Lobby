@@ -320,7 +320,7 @@ The table code in `hub.js` (seats, stakes, start, rematch, leaving, robots, tidy
 
 - **Asked for on 13 Nov 2026 after he had played v0.14.1** (each to be its own pull request, in this order unless he says otherwise):
   1. ~~Steering in the saloon as in the shooter~~: done in v0.15.0 (pull request open).
-  2. The shooter: "some wall graphics are flashing when moving around" (a screenshot of the house door: the wall's end at the right door post flickers; two faces in the same plane).
+  2. ~~The shooter: "some wall graphics are flashing when moving around"~~: done in v0.15.1 (pull request open). The door frames' sides lay in the plane of the wall's ends (`buildSide` in `world.js`), and the windows' side frames likewise (`scenery.js`); where two faces that do not look alike share a plane and look the same way, the picture flickers between them as one moves. Both now stand a finger's breadth into the opening. The self test fails if a frame shares an upright plane with a wall again. Not looked for: the same thing elsewhere in the scenery's batches (only the plain boxes of `world.js` were searched, and nothing else visible was found there).
   3. The bar: "more detailed.. and bigger.. the robot is colliding with the bar as well", then "Lav baren som et U.. baren kan også have en overdel hvor glassene kan hænge, til fadøl".
   4. "Kan du også lave loft til kip i huset, så vi får en bedre træ stemning, ligesom i Yellowstone": an open ceiling to the ridge with timber showing (own design in that style, not a copy of any existing house or film set).
   5. "Der må også gerne være noget at se ud af vinduerne og døren".

@@ -517,7 +517,9 @@ export function dressWorld(THREE, scene, world, texLib, opt = {}) {
             const k = 0.9 + rnd() * 0.2;
             sb(solid, c + s * 1.05, mid, wallT / 2 + 0.035, 0.62, hh + 0.08, 0.05, { col: [shut[0] * k, shut[1] * k, shut[2] * k] });
             for (const y of [H.sill + 0.22, H.head - 0.22]) sb(solid, c + s * 1.05, y, wallT / 2 + 0.066, 0.56, 0.06, 0.02, { col: [shut[0] * 0.6, shut[1] * 0.6, shut[2] * 0.6] });
-            sb(solid, c + s * 0.735, mid, 0, 0.07, hh, wallT + 0.1, { col: TRIMC });
+            // the window's side frames: a little into the opening and a little shallower than the sill, so that no
+            // face of theirs lies in the same plane as the wall's end or the sill's front (such faces flicker)
+            sb(solid, c + s * 0.722, mid, 0, 0.076, hh, wallT + 0.07, { col: TRIMC });
           }
           sb(solid, c, H.sill - 0.19, wallT / 2 + 0.15, 1.3, 0.2, 0.25, { col: [0.55, 0.3, 0.2] });
           for (let q = 0; q < 8; q++) {

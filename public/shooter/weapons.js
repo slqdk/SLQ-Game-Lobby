@@ -278,6 +278,30 @@ export function makeArsenal(THREE, renderer) {
     return { group, parts, def: d, id };
   }
 
+  // The whole weapon as ONE mesh, every shape painted in its material's colour: for where it is small in the
+  // picture and nothing on it moves (in a dino's hand). One draw call instead of one for each material and part.
+  const flats = {};
+  let flatMat = null;
+  function flat(id, opt = {}) {
+    if (!flats[id]) {
+      const d = def(id), P = [], N = [], C = [];
+      for (const name of Object.keys(d.shapes)) {
+        const pv = name === 'body' ? [0, 0, 0] : d.pivots[name] || [0, 0, 0];
+        for (const s of d.shapes[name]) {
+          const g = s.geo.index ? s.geo.toNonIndexed() : s.geo, p = g.attributes.position, n = g.attributes.normal, c = M[s.mat].color;
+          for (let i = 0; i < p.count; i++) { P.push(p.getX(i) + pv[0], p.getY(i) + pv[1], p.getZ(i) + pv[2]); N.push(n.getX(i), n.getY(i), n.getZ(i)); C.push(c.r, c.g, c.b); }
+          if (g !== s.geo) g.dispose();
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+      flats[id] = geo;
+    }
+    flatMat = flatMat || new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.15 });
+    const m = new THREE.Mesh(flats[id], flatMat); m.castShadow = !!opt.shadow;
+    return m;
+  }
+
   // One part of a weapon alone, around the part's own origin (the rocket that flies).
   function piece(id, name, opt = {}) {
     const g = new THREE.Group();
@@ -348,7 +372,9 @@ export function makeArsenal(THREE, renderer) {
     for (const m of Object.values(M)) m.dispose();
     for (const g of Object.values(armGeo)) g.dispose();
     shellGeo.dispose(); flashGeo.dispose(); flashMat.dispose();
+    for (const g of Object.values(flats)) g.dispose();
+    if (flatMat) flatMat.dispose();
     if (env) env.dispose();
   }
-  return { build, piece, def, arm, aimArm, materials: M, shellGeo, flashGeo, flashMat, env, dispose, ids: Object.keys(DEFS) };
+  return { build, flat, piece, def, arm, aimArm, materials: M, shellGeo, flashGeo, flashMat, env, dispose, ids: Object.keys(DEFS) };
 }

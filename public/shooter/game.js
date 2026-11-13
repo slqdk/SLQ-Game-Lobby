@@ -651,6 +651,11 @@ export function startGame({ root, info, send, sound = true, leave }) {
         if (keys.KeyE && running) { useHeld += dt; prompt = 'Stjæler … ' + Math.max(0, ARENA.stealTime - useHeld).toFixed(1) + ' s'; } else { useHeld = 0; prompt = 'Hold E: stjæl en stjerne'; }
       } else useHeld = 0;
     }
+    // first aid one stands at and does not get: say why (it is for the hurt, and in team games for one's own team)
+    if (!prompt && my.alive && state === 'active') for (const p of fx.healthPacks) {
+      if (!p.mesh.visible || Math.hypot(me.x - p.x, me.z - p.z) >= 1.4 || Math.abs(me.y) >= 2) continue;
+      prompt = teams && p.team !== my.team ? 'Førstehjælpen her er kun for ' + TEAMS[p.team].name.toLowerCase() + ' hold' : my.hp >= 100 ? 'Du har fuldt liv – førstehjælpen er til, når du er såret' : '';
+    }
     if (prompt) { H.note.textContent = prompt; H.note.style.opacity = '1'; noteT = 0.15; }
     else if (noteT > 0) { noteT -= dt; if (noteT <= 0) H.note.style.opacity = '0'; }
     if (state === 'countdown') {

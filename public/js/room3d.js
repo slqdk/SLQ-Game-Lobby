@@ -10,7 +10,7 @@ import { PRANKS, EMOTES, BAR } from '../shared/defs.js';
 import { drawPrank, INK } from './avatar.js';
 import { play } from './sfx.js';
 import { makeKit } from './saloon/kit.js';
-import { buildSaloon, WALL_H, SEAT_H } from './saloon/place.js';
+import { buildSaloon, seatSpot, WALL_H, SEAT_H } from './saloon/place.js';
 import { makePeople } from './saloon/people.js';
 
 const TAU = Math.PI * 2, FONT = 'Fredoka, system-ui, sans-serif';
@@ -33,6 +33,7 @@ export function createRoom3D(canvas, over, hooks) {
   for (const [x, y, z] of saloon.lamps) { const l = new THREE.PointLight(0xffc27a, 16, 13, 1.8); l.position.set(x, y + 0.2, z); scene.add(l); }
   const c = over.getContext('2d');
   const actors = new Map(), fx = [];
+  const used = new Set();        // the seats somebody sits on or is on the way to: 'station:seat'
   let me = 0, T = 0, last = 0, raf = 0, running = false, cw = 100, ch = 100, dpr = 1;
   let labels = {}, hover = null, hintUntil = 0, music = false, down = null, groupName = '';
   const casino = { pot: 0, lines: [], spin: {} }, spins = [];
@@ -68,15 +69,15 @@ export function createRoom3D(canvas, over, hooks) {
   function place(a) {            // where the figure stands or sits: [x, y, z]
     const st = seatOf(a);
     if (!st) return [a.x + (a.moving && a.buzz >= 3 ? Math.sin(T * 2.3 + a.seed) * 0.1 * Math.min(1, (a.buzz - 2) / 3) : 0), a.y, 0];
-    const q = st.seats[a.sit[1]] || st.use;
+    const q = seatSpot(st, a.sit[1]) || st.seats[a.sit[1]] || st.use;         // at a table: on the chair, pulled up to it
     return [q[0], q[1], SEAT_H[seatKind(st)]];
   }
   // a seated figure looks at its table; on the sofa it looks out into the room
   function faceSeat(a) {
     const st = STATION[a.sit && a.sit[0]]; if (!st) return;
     const q = st.seats && st.seats[a.sit[1]]; if (!q) return;
-    const cx = st.box ? st.box[0] + st.box[2] / 2 : st.round[0], cy = st.box ? st.box[1] + st.box[3] / 2 : st.round[1];
-    a.want = st.on ? 0 : Math.atan2(cx - q[0], cy - q[1]);
+    const sp = seatSpot(st, a.sit[1]);
+    a.want = sp ? sp[2] : 0;
   }
   const buzzNow = a => Math.max(0, a.buzz - (T - a.buzzAt) / (BAR.soberMin * 60));
   const isHen = a => a.fxs.chicken !== undefined && T >= a.fxs.chicken;
@@ -325,6 +326,8 @@ export function createRoom3D(canvas, over, hooks) {
     // the barkeeper looks at whoever stands nearest the bar
     let near = null, nd = 30;
     for (const a of actors.values()) { const d = (a.x - 10.9) ** 2 + (a.y - 2.4) ** 2; if (d < nd) { nd = d; near = [a.x, a.y]; } }
+    used.clear(); for (const a of actors.values()) if (a.sit) used.add(a.sit[0] + ':' + a.sit[1]);
+    saloon.seats(used);
     saloon.tick(dt, T, near);
     if (music && (noteT += dt) > 0.45) { noteT = 0; const n = saloon.notes; fx.push({ kind: 'p', shape: 'note', text: Math.random() < 0.5 ? '♪' : '♫', x: n[0] + (Math.random() - 0.5) * 0.5, y: n[2], z: n[1] - 0.2, vx: (Math.random() - 0.5) * 0.4, vy: 0.2, vz: 0.7, g: 0, t: 0, life: 1.8, col: '#ffe9a8', size: 0.1, rot: 0, vr: 0 }); }
     hand.tick(dt);

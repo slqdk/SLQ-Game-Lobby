@@ -738,12 +738,32 @@ section('klubhuset i 3D: saloonen og figurerne');
   const THREE = await import('../public/shooter/vendor/three.module.min.js'), N = nullThree();
   const hadDoc = 'document' in globalThis;
   if (!hadDoc) globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => N }) };
-  const { makeKit } = await import('../public/js/saloon/kit.js'), { buildSaloon, SEAT_H } = await import('../public/js/saloon/place.js'), { makePeople } = await import('../public/js/saloon/people.js');
+  const { makeKit } = await import('../public/js/saloon/kit.js'), { buildSaloon, seatSpot, seatLine, GAP, SEAT_H } = await import('../public/js/saloon/place.js'), { makePeople } = await import('../public/js/saloon/people.js');
   const sal = buildSaloon(THREE, makeKit(THREE), 'Torsdagsklubben');
   if (!hadDoc) delete globalThis.document;
   const named = STATIONS.filter(st => st.name), finite = o => { let ok = true; o.traverse(m => { if (m.isMesh) { const a = m.geometry.attributes.position.array; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) ok = false; } if (![m.position.x, m.position.y, m.position.z, m.quaternion.x, m.quaternion.w, m.scale.x, m.scale.y].every(Number.isFinite)) ok = false; }); return ok; };
   check('hvert møbel i saloonen kan trykkes på og har et skilt', named.every(st => sal.picks.some(q => q.id === st.id) && sal.signs.some(q => q[0] === st.id)), named.filter(st => !sal.picks.some(q => q.id === st.id)).map(st => st.id).join());
   check('møblerne står, hvor stierne går udenom dem', sal.picks.every(q => { const st = STATION[q.id], b = st.box, r = st.round; return b ? Math.abs(q.box.min.x - b[0]) < 1e-9 && Math.abs(q.box.max.z - b[1] - b[3]) < 1e-9 : r ? Math.abs(q.box.min.x - (r[0] - r[2])) < 1e-9 : true; }) && SEAT_H.high > SEAT_H.low);
+  // the chairs: one for every seat at a table, turned to the table, nearer to it than the plan's seat and never in it
+  {
+    const tables = STATIONS.filter(st => st.seats && !st.on && !st.high), seatsN = tables.reduce((n, st) => n + st.seats.length, 0);
+    const inTable = (st, x, z) => st.box ? x > st.box[0] && x < st.box[0] + st.box[2] && z > st.box[1] && z < st.box[1] + st.box[3] : ((x - st.round[0]) / st.round[2]) ** 2 + ((z - st.round[1]) / st.round[3]) ** 2 < 1;
+    let bad = [];
+    for (const st of STATIONS.filter(st => st.seats && !st.on)) st.seats.forEach((q, i) => {
+      const l = seatLine(st, i), sp = seatSpot(st, i), moved = Math.hypot(sp[0] - q[0], sp[1] - q[1]);
+      const towards = (sp[0] - q[0]) * l.dx + (sp[1] - q[1]) * l.dz >= -1e-9, faces = Math.abs(Math.hypot(l.dx, l.dz) - 1) < 1e-9 && Math.abs(Math.sin(sp[2]) - l.dx) < 1e-9 && Math.abs(Math.cos(sp[2]) - l.dz) < 1e-9;
+      // a small step in front of whoever sits is the table; half a step behind is not
+      const ahead = inTable(st, sp[0] + l.dx * (st.high ? GAP.bar : GAP.sit) * 1.15, sp[1] + l.dz * (st.high ? GAP.bar : GAP.sit) * 1.15), free = !inTable(st, sp[0], sp[1]) && !inTable(st, sp[0] - l.dx * 0.3, sp[1] - l.dz * 0.3);
+      if (!(towards && faces && ahead && free && moved < 0.5 && l.far > 0.3 && l.far < 0.9)) bad.push(st.id + ':' + i + ' ' + [towards, faces, ahead, free, moved.toFixed(2), l.far.toFixed(2)]);
+    });
+    check('hver plads ved et bord har en stol, der vender mod bordet og står tæt på det', sal.chairs.length === seatsN && bad.length === 0 && seatSpot(STATION.sofa, 0) === null, sal.chairs.length + ' stole; ' + bad.join(' | '));
+    const c0 = sal.chairs[0], at = c => { const m = new THREE.Matrix4(); c.set.getMatrixAt(c.n, m); return [m.elements[12], m.elements[14]]; }, before = at(c0);
+    sal.seats(new Set([c0.key])); for (let t = 0; t < 2; t += 0.05) sal.tick(0.05, t, null);
+    const out = at(c0), sp = seatSpot(STATION[c0.key.split(':')[0]], +c0.key.split(':')[1]);
+    sal.seats(new Set()); for (let t = 0; t < 2; t += 0.05) sal.tick(0.05, t, null);
+    const back = at(c0);
+    check('en tom stol er skubbet ind under bordet, og den trækkes ud til den, der sætter sig', Math.abs(Math.hypot(out[0] - before[0], out[1] - before[1]) - (GAP.sit - GAP.tucked)) < 1e-6 && Math.hypot(out[0] - sp[0], out[1] - sp[1]) < 1e-6 && Math.hypot(back[0] - before[0], back[1] - before[1]) < 1e-6, [before, out, back].map(q => q.map(v => v.toFixed(2)).join(',')).join(' -> '));
+  }
   let tris = 0; sal.root.traverse(m => { if (m.isMesh) tris += m.geometry.attributes.position.count / 3; });
   check('saloonen bygges uden skærm og er ikke for tung', finite(sal.root) && tris > 8000 && tris < 60000 && (() => { sal.setCasino({ pot: 1234, lines: [['Søren', 40], ['Mads', -15]] }); sal.setName('En anden klub'); sal.setMusic(true); sal.spin('slot2', 2, 1); sal.swing(); for (let t = 0; t < 3; t += 0.1) sal.tick(0.1, t, t > 1 ? [10, 2] : null); return finite(sal.root); })(), Math.round(tris) + ' trekanter');
   const people = makePeople(THREE), who = people.person(randomLook(7)), base = { phase: 1.3, walk: 0, seed: 2, emote: '', drink: null, talk: false }, st0 = { T: 5, seat: '', seatY: 0, fill: 1, sip: 0, buzz: 0, fx: {}, et: 0.6, hen: false, first: false };

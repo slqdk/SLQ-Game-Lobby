@@ -632,7 +632,8 @@ export function startGame({ root, info, send, sound = true, leave }) {
     fx.updateParticles(dt); fx.tickMuzzle(dt);
     fx.tick(dt, nowT / 1000); scenery.tick(dt, nowT / 1000);
     // smoke from the train's funnel and from the chimneys
-    if ((trainSmoke += dt) > 0.11) { trainSmoke = 0; const c = world.bazCar, p = world.carWorld(c, world.TRAIN.CL / 2 - 1.8, 0); fx.smoke(V.set(p.x, world.TRAIN.DECK + 1.0, p.z), 0.2, 1.5, 1.6); }
+    // the engine puffs: a cloud out of the chimney for every 1.3 m it runs
+    { const k = Math.floor(world.trainHead() / 1.3); if (k !== trainSmoke) { trainSmoke = k; const p = world.carWorld(world.bazCar, 2.45, 0); fx.smoke(V.set(p.x, world.TRAIN.DECK + 0.95, p.z), 0.3, 1.8, 1.9); } }
     for (const s of scenery.smokers) { s.t = (s.t || 0) + dt; if (s.t >= s.every) { s.t = 0; fx.smoke(V.set(s.x + (Math.random() - 0.5) * 0.08, s.y, s.z + (Math.random() - 0.5) * 0.08), s.size, s.ttl, s.rise); } }
     for (const t of ['A', 'B']) for (const s of towerStars[t]) s.rotation.y += dt * 1.3;
     const hover = Math.sin(nowT * 0.004) * 0.15;

@@ -64,14 +64,14 @@ export function makeSfx(ear) {
     src.start(t); played++;
   }
   // A sound at a place in the arena. o as for play, and: near (as loud as it gets within this distance), far (gone
-  // beyond this). Further off it is fainter and duller, has more of the echo in it and comes a little later; it
-  // comes from the side it is on, and from behind it is a little duller still.
+  // beyond this), wetMax (never more of the echo than this). Further off it is fainter and duller, has more of the
+  // echo in it and comes a little later; it comes from the side it is on, and from behind it is a little duller still.
   function at(name, x, z, o = {}) {
     const dx = x - ear.x, dz = z - ear.z, d = Math.hypot(dx, dz), far = o.far || 90, near = o.near || 7; if (d > far) return;
     const k = near / Math.max(near, d) * (1 - (d / far) ** 2);
     const fx = -Math.sin(ear.yaw || 0), fz = -Math.cos(ear.yaw || 0), side = d > 0.3 ? (dx * -fz + dz * fx) / d : 0, front = d > 0.3 ? (dx * fx + dz * fz) / d : 1;
     play(name, Object.assign({}, o, { vol: (o.vol === undefined ? 1 : o.vol) * k, pan: side * 0.8, lp: (o.lp || 16000) / (1 + d / 22) * (front < 0 ? 0.8 + 0.2 * (1 + front) : 1),
-      wet: Math.min(0.7, (o.wet === undefined ? 0.15 : o.wet) + d / 110), delay: (o.delay || 0) + Math.min(0.3, d / 340) }));
+      wet: Math.min(o.wetMax || 0.7, (o.wet === undefined ? 0.15 : o.wet) + d / 110), delay: (o.delay || 0) + Math.min(0.3, d / 340) }));
     return d;
   }
   const once = (key, gap) => { const t = ctx ? ctx.currentTime : 0; if (last[key] !== undefined && t - last[key] < gap) return false; last[key] = t; return true; };
@@ -123,9 +123,10 @@ export function makeSfx(ear) {
     remoteHit: function (x, z, head) { at('thud', x, z, { vol: 0.75, far: 46, near: 5, vary: 0.15 }); if (head) at('headshot', x, z, { vol: 0.22, far: 30, near: 4 }); },
     voice: function (what, x, z, v) { v = v || mine; at(what + '_' + v.kind, x, z, { vol: what === 'cry' ? 0.6 : 0.42, rate: v.rate, far: what === 'cry' ? 70 : 46, near: 6 }); if (what === 'cry') at('fall', x, z, { vol: 0.7, far: 40, near: 5, delay: 0.5 }); },
     // ---- the dinos ----
-    dinoRoar: function (x, z) { at('dino_roar', x, z, { vol: 0.62, far: 130, near: 12, wet: 0.3, vary: 0.08 }); },
+    // (a long sound with the arena's echo on it sounds as if it were in a tub: a roar gets little of it)
+    dinoRoar: function (x, z) { at('dino_roar', x, z, { vol: 0.7, far: 130, near: 12, wet: 0.04, wetMax: 0.16, vary: 0.06 }); },
     dinoHurt: function (x, z) { at('dino_hurt', x, z, { vol: 0.5, far: 60, near: 7, vary: 0.12 }); },
-    dinoDie: function (x, z) { at('dino_die', x, z, { vol: 0.7, far: 90, near: 9, wet: 0.25 }); at('fall', x, z, { vol: 0.8, far: 40, near: 5, delay: 0.4, rate: 0.8 }); },
+    dinoDie: function (x, z) { at('dino_die', x, z, { vol: 0.75, far: 90, near: 9, wet: 0.05, wetMax: 0.16 }); at('fall', x, z, { vol: 0.8, far: 40, near: 5, delay: 0.4, rate: 0.8 }); },
     dinoShot: function (x, z, dir) { at('shot_badgun', x, z, { vol: 0.8, far: 120, near: 9, rate: 0.9, vary: 0.08 }); passing(x, z, dir, 70); },
     // ---- feet ----
     jump: function () { play('jump', { vol: 0.25, wet: 0.04 }); },

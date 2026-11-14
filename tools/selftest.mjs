@@ -907,6 +907,22 @@ section('skydespillet: lydene');
   check('et hovedskud ringer lysere og længere end et almindeligt træf, og et træf er et kort slag, ikke et bip', first.headshot.cross > first.hit.cross * 1.5 && first.headshot.heard > first.hit.heard * 1.5 && first.hit.heard < 0.12 && first.thud.heard < 0.16);
   check('stemmerne er forskellige: en kvindes er lysere end en mands, og et dødsskrig er længere end et grynt', Object.keys(VOICES).join() === 'm,f,r' && first.grunt_f.cross > first.grunt_m.cross * 1.3 && first.cry_m.secs > first.grunt_m.secs * 2 && first.grunt_r.x.some((v, i) => Math.abs(v - first.grunt_m.x[i]) > 0.1));
   check('dinoens brøl varer lige så længe, som den står og brøler', first.dino_roar.heard > DINO.roar - 0.25 && first.dino_roar.secs < DINO.roar + 0.3 && first.dino_roar.rms > first.dino_hurt.rms * 0.8, first.dino_roar.heard.toFixed(2) + ' s');
+  // Søren on the first roar: "Det lyder som en lyd i en tom spand med ekko". A bucket is a few narrow resonances: in the
+  // middle of the roar and of the death cry, the spectrum (150 Hz to 3 kHz, smoothed over 60 Hz) may nowhere stand
+  // far above itself smoothed over 400 Hz. (The first roar stood 6.2 dB above, the death cry 7.8.)
+  const narrow = x => {
+    const N = 4096, out = [];
+    for (const u of [0.3, 0.5, 0.7]) {
+      const o = Math.round(u * x.length - N / 2), lo = Math.round(150 * N / SR), hi = Math.round(3000 * N / SR), sp = [];
+      for (let k = lo - 40; k <= hi + 40; k++) { let re = 0, im = 0; for (let i = 0; i < N; i++) { const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N), a = 2 * Math.PI * k * i / N; re += x[o + i] * w * Math.cos(a); im -= x[o + i] * w * Math.sin(a); } sp.push(re * re + im * im); }
+      const avg = (c, h) => { let t = 0; for (let j = c - h; j <= c + h; j++) t += sp[j]; return t / (2 * h + 1); };
+      let m = 0; for (let j = 40; j < sp.length - 40; j++) m = Math.max(m, avg(j, 5) / avg(j, 37));
+      out.push(10 * Math.log10(m));
+    }
+    return out.reduce((a, b) => a + b) / out.length;
+  };
+  const tub = [renderSound('dino_roar', SR, 0), renderSound('dino_roar', SR, 1), first.dino_die.x].map(narrow);
+  check('dinoens brøl og dødsskrig er grove, ikke en stemme i en spand: ingen smalle toppe i lyden', tub.every(d => d < 5), tub.map(d => d.toFixed(1) + ' dB').join(' '));
   const ir = arenaEcho(SR, 1.2), energy = ch => ch.reduce((n, v) => n + v * v, 0);
   check('arenaens ekko er to kanaler, der ikke er ens, og som dør ud', ir.length === 2 && ir[0].length === ir[1].length && ir.every(ch => ch.every(Number.isFinite) && Math.abs(energy(ch) - 1) < 0.2 && Math.abs(ch[ch.length - 1]) < 1e-3) && ir[0].some((v, i) => v !== ir[1][i])
     && energy(ir[0].subarray(0, SR / 4)) > energy(ir[0].subarray(SR / 2)) * 5);

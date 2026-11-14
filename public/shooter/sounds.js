@@ -176,20 +176,94 @@ const CRY = [
 const speak = (list, kind) => (sr, rnd, v) => voice(sr, rnd, Object.assign({}, list[v % list.length], VOICES[kind]));
 
 // ---------- the dino ----------
-// It roars before it attacks: a deep rattling throat that opens wide, a scream on top in the middle, and a rumble.
+// It roars before it attacks. Søren on the first roar: "Det lyder som en lyd i en tom spand med ekko". That one was a
+// voice at a low pitch through three narrow resonances (a man shouting into a bucket), a throat that rattled evenly
+// 31 times a second (heard as an echo in the bucket), and a good deal of the arena's echo, whose first few claps
+// colour a long sound like a tube. A big animal is rougher than a voice: its pitch wavers and jumps from pulse to
+// pulse, every other pulse is weaker (as if a voice an octave down came along), its throat flutters unevenly, much of
+// it is breath, and its long throat has many resonances close together, damped wide by all that flesh. It is played
+// with little of the echo (sfx.js).
+
+// a resonance that can move: one of a throat's (two poles, as loud as what comes in, far below it)
+function reson(x, sr, freq, bw) {
+  const y = new Float32Array(x.length); let y1 = 0, y2 = 0, A = 0, B = 0, C = 0;
+  const set = t => { const f = Math.min(0.45 * sr, val(freq, t)), b = bw(f); C = -Math.exp(-2 * Math.PI * b / sr); B = 2 * Math.exp(-Math.PI * b / sr) * Math.cos(2 * Math.PI * f / sr); A = 1 - B - C; };
+  set(0);
+  for (let i = 0; i < x.length; i++) { if ((i & 31) === 0) set(i / sr); const v = A * x[i] + B * y1 + C * y2; y2 = y1; y1 = v; y[i] = v; }
+  return y;
+}
+// A beast's voice. o: dur; f0(u) in Hz (u goes 0..1 through the sound); mouth(u) 0..1 (how wide open: the throat's
+// resonances go up as it opens); amp(u); rough(u) 0..1 (how unsteady each pulse is, in length and in strength);
+// sub(u) 0..1 (every other pulse weaker and later); breath(u) (how much of it is breath); flutter (how much the throat
+// trembles); force(u) 0..1 (how hard it is pushed: the harder, the more suddenly the throat shuts, and the brighter it
+// sounds; as wide as the mouth when not given); size (1 is the dino: a bigger beast has its resonances closer
+// together and lower)
+function beast(sr, rnd, o) {
+  const n = Math.round(sr * o.dur), flow = new Float32Array(n), air = new Float32Array(n), size = o.size || 1;
+  // the throat's tremble: 15 to 40 times a second and never even (noise through a band, not a steady beat)
+  const flut = unit(filt(filt(noise(sr, o.dur, rnd), sr, 'bp', 24, 0.8), sr, 'lp', 55));
+  let p = 0, per = 1, jit = 0, odd = 0, str = 1, last = 0;
+  for (let i = 0; i < n; i++) {
+    const u = i / n, r = val(o.rough, u) || 0, sb = val(o.sub, u) || 0, f0 = o.f0(u);
+    if ((i & 31) === 0) jit += (rnd() - 0.5) * 0.05 * (1 + 2 * r) - jit * 0.15;                      // the pitch wanders
+    p += f0 * (1 + jit) / per / sr;
+    if (p >= 1) {                                                                                      // a new pulse: its own length and strength
+      p -= 1; odd ^= 1;
+      per = Math.max(0.5, 1 + (rnd() - 0.5) * 0.45 * r + (odd ? 0.14 : -0.14) * sb);
+      str = (1 - 0.55 * r * rnd()) * (odd ? 1 - 0.6 * sb : 1);
+    }
+    // the air let through the throat: a soft rise, a sudden shut (the sound is in the shut), and shut for a while
+    const shut = 0.2 - 0.14 * (o.force ? val(o.force, u) : val(o.mouth, u) || 0), b = val(o.breath, u) || 0;
+    const q = p < 0.55 ? 0.5 - 0.5 * Math.cos(Math.PI * p / 0.55) : p < 0.55 + shut ? Math.cos(0.5 * Math.PI * (p - 0.55) / shut) : 0;
+    flow[i] = q * str * (1 + (o.flutter === undefined ? 0.45 : o.flutter) * flut[i]);
+    air[i] = (rnd() * 2 - 1) * b * (0.35 + 0.65 * q);                                                  // breath, strongest while the throat is open
+  }
+  const src = new Float32Array(n);
+  for (let i = 1; i < n; i++) src[i] = (flow[i] - flow[i - 1]) * sr / (12 * o.f0(i / n)) + air[i];
+  // the throat and the mouth: seven resonances close together and wide, all going up as the mouth opens
+  const space = 300 / size, mouth = t => val(o.mouth, Math.min(1, t * sr / n)) || 0;
+  let y = src;
+  for (let k = 1; k <= 7; k++) y = reson(y, sr, t => (k - 0.5) * space * (0.8 + 0.42 * mouth(t)) + (k === 1 ? 150 * mouth(t) : 0), f => 90 + 0.22 * f);
+  // a rasp high up in the throat, only while it is loud
+  const rasp = filt(filt(noise(sr, o.dur, rnd), sr, 'bp', 2600 / Math.sqrt(size), 1.2), sr, 'hp', 1500);
+  for (let i = 0; i < n; i++) rasp[i] *= Math.abs(src[i]) * 0.6;
+  // the open mouth throws the middle out (where a roar bites), more the wider it is
+  const bite = filt(src, sr, 'bp', t => 900 + 500 * mouth(t), 0.8);
+  for (let i = 0; i < n; i++) bite[i] *= mouth(i / sr);
+  const out = unit(y); add(out, unit(bite), 0, o.bite === undefined ? 0.35 : o.bite); add(out, unit(rasp), 0, o.rasp === undefined ? 0.12 : o.rasp);
+  return gain(out, sr, (t, i) => val(o.amp, i / n));
+}
+// pushed hard and a little lopsided: rough, and fuller than a clean squeeze
+const growl = (x, d, bias = 0.2) => { const o = Math.tanh(bias); for (let i = 0; i < x.length; i++) x[i] = Math.tanh(x[i] * d + bias) - o; return x; };
+// the roar: it starts as a growl low in the throat, opens wide and rises (and something higher cries out of it at
+// the top), and sinks back into a growl and a breath out. Takes 0 and 1 rise and fall a little differently.
 function dinoRoar(sr, rnd, v) {
-  const dur = 1.12, low = voice(sr, rnd, { dur, f0: line([0, 78], [0.25, 132 + v * 10], [0.6, 118], [1, 62]), vow: [[0, 330, 880, 2200], [0.3, 640, 1300, 2500], [0.7, 560, 1150, 2400], [1, 380, 900, 2200]],
-    amp: line([0, 0], [0.07, 1], [0.7, 0.9], [1, 0]), growl: line([0, 0.9], [0.4, 0.7], [1, 1]), breath: 0.18, rattle: 31, drive: 2.6 });
-  const high = voice(sr, rnd, { dur, f0: line([0, 330], [0.3, 520 + v * 30], [0.65, 450], [1, 240]), vow: [[0, 1300, 2300, 3300], [0.4, 1700, 2700, 3600], [1, 1200, 2200, 3200]],
-    amp: line([0, 0], [0.15, 0.5], [0.4, 1], [0.75, 0.5], [1, 0]), growl: 0.8, breath: 0.25, rattle: 57, drive: 2 });
-  const out = blank(sr, dur + 0.1);
+  const dur = 1.36, out = blank(sr, dur);
+  const low = beast(sr, rnd, { dur, f0: line([0, 44], [0.09, 58], [0.22, 92 + v * 10], [0.45, 106 + v * 6], [0.68, 94 - v * 4], [0.86, 68], [1, 46]),
+    mouth: line([0, 0.05], [0.14, 0.45], [0.32, 1], [0.66, 0.9], [0.86, 0.45], [1, 0.15]),
+    amp: line([0, 0], [0.04, 0.35], [0.12, 0.75], [0.25, 1], [0.62, 0.92], [0.84, 0.55], [1, 0]),
+    rough: line([0, 0.9], [0.18, 0.55], [0.45, 0.65], [0.8, 0.6], [1, 0.95]), sub: line([0, 0.85], [0.25, 0.45], [0.6, 0.5], [1, 0.85]),
+    breath: line([0, 0.35], [0.2, 0.18], [0.7, 0.2], [0.88, 0.45], [1, 0.8]), flutter: 0.5, bite: 0.55 });
+  const high = beast(sr, rnd, { dur, f0: line([0, 300], [0.25, 500 + v * 40], [0.45, 580 + v * 30], [0.7, 470], [1, 320]), size: 0.45,
+    mouth: line([0, 0.3], [0.35, 1], [0.7, 0.8], [1, 0.4]), amp: line([0, 0], [0.2, 0.2], [0.33, 1], [0.55, 0.8], [0.72, 0.25], [0.82, 0]),
+    rough: 0.85, sub: 0.25, breath: 0.45, flutter: 0.3, rasp: 0.25, bite: 0.2 });
   add(out, low, 0, 1); add(out, high, 0, 0.42);
-  add(out, gain(tone(sr, dur, line([0, 52], [0.3, 64], [1, 44])), sr, t => Math.sin(Math.PI * Math.min(1, t / dur)) ** 0.7 * (0.75 + 0.25 * Math.sin(TAU * 27 * t))), 0, 0.5);
-  add(out, gain(filt(noise(sr, dur, rnd), sr, 'bp', line([0, 900], [0.3, 2000], [1, 900]), 0.9), sr, t => Math.sin(Math.PI * Math.min(1, t / dur)) ** 1.5), 0, 0.2);
-  return finish(drive(out, 1.7), sr, 0.93, 0.06);
+  // the weight of it: a deep hum an octave under the voice, trembling with it
+  const sub = unit(filt(noise(sr, dur, rnd), sr, 'lp', 18));
+  const deep = line([0, 26], [0.22, 46 + v * 5], [0.5, 53], [0.86, 34], [1, 23]);
+  add(out, gain(tone(sr, dur, t => deep(t / dur)), sr, (t, i) => val(line([0, 0], [0.1, 0.6], [0.3, 1], [0.8, 0.7], [1, 0]), i / sr / dur) * (0.75 + 0.25 * sub[i])), 0, 0.35);
+  return finish(growl(unit(out), 2.2), sr, 0.93, 0.08);
 }
 const dinoHurt = (sr, rnd, v) => voice(sr, rnd, { dur: 0.24, f0: line([0, 300], [0.3, 520 + v * 40], [1, 360]), vow: [[0, 900, 2100, 3000], [1, 1100, 2300, 3200]], amp: inOut(0.05, 0.5), growl: 0.7, breath: 0.2, rattle: 61, drive: 2 });
-const dinoDie = (sr, rnd) => voice(sr, rnd, { dur: 0.95, f0: line([0, 250], [0.15, 300], [1, 84]), vow: [[0, 800, 1900, 2900], [0.4, 600, 1300, 2500], [1, 360, 900, 2200]], amp: inOut(0.04, 0.5), growl: line([0, 0.5], [1, 1]), breath: line([0, 0.15], [1, 0.6]), rattle: 29, vib: 0.05, drive: 2.2 });
+// it dies: a cry that breaks and sinks into a rattle and the last breath (the same throat as the roar)
+function dinoDie(sr, rnd) {
+  const dur = 0.95, out = blank(sr, dur);
+  add(out, beast(sr, rnd, { dur, f0: line([0, 140], [0.12, 168], [0.5, 112], [1, 50]), mouth: line([0, 0.8], [0.3, 1], [1, 0.1]), amp: line([0, 0], [0.05, 1], [0.5, 0.8], [1, 0]),
+    rough: line([0, 0.6], [1, 1]), sub: line([0, 0.3], [1, 0.9]), breath: line([0, 0.25], [0.6, 0.35], [1, 0.9]), flutter: 0.55, bite: 0.5 }), 0, 1);
+  add(out, beast(sr, rnd, { dur, f0: line([0, 420], [0.15, 480], [1, 200]), size: 0.45, mouth: line([0, 1], [1, 0.3]), amp: line([0, 0], [0.05, 1], [0.4, 0.6], [0.7, 0]),
+    rough: 0.85, sub: 0.3, breath: 0.45, flutter: 0.3, rasp: 0.25, bite: 0.2 }), 0, 0.4);
+  return finish(growl(unit(out), 2), sr, 0.93, 0.06);
+}
 
 // ---------- feet, hands and the weapon's mechanism ----------
 const step = (sr, rnd) => { const out = blank(sr, 0.17); add(out, hiss(sr, rnd, 0.1, 'lp', 260 + 140 * rnd(), 0.707, dec(0.02, 0.003)), 0, 0.9); add(out, hum(sr, 0.1, fall(118, 68, 0.02), dec(0.028, 0.002)), 0, 0.35); for (let k = 0, m = 4 + Math.floor(rnd() * 4); k < m; k++) add(out, hiss(sr, rnd, 0.012, 'bp', 1800 + 3200 * rnd(), 2, dec(0.003, 0.0004)), (0.004 + rnd() * 0.08) * sr, 0.12 + 0.2 * rnd()); return finish(out, sr, 0.8); };
